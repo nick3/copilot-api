@@ -1,5 +1,9 @@
-import { describe, it, expect } from "vitest"
+import { describe, test, expect } from "bun:test"
 import { z } from "zod"
+
+import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
+
+import { translateToOpenAI } from "../src/routes/messages/non-stream-translation"
 
 // Zod schema for a single message in the chat completion request.
 const messageSchema = z.object({
@@ -53,13 +57,77 @@ const chatCompletionRequestSchema = z.object({
  * @param payload The request payload to validate.
  * @returns True if the payload is valid, false otherwise.
  */
-function isValidChatCompletionRequest(payload: any): boolean {
+function isValidChatCompletionRequest(payload: unknown): boolean {
   const result = chatCompletionRequestSchema.safeParse(payload)
   return result.success
 }
 
+describe("Anthropic to OpenAI translation logic", () => {
+  test("should translate minimal Anthropic payload to valid OpenAI payload", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-4o",
+      messages: [{ role: "user", content: "Hello!" }],
+      max_tokens: 0,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+    expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+  })
+
+  test("should translate comprehensive Anthropic payload to valid OpenAI payload", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-4o",
+      system: "You are a helpful assistant.",
+      messages: [
+        { role: "user", content: "What is the weather like in Boston?" },
+        {
+          role: "assistant",
+          content: "The weather in Boston is sunny and 75°F.",
+        },
+      ],
+      temperature: 0.7,
+      max_tokens: 150,
+      top_p: 1,
+      stream: false,
+      metadata: { user_id: "user-123" },
+      tools: [
+        {
+          name: "getWeather",
+          description: "Gets weather info",
+          input_schema: { location: { type: "string" } },
+        },
+      ],
+      tool_choice: { type: "auto" },
+    }
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+    expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+  })
+
+  test("should handle missing fields gracefully", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-4o",
+      messages: [{ role: "user", content: "Hello!" }],
+      max_tokens: 0,
+    }
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+    expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+  })
+
+  test("should handle invalid types in Anthropic payload", () => {
+    const anthropicPayload = {
+      model: "gpt-4o",
+      messages: [{ role: "user", content: "Hello!" }],
+      temperature: "hot", // Should be a number
+    }
+    // @ts-expect-error intended to be invalid
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+    // Should fail validation
+    expect(isValidChatCompletionRequest(openAIPayload)).toBe(false)
+  })
+})
+
 describe("OpenAI Chat Completion v1 Request Payload Validation with Zod", () => {
-  it("should return true for a minimal valid request payload", () => {
+  test("should return true for a minimal valid request payload", () => {
     const validPayload = {
       model: "gpt-4o",
       messages: [{ role: "user", content: "Hello!" }],
@@ -67,7 +135,7 @@ describe("OpenAI Chat Completion v1 Request Payload Validation with Zod", () => 
     expect(isValidChatCompletionRequest(validPayload)).toBe(true)
   })
 
-  it("should return true for a comprehensive valid request payload", () => {
+  test("should return true for a comprehensive valid request payload", () => {
     const validPayload = {
       model: "gpt-4o",
       messages: [
@@ -85,21 +153,21 @@ describe("OpenAI Chat Completion v1 Request Payload Validation with Zod", () => 
     expect(isValidChatCompletionRequest(validPayload)).toBe(true)
   })
 
-  it('should return false if the "model" field is missing', () => {
+  test('should return false if the "model" field is missing', () => {
     const invalidPayload = {
       messages: [{ role: "user", content: "Hello!" }],
     }
     expect(isValidChatCompletionRequest(invalidPayload)).toBe(false)
   })
 
-  it('should return false if the "messages" field is missing', () => {
+  test('should return false if the "messages" field is missing', () => {
     const invalidPayload = {
       model: "gpt-4o",
     }
     expect(isValidChatCompletionRequest(invalidPayload)).toBe(false)
   })
 
-  it('should return false if the "messages" array is empty', () => {
+  test('should return false if the "messages" array is empty', () => {
     const invalidPayload = {
       model: "gpt-4o",
       messages: [],
@@ -107,7 +175,7 @@ describe("OpenAI Chat Completion v1 Request Payload Validation with Zod", () => 
     expect(isValidChatCompletionRequest(invalidPayload)).toBe(false)
   })
 
-  it('should return false if "model" is not a string', () => {
+  test('should return false if "model" is not a string', () => {
     const invalidPayload = {
       model: 12345,
       messages: [{ role: "user", content: "Hello!" }],
@@ -115,7 +183,7 @@ describe("OpenAI Chat Completion v1 Request Payload Validation with Zod", () => 
     expect(isValidChatCompletionRequest(invalidPayload)).toBe(false)
   })
 
-  it('should return false if "messages" is not an array', () => {
+  test('should return false if "messages" is not an array', () => {
     const invalidPayload = {
       model: "gpt-4o",
       messages: { role: "user", content: "Hello!" },
@@ -123,7 +191,7 @@ describe("OpenAI Chat Completion v1 Request Payload Validation with Zod", () => 
     expect(isValidChatCompletionRequest(invalidPayload)).toBe(false)
   })
 
-  it('should return false if a message in the "messages" array is missing a "role"', () => {
+  test('should return false if a message in the "messages" array is missing a "role"', () => {
     const invalidPayload = {
       model: "gpt-4o",
       messages: [{ content: "Hello!" }],
@@ -131,7 +199,7 @@ describe("OpenAI Chat Completion v1 Request Payload Validation with Zod", () => 
     expect(isValidChatCompletionRequest(invalidPayload)).toBe(false)
   })
 
-  it('should return false if a message in the "messages" array is missing "content"', () => {
+  test('should return false if a message in the "messages" array is missing "content"', () => {
     const invalidPayload = {
       model: "gpt-4o",
       messages: [{ role: "user" }],
@@ -141,7 +209,7 @@ describe("OpenAI Chat Completion v1 Request Payload Validation with Zod", () => 
     expect(result.success).toBe(false)
   })
 
-  it('should return false if a message has an invalid "role"', () => {
+  test('should return false if a message has an invalid "role"', () => {
     const invalidPayload = {
       model: "gpt-4o",
       messages: [{ role: "customer", content: "Hello!" }],
@@ -149,7 +217,7 @@ describe("OpenAI Chat Completion v1 Request Payload Validation with Zod", () => 
     expect(isValidChatCompletionRequest(invalidPayload)).toBe(false)
   })
 
-  it("should return false if an optional field has an incorrect type", () => {
+  test("should return false if an optional field has an incorrect type", () => {
     const invalidPayload = {
       model: "gpt-4o",
       messages: [{ role: "user", content: "Hello!" }],
@@ -158,12 +226,12 @@ describe("OpenAI Chat Completion v1 Request Payload Validation with Zod", () => 
     expect(isValidChatCompletionRequest(invalidPayload)).toBe(false)
   })
 
-  it("should return false for a completely empty object", () => {
+  test("should return false for a completely empty object", () => {
     const invalidPayload = {}
     expect(isValidChatCompletionRequest(invalidPayload)).toBe(false)
   })
 
-  it("should return false for null or non-object payloads", () => {
+  test("should return false for null or non-object payloads", () => {
     expect(isValidChatCompletionRequest(null)).toBe(false)
     expect(isValidChatCompletionRequest(undefined)).toBe(false)
     expect(isValidChatCompletionRequest("a string")).toBe(false)

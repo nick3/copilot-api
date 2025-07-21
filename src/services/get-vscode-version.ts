@@ -9,7 +9,9 @@ export async function getVSCodeVersion() {
   try {
     const response = await fetch(
       "https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h=visual-studio-code-bin",
-      { signal: controller.signal },
+      {
+        signal: controller.signal,
+      },
     )
 
     const pkgbuild = await response.text()

@@ -1,0 +1,17 @@
+{
+  "experimental": {
+    "hook": {
+      "file_edited": {
+        "eslint": [{ "command": ["bun", "run", "lint", "--fix"] }]
+      }
+    }
+  },
+  "mcp": {
+    "duckduckgo": {
+      "type": "local",
+      "command": ["uvx", "duckduckgo-mcp-server"],
+      "enabled": false
+    }
+  },
+  "$schema": "https://opencode.ai/config.json"
+}

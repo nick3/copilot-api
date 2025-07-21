@@ -22,7 +22,6 @@ import {
 } from "./non-stream-translation"
 import { translateChunkToAnthropicEvents } from "./stream-translation"
 
-// eslint-disable-next-line max-lines-per-function
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
 

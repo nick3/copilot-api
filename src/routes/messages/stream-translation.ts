@@ -144,20 +144,21 @@ export function translateChunkToAnthropicEvents(
       state.contentBlockOpen = false
     }
 
-    events.push({
-      type: "message_delta",
-      delta: {
-        stop_reason: mapOpenAIStopReasonToAnthropic(choice.finish_reason),
-        stop_sequence: null,
+    events.push(
+      {
+        type: "message_delta",
+        delta: {
+          stop_reason: mapOpenAIStopReasonToAnthropic(choice.finish_reason),
+          stop_sequence: null,
+        },
+        usage: {
+          output_tokens: 1,
+        },
       },
-      usage: {
-        output_tokens: 1,
+      {
+        type: "message_stop",
       },
-    })
-
-    events.push({
-      type: "message_stop",
-    })
+    )
   }
 
   return events

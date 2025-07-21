@@ -25,7 +25,6 @@ interface RunServerOptions {
   showToken: boolean
 }
 
-// eslint-disable-next-line max-lines-per-function
 export async function runServer(options: RunServerOptions): Promise<void> {
   if (options.verbose) {
     consola.level = 5
