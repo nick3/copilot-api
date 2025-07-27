@@ -124,6 +124,79 @@ describe("Anthropic to OpenAI translation logic", () => {
     // Should fail validation
     expect(isValidChatCompletionRequest(openAIPayload)).toBe(false)
   })
+
+  test("should handle thinking blocks in assistant messages", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-3-5-sonnet-20241022",
+      messages: [
+        { role: "user", content: "What is 2+2?" },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "thinking",
+              thinking: "Let me think about this simple math problem...",
+            },
+            { type: "text", text: "2+2 equals 4." },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+    expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+
+    // Check that thinking content is combined with text content
+    const assistantMessage = openAIPayload.messages.find(
+      (m) => m.role === "assistant",
+    )
+    expect(assistantMessage?.content).toContain(
+      "Let me think about this simple math problem...",
+    )
+    expect(assistantMessage?.content).toContain("2+2 equals 4.")
+  })
+
+  test("should handle thinking blocks with tool calls", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-3-5-sonnet-20241022",
+      messages: [
+        { role: "user", content: "What's the weather?" },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "thinking",
+              thinking:
+                "I need to call the weather API to get current weather information.",
+            },
+            { type: "text", text: "I'll check the weather for you." },
+            {
+              type: "tool_use",
+              id: "call_123",
+              name: "get_weather",
+              input: { location: "New York" },
+            },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+    expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+
+    // Check that thinking content is included in the message content
+    const assistantMessage = openAIPayload.messages.find(
+      (m) => m.role === "assistant",
+    )
+    expect(assistantMessage?.content).toContain(
+      "I need to call the weather API",
+    )
+    expect(assistantMessage?.content).toContain(
+      "I'll check the weather for you.",
+    )
+    expect(assistantMessage?.tool_calls).toHaveLength(1)
+    expect(assistantMessage?.tool_calls?.[0].function.name).toBe("get_weather")
+  })
 })
 
 describe("OpenAI Chat Completion v1 Request Payload Validation with Zod", () => {

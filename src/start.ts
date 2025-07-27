@@ -89,8 +89,15 @@ export async function runServer(options: RunServerOptions): Promise<void> {
       "claude",
     )
 
-    clipboard.writeSync(command)
-    consola.success("Copied Claude Code command to clipboard!")
+    try {
+      clipboard.writeSync(command)
+      consola.success("Copied Claude Code command to clipboard!")
+    } catch {
+      consola.warn(
+        "Failed to copy to clipboard. Here is the Claude Code command:",
+      )
+      consola.log(command)
+    }
   }
 
   consola.box(
