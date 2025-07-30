@@ -79,10 +79,11 @@ npx copilot-api@latest auth
 
 ## Command Structure
 
-Copilot API now uses a subcommand structure with two main commands:
+Copilot API now uses a subcommand structure with these main commands:
 
 - `start`: Start the Copilot API server. This command will also handle authentication if needed.
 - `auth`: Run GitHub authentication flow without starting the server. This is typically used if you need to generate a token for use with the `--github-token` option, especially in non-interactive environments.
+- `check-usage`: Show your current GitHub Copilot usage and quota information directly in the terminal (no server required).
 
 ## Command Line Options
 
@@ -136,10 +137,10 @@ These endpoints are designed to be compatible with the Anthropic Messages API.
 
 New endpoints for monitoring your Copilot usage and quotas.
 
-| Endpoint                    | Method | Description                                               |
-| --------------------------- | ------ | --------------------------------------------------------- |
-| `GET /usage`               | `GET`  | Get detailed Copilot usage statistics and quota information. |
-| `GET /token`               | `GET`  | Get the current Copilot token being used by the API.     |
+| Endpoint     | Method | Description                                                  |
+| ------------ | ------ | ------------------------------------------------------------ |
+| `GET /usage` | `GET`  | Get detailed Copilot usage statistics and quota information. |
+| `GET /token` | `GET`  | Get the current Copilot token being used by the API.         |
 
 ## Example Usage
 
@@ -175,6 +176,9 @@ npx copilot-api@latest auth
 
 # Run auth flow with verbose logging
 npx copilot-api@latest auth --verbose
+
+# Show your Copilot usage/quota in the terminal (no server needed)
+npx copilot-api@latest check-usage
 ```
 
 ## Using the Usage Viewer
@@ -191,12 +195,12 @@ After starting the server, a URL to the Copilot Usage Dashboard will be displaye
 
 The dashboard provides a user-friendly interface to view your Copilot usage data:
 
--   **API Endpoint URL**: The dashboard is pre-configured to fetch data from your local server endpoint via the URL query parameter. You can change this URL to point to any other compatible API endpoint.
--   **Fetch Data**: Click the "Fetch" button to load or refresh the usage data. The dashboard will automatically fetch data on load.
--   **Usage Quotas**: View a summary of your usage quotas for different services like Chat and Completions, displayed with progress bars for a quick overview.
--   **Detailed Information**: See the full JSON response from the API for a detailed breakdown of all available usage statistics.
--   **URL-based Configuration**: You can also specify the API endpoint directly in the URL using a query parameter. This is useful for bookmarks or sharing links. For example:
-    `https://ericc-ch.github.io/copilot-api?endpoint=http://your-api-server/usage`
+- **API Endpoint URL**: The dashboard is pre-configured to fetch data from your local server endpoint via the URL query parameter. You can change this URL to point to any other compatible API endpoint.
+- **Fetch Data**: Click the "Fetch" button to load or refresh the usage data. The dashboard will automatically fetch data on load.
+- **Usage Quotas**: View a summary of your usage quotas for different services like Chat and Completions, displayed with progress bars for a quick overview.
+- **Detailed Information**: See the full JSON response from the API for a detailed breakdown of all available usage statistics.
+- **URL-based Configuration**: You can also specify the API endpoint directly in the URL using a query parameter. This is useful for bookmarks or sharing links. For example:
+  `https://ericc-ch.github.io/copilot-api?endpoint=http://your-api-server/usage`
 
 ## Using with Claude Code
 
