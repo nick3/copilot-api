@@ -14,7 +14,7 @@ export const getCopilotUsage = async (): Promise<CopilotUsageResponse> => {
   return (await response.json()) as CopilotUsageResponse
 }
 
-interface QuotaDetail {
+export interface QuotaDetail {
   entitlement: number
   overage_count: number
   overage_permitted: boolean
