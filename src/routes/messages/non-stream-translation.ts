@@ -88,18 +88,19 @@ function handleUserMessage(message: AnthropicUserMessage): Array<Message> {
       (block) => block.type !== "tool_result",
     )
 
-    if (otherBlocks.length > 0) {
-      newMessages.push({
-        role: "user",
-        content: mapContent(otherBlocks),
-      })
-    }
-
+    // Tool results must come first to maintain protocol: tool_use -> tool_result -> user
     for (const block of toolResultBlocks) {
       newMessages.push({
         role: "tool",
         tool_call_id: block.tool_use_id,
         content: block.content,
+      })
+    }
+
+    if (otherBlocks.length > 0) {
+      newMessages.push({
+        role: "user",
+        content: mapContent(otherBlocks),
       })
     }
   } else {
