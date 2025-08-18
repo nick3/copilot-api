@@ -1,17 +1,11 @@
 {
-  "experimental": {
-    "hook": {
-      "file_edited": {
-        "eslint": [{ "command": ["bun", "run", "lint", "--fix"] }]
-      }
-    }
-  },
+  "$schema": "https://opencode.ai/config.json",
+
   "mcp": {
-    "duckduckgo": {
-      "type": "local",
-      "command": ["uvx", "duckduckgo-mcp-server"],
-      "enabled": false
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": true
     }
-  },
-  "$schema": "https://opencode.ai/config.json"
+  }
 }

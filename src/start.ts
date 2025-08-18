@@ -182,7 +182,7 @@ export const start = defineCommand({
       accountType: args["account-type"],
       manual: args.manual,
       rateLimit,
-      rateLimitWait: Boolean(args.wait),
+      rateLimitWait: args.wait,
       githubToken: args["github-token"],
       claudeCode: args["claude-code"],
       showToken: args["show-token"],

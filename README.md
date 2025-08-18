@@ -3,6 +3,20 @@
 > [!WARNING]
 > This is a reverse-engineered proxy of GitHub Copilot API. It is not supported by GitHub, and may break unexpectedly. Use at your own risk.
 
+> [!WARNING]
+> **GitHub Security Notice:**  
+> Excessive automated or scripted use of Copilot (including rapid or bulk requests, such as via automated tools) may trigger GitHub's abuse-detection systems.  
+> You may receive a warning from GitHub Security, and further anomalous activity could result in temporary suspension of your Copilot access.
+>
+> GitHub prohibits use of their servers for excessive automated bulk activity or any activity that places undue burden on their infrastructure.
+>
+> Please review:
+>
+> - [GitHub Acceptable Use Policies](https://docs.github.com/site-policy/acceptable-use-policies/github-acceptable-use-policies#4-spam-and-inauthentic-activity-on-github)
+> - [GitHub Copilot Terms](https://docs.github.com/site-policy/github-terms/github-terms-for-additional-products-and-features#github-copilot)
+>
+> Use this proxy responsibly to avoid account restrictions.
+
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/E1E519XS7W)
 
 ---
@@ -84,7 +98,7 @@ docker run -p 4141:4141 -e GH_TOKEN=your_token copilot-api start --verbose --por
 ### Docker Compose Example
 
 ```yaml
-version: '3.8'
+version: "3.8"
 services:
   copilot-api:
     build: .
@@ -96,6 +110,7 @@ services:
 ```
 
 The Docker image includes:
+
 - Multi-stage build for optimized image size
 - Non-root user for enhanced security
 - Health check for container monitoring
@@ -157,9 +172,9 @@ The following command line options are available for the `start` command:
 
 ### Debug Command Options
 
-| Option | Description                    | Default | Alias |
-| ------ | ------------------------------ | ------- | ----- |
-| --json | Output debug info as JSON      | false   | none  |
+| Option | Description               | Default | Alias |
+| ------ | ------------------------- | ------- | ----- |
+| --json | Output debug info as JSON | false   | none  |
 
 ## API Endpoints
 

@@ -30,7 +30,7 @@ export function translateToOpenAI(
   payload: AnthropicMessagesPayload,
 ): ChatCompletionsPayload {
   return {
-    model: payload.model,
+    model: translateModelName(payload.model),
     messages: translateAnthropicMessagesToOpenAI(
       payload.messages,
       payload.system,
@@ -44,6 +44,16 @@ export function translateToOpenAI(
     tools: translateAnthropicToolsToOpenAI(payload.tools),
     tool_choice: translateAnthropicToolChoiceToOpenAI(payload.tool_choice),
   }
+}
+
+function translateModelName(model: string): string {
+  // Subagent requests use a specific model number which Copilot doesn't support
+  if (model.startsWith("claude-sonnet-4-")) {
+    return model.replace(/^claude-sonnet-4-.*/, "claude-sonnet-4")
+  } else if (model.startsWith("claude-opus-")) {
+    return model.replace(/^claude-opus-4-.*/, "claude-opus-4")
+  }
+  return model
 }
 
 function translateAnthropicMessagesToOpenAI(
@@ -271,9 +281,27 @@ function translateAnthropicToolChoiceToOpenAI(
 export function translateToAnthropic(
   response: ChatCompletionResponse,
 ): AnthropicResponse {
-  const choice = response.choices[0]
-  const textBlocks = getAnthropicTextBlocks(choice.message.content)
-  const toolUseBlocks = getAnthropicToolUseBlocks(choice.message.tool_calls)
+  // Merge content from all choices
+  const allTextBlocks: Array<AnthropicTextBlock> = []
+  const allToolUseBlocks: Array<AnthropicToolUseBlock> = []
+  let stopReason: "stop" | "length" | "tool_calls" | "content_filter" | null =
+    null // default
+  stopReason = response.choices[0]?.finish_reason ?? stopReason
+
+  // Process all choices to extract text and tool use blocks
+  for (const choice of response.choices) {
+    const textBlocks = getAnthropicTextBlocks(choice.message.content)
+    const toolUseBlocks = getAnthropicToolUseBlocks(choice.message.tool_calls)
+
+    allTextBlocks.push(...textBlocks)
+    allToolUseBlocks.push(...toolUseBlocks)
+
+    // Use the finish_reason from the first choice, or prioritize tool_calls
+    if (choice.finish_reason === "tool_calls" || stopReason === "stop") {
+      stopReason = choice.finish_reason
+    }
+  }
+
   // Note: GitHub Copilot doesn't generate thinking blocks, so we don't include them in responses
 
   return {
@@ -281,8 +309,8 @@ export function translateToAnthropic(
     type: "message",
     role: "assistant",
     model: response.model,
-    content: [...textBlocks, ...toolUseBlocks],
-    stop_reason: mapOpenAIStopReasonToAnthropic(choice.finish_reason),
+    content: [...allTextBlocks, ...allToolUseBlocks],
+    stop_reason: mapOpenAIStopReasonToAnthropic(stopReason),
     stop_sequence: null,
     usage: {
       input_tokens: response.usage?.prompt_tokens ?? 0,
