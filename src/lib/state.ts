@@ -2,6 +2,8 @@ import type { ModelsResponse } from "~/services/copilot/get-models"
 
 import type { AccountContext, AccountType } from "./types/account"
 
+import { RequestQueue } from "./queue"
+
 export interface State {
   githubToken?: string
   copilotToken?: string
@@ -18,6 +20,7 @@ export interface State {
   rateLimitSeconds?: number
   lastRequestTimestamp?: number
   verbose: boolean
+  requestQueue: RequestQueue
 }
 
 export const state: State = {
@@ -26,6 +29,7 @@ export const state: State = {
   rateLimitWait: false,
   showToken: false,
   verbose: false,
+  requestQueue: new RequestQueue(),
 }
 
 /**

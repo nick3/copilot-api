@@ -14,7 +14,7 @@ import {
   toAccountContext,
 } from "~/lib/handler-utils"
 import { createHandlerLogger } from "~/lib/logger"
-import { checkRateLimit } from "~/lib/rate-limit"
+import { executeWithRateLimit } from "~/lib/rate-limit"
 import {
   extractResponsesUsageFromResult,
   extractResponsesUsageFromStreamEvent,
@@ -93,8 +93,10 @@ type InstrumentationContext = {
 }
 
 export async function handleCompletion(c: Context) {
-  await checkRateLimit(state)
+  return executeWithRateLimit(state, () => handleCompletionImpl(c))
+}
 
+async function handleCompletionImpl(c: Context) {
   const store = getRequestHistoryStore()
 
   const requestId = randomUUID()
