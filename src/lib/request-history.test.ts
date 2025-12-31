@@ -361,3 +361,447 @@ describe("RequestHistoryStore", () => {
     expect(after.items.length).toBe(2)
   })
 })
+
+test("normalizeChatCompletionsUsage handles missing prompt_tokens_details", () => {
+  const usage: ChatCompletionResponse["usage"] = {
+    prompt_tokens: 50,
+    completion_tokens: 10,
+    total_tokens: 60,
+  }
+
+  const result = normalizeChatCompletionsUsage(usage)
+
+  expect(result.tokensCachedInput).toBe(0)
+  expect(result.tokensInput).toBe(50)
+})
+
+test("normalizeChatCompletionsUsage returns empty object for undefined", () => {
+  expect(normalizeChatCompletionsUsage(undefined)).toEqual({})
+})
+
+test("normalizeResponsesUsage handles missing output_tokens", () => {
+  const usage: ResponseUsage = {
+    input_tokens: 10,
+    total_tokens: 10,
+    input_tokens_details: { cached_tokens: 0 },
+  }
+
+  const result = normalizeResponsesUsage(usage)
+
+  expect(result.tokensOutput).toBe(0)
+})
+
+test("normalizeResponsesUsage returns empty object for null", () => {
+  expect(normalizeResponsesUsage(null)).toEqual({})
+})
+
+test("normalizeEmbeddingsUsage returns empty for undefined", () => {
+  expect(normalizeEmbeddingsUsage(undefined)).toEqual({})
+})
+
+test("getClientIpInfo returns empty object when no headers", () => {
+  const c = {
+    req: {
+      header: () => undefined,
+    },
+  } as unknown as Context
+
+  expect(getClientIpInfo(c)).toEqual({})
+})
+
+test("getClientIpInfo handles empty x-forwarded-for", () => {
+  const c = {
+    req: {
+      header: (name: string) => {
+        if (name.toLowerCase() === "x-forwarded-for") return ""
+        return undefined
+      },
+    },
+  } as unknown as Context
+
+  expect(getClientIpInfo(c)).toEqual({})
+})
+
+test("getClientIpInfo trims whitespace from IPs", () => {
+  const c = {
+    req: {
+      header: (name: string) => {
+        if (name.toLowerCase() === "x-real-ip") return "  192.0.2.1  "
+        return undefined
+      },
+    },
+  } as unknown as Context
+
+  expect(getClientIpInfo(c)).toEqual({
+    ip: "192.0.2.1",
+    source: "x-real-ip",
+  })
+})
+
+test("extractResponsesUsageFromStreamEvent returns empty for non-completed events", () => {
+  const event = {
+    type: "response.text.delta",
+    sequence_number: 1,
+  } as ResponseStreamEvent
+
+  expect(extractResponsesUsageFromStreamEvent(event)).toEqual({})
+})
+
+test("extractResponsesUsageFromResult returns empty when result has no usage", () => {
+  const result = {
+    id: "test",
+  } as ResponsesResult
+
+  expect(extractResponsesUsageFromResult(result)).toEqual({})
+})
+
+test("RequestHistoryStore insert handles minimal record", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+
+  const store = new RequestHistoryStore(db)
+
+  store.insert({
+    requestId: "minimal",
+    startedAtMs: Date.now(),
+    method: "GET",
+    path: "/test",
+    stream: false,
+  })
+
+  const row = store.getByRequestId("minimal")
+  expect(row?.request_id).toBe("minimal")
+  expect(row?.method).toBe("GET")
+})
+
+test("RequestHistoryStore getByRequestId returns null for non-existent", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+
+  const store = new RequestHistoryStore(db)
+
+  expect(store.getByRequestId("nonexistent")).toBeNull()
+})
+
+test("RequestHistoryStore query respects limit parameter", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+
+  const store = new RequestHistoryStore(db)
+
+  for (let i = 0; i < 10; i++) {
+    store.insert({
+      requestId: `r${i}`,
+      startedAtMs: i,
+      method: "POST",
+      path: "/test",
+      stream: false,
+    })
+  }
+
+  const result = store.query({ limit: 3 })
+
+  expect(result.items.length).toBe(3)
+})
+
+test("RequestHistoryStore query clamps limit to max 200", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+
+  const store = new RequestHistoryStore(db)
+
+  for (let i = 0; i < 5; i++) {
+    store.insert({
+      requestId: `r${i}`,
+      startedAtMs: i,
+      method: "POST",
+      path: "/test",
+      stream: false,
+    })
+  }
+
+  const result = store.query({ limit: 500 })
+
+  expect(result.items.length).toBeLessThanOrEqual(200)
+})
+
+test("RequestHistoryStore query filters by upstreamModel", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+
+  const store = new RequestHistoryStore(db)
+
+  store.insert({
+    requestId: "r1",
+    startedAtMs: 1,
+    method: "POST",
+    path: "/test",
+    stream: false,
+    upstreamModel: "gpt-4",
+  })
+
+  store.insert({
+    requestId: "r2",
+    startedAtMs: 2,
+    method: "POST",
+    path: "/test",
+    stream: false,
+    upstreamModel: "gpt-5",
+  })
+
+  const result = store.query({ limit: 50, upstreamModel: "gpt-5" })
+
+  expect(result.items.length).toBe(1)
+  expect(result.items[0].request_id).toBe("r2")
+})
+
+test("RequestHistoryStore query filters by clientModel", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+
+  const store = new RequestHistoryStore(db)
+
+  store.insert({
+    requestId: "r1",
+    startedAtMs: 1,
+    method: "POST",
+    path: "/test",
+    stream: false,
+    clientModel: "claude-3.5",
+  })
+
+  store.insert({
+    requestId: "r2",
+    startedAtMs: 2,
+    method: "POST",
+    path: "/test",
+    stream: false,
+    clientModel: "gpt-4",
+  })
+
+  const result = store.query({ limit: 50, clientModel: "claude-3.5" })
+
+  expect(result.items.length).toBe(1)
+  expect(result.items[0].request_id).toBe("r1")
+})
+
+test("RequestHistoryStore query filters by upstreamEndpoint", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+
+  const store = new RequestHistoryStore(db)
+
+  store.insert({
+    requestId: "r1",
+    startedAtMs: 1,
+    method: "POST",
+    path: "/test",
+    stream: false,
+    upstreamEndpoint: "/chat/completions",
+  })
+
+  store.insert({
+    requestId: "r2",
+    startedAtMs: 2,
+    method: "POST",
+    path: "/test",
+    stream: false,
+    upstreamEndpoint: "/responses",
+  })
+
+  const result = store.query({ limit: 50, upstreamEndpoint: "/responses" })
+
+  expect(result.items.length).toBe(1)
+  expect(result.items[0].request_id).toBe("r2")
+})
+
+test("RequestHistoryStore query filters by path", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+
+  const store = new RequestHistoryStore(db)
+
+  store.insert({
+    requestId: "r1",
+    startedAtMs: 1,
+    method: "POST",
+    path: "/v1/messages",
+    stream: false,
+  })
+
+  store.insert({
+    requestId: "r2",
+    startedAtMs: 2,
+    method: "POST",
+    path: "/v1/chat/completions",
+    stream: false,
+  })
+
+  const result = store.query({ limit: 50, path: "/v1/messages" })
+
+  expect(result.items.length).toBe(1)
+  expect(result.items[0].request_id).toBe("r1")
+})
+
+test("RequestHistoryStore query filters by hasError=true", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+
+  const store = new RequestHistoryStore(db)
+
+  store.insert({
+    requestId: "ok",
+    startedAtMs: 1,
+    method: "POST",
+    path: "/test",
+    stream: false,
+  })
+
+  store.insert({
+    requestId: "error",
+    startedAtMs: 2,
+    method: "POST",
+    path: "/test",
+    stream: false,
+    errorName: "Error",
+    errorMessage: "boom",
+  })
+
+  const result = store.query({ limit: 50, hasError: true })
+
+  expect(result.items.length).toBe(1)
+  expect(result.items[0].request_id).toBe("error")
+})
+
+test("RequestHistoryStore query filters by hasError=false", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+
+  const store = new RequestHistoryStore(db)
+
+  store.insert({
+    requestId: "ok",
+    startedAtMs: 1,
+    method: "POST",
+    path: "/test",
+    stream: false,
+  })
+
+  store.insert({
+    requestId: "error",
+    startedAtMs: 2,
+    method: "POST",
+    path: "/test",
+    stream: false,
+    errorName: "Error",
+  })
+
+  const result = store.query({ limit: 50, hasError: false })
+
+  expect(result.items.length).toBe(1)
+  expect(result.items[0].request_id).toBe("ok")
+})
+
+test("RequestHistoryStore query filters by time range", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+
+  const store = new RequestHistoryStore(db)
+
+  store.insert({
+    requestId: "r1",
+    startedAtMs: 1000,
+    method: "POST",
+    path: "/test",
+    stream: false,
+  })
+
+  store.insert({
+    requestId: "r2",
+    startedAtMs: 2000,
+    method: "POST",
+    path: "/test",
+    stream: false,
+  })
+
+  store.insert({
+    requestId: "r3",
+    startedAtMs: 3000,
+    method: "POST",
+    path: "/test",
+    stream: false,
+  })
+
+  const result = store.query({ limit: 50, fromMs: 1500, toMs: 2500 })
+
+  expect(result.items.length).toBe(1)
+  expect(result.items[0].request_id).toBe("r2")
+})
+
+test("RequestHistoryStore getAccountStatsSince handles missing duration", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+
+  const store = new RequestHistoryStore(db)
+
+  store.insert({
+    requestId: "r1",
+    startedAtMs: Date.now(),
+    method: "POST",
+    path: "/test",
+    stream: false,
+    accountId: "a1",
+  })
+
+  const stats = store.getAccountStatsSince(Date.now() - 60_000)
+
+  expect(stats.a1?.request_count).toBe(1)
+  expect(stats.a1?.avg_duration_ms).toBe(0)
+})
+
+test("RequestHistoryStore cleanupRetention enforces retention days", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+
+  const store = new RequestHistoryStore(db)
+
+  const oldTime = Date.now() - 15 * 24 * 60 * 60 * 1000
+  const newTime = Date.now()
+
+  store.insert({
+    requestId: "old",
+    startedAtMs: oldTime,
+    method: "POST",
+    path: "/test",
+    stream: false,
+  })
+
+  store.insert({
+    requestId: "new",
+    startedAtMs: newTime,
+    method: "POST",
+    path: "/test",
+    stream: false,
+  })
+
+  store.cleanupRetention(14, 999999)
+
+  const result = store.query({ limit: 50 })
+
+  expect(result.items.length).toBe(1)
+  expect(result.items[0].request_id).toBe("new")
+})
+
+test("RequestHistoryStore meta returns expected structure", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+
+  const store = new RequestHistoryStore(db)
+
+  const meta = store.meta()
+
+  expect(meta.dbPath).toBeDefined()
+  expect(meta.schemaVersion).toBe(1)
+  expect(meta.retentionDays).toBeDefined()
+  expect(meta.maxRows).toBeDefined()
+})

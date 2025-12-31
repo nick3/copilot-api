@@ -116,3 +116,73 @@ test("hasRegistry fails fast on invalid registry JSON", async () => {
     expect(message).toMatch(/Invalid accounts registry JSON at/)
   }
 })
+
+test("addAccountToRegistry throws on duplicate account", async () => {
+  const withMockedFs = async <T>(
+    readImpl: ReadFile,
+    writeImpl: typeof fs.writeFile,
+    run: () => Promise<T>,
+  ): Promise<T> => {
+    const originalRead = fs.readFile
+    const originalWrite = fs.writeFile
+    ;(fs as unknown as { readFile: ReadFile }).readFile = readImpl
+    ;(fs as unknown as { writeFile: typeof fs.writeFile }).writeFile =
+      writeImpl
+    try {
+      return await run()
+    } finally {
+      ;(fs as unknown as { readFile: ReadFile }).readFile = originalRead
+      ;(fs as unknown as { writeFile: typeof fs.writeFile }).writeFile =
+        originalWrite
+    }
+  }
+
+  const content = JSON.stringify({
+    version: 1,
+    accounts: [{ id: "octocat", accountType: "individual", addedAt: 1 }],
+  })
+
+  try {
+    await withMockedFs(
+      (() => content) as unknown as ReadFile,
+      (() => Promise.resolve()) as unknown as typeof fs.writeFile,
+      async () => {
+        const { addAccountToRegistry } = await import(
+          "../src/lib/accounts-registry"
+        )
+        await addAccountToRegistry({
+          id: "octocat",
+          accountType: "business",
+          addedAt: Date.now(),
+        })
+      },
+    )
+    throw new Error("Expected addAccountToRegistry to throw")
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    expect(message).toMatch(/Account already exists: octocat/)
+  }
+})
+
+test("validateAccountId rejects empty string", () => {
+  expect(validateAccountId("")).toBe(false)
+})
+
+test("validateAccountId rejects 40+ character strings", () => {
+  expect(validateAccountId("a".repeat(39))).toBe(true)
+  expect(validateAccountId("a".repeat(40))).toBe(false)
+})
+
+test("validateAccountId rejects underscores", () => {
+  expect(validateAccountId("user_name")).toBe(false)
+})
+
+test("validateAccountId allows mixed case", () => {
+  expect(validateAccountId("GitHubUser123")).toBe(true)
+})
+
+test("validateAccountId rejects special characters", () => {
+  expect(validateAccountId("user@name")).toBe(false)
+  expect(validateAccountId("user.name")).toBe(false)
+  expect(validateAccountId("user#name")).toBe(false)
+})
