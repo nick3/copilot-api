@@ -72,14 +72,13 @@ export class RequestQueue {
         consola.debug(
           `Processing request (${this.queue.length} remaining in queue)`,
         )
+        this.lastProcessedTime = Date.now()
         const result = await item.execute()
         item.resolve(result)
       } catch (error) {
         consola.error("Error processing queued request:", error)
         item.reject(error)
       }
-
-      this.lastProcessedTime = Date.now()
     }
 
     this.processing = false

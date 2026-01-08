@@ -11,7 +11,7 @@ import {
   toAccountContext,
 } from "~/lib/handler-utils"
 import { createHandlerLogger } from "~/lib/logger"
-import { checkRateLimit } from "~/lib/rate-limit"
+import { executeWithRateLimit } from "~/lib/rate-limit"
 import {
   extractResponsesUsageFromResult,
   extractResponsesUsageFromStreamEvent,
@@ -33,9 +33,10 @@ const logger = createHandlerLogger("responses-handler")
 
 const RESPONSES_ENDPOINT = "/responses"
 
-export const handleResponses = async (c: Context) => {
-  await checkRateLimit(state)
+export const handleResponses = (c: Context) =>
+  executeWithRateLimit(state, () => handleResponsesImpl(c))
 
+const handleResponsesImpl = async (c: Context) => {
   const store = getRequestHistoryStore()
   const request = buildRequestContext(c)
 

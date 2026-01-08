@@ -7,9 +7,6 @@ node_modules/
 # aider
 .aider*
 
-# claude
-.claude/
-
 # eslint cache
 .eslintcache
 
