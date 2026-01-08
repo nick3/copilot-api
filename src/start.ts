@@ -239,7 +239,7 @@ export const start = defineCommand({
       type: "boolean",
       default: false,
       description:
-        "Wait instead of error when rate limit is hit. Has no effect if rate limit is not set",
+        "Deprecated (no-op): kept for backward compatibility; queue-based rate limiting always waits when enabled",
     },
     "github-token": {
       alias: "g",
