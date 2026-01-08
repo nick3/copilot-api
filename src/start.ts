@@ -232,7 +232,6 @@ export const start = defineCommand({
     "rate-limit": {
       alias: "r",
       type: "string",
-      default: "3",
       description: "Rate limit in seconds between requests",
     },
     wait: {
