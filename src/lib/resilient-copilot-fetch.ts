@@ -118,7 +118,7 @@ async function waitForRateLimitRetry(params: {
   const baseSeconds = Math.max(1, Math.ceil(baseMs / 1000))
 
   consola.warn(
-    `[retry] Rate limit hit for ${operation} (account=${accountId}) (attempt ${retryAttempt + 1}/${maxRetries}). Waiting ${Math.round(waitMs / 100) / 10}s before retry...`,
+    `[retry] Rate limit hit for ${operation} (account=${accountId}) (retry ${retryAttempt + 1} of ${maxRetries}). Waiting ${Math.round(waitMs / 100) / 10}s before retry...`,
   )
 
   if (state.rateLimitSeconds !== undefined) {
@@ -143,7 +143,7 @@ async function waitForRetryableHttpStatus(params: {
   const backoffMs = addJitter(getExponentialBackoffMs(retryAttempt + 1))
 
   consola.warn(
-    `[retry] Transient HTTP ${status} for ${operation} (account=${accountId}) (attempt ${retryAttempt + 1}/${maxRetries}). Waiting ${Math.round(backoffMs / 100) / 10}s before retry...`,
+    `[retry] Transient HTTP ${status} for ${operation} (account=${accountId}) (retry ${retryAttempt + 1} of ${maxRetries}). Waiting ${Math.round(backoffMs / 100) / 10}s before retry...`,
   )
 
   await sleep(backoffMs)
@@ -178,7 +178,7 @@ async function waitForRetryableError(params: {
   const details = describeError(error)
 
   consola.warn(
-    `[retry] Transient${stream ? " stream" : ""} error for ${operation} (account=${accountId}) (attempt ${retryAttempt + 1}/${maxRetries}): ${details}. Waiting ${Math.round(backoffMs / 100) / 10}s before retry...`,
+    `[retry] Transient${stream ? " stream" : ""} error for ${operation} (account=${accountId}) (retry ${retryAttempt + 1} of ${maxRetries}): ${details}. Waiting ${Math.round(backoffMs / 100) / 10}s before retry...`,
   )
 
   await sleep(backoffMs)

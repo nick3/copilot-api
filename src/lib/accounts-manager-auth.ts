@@ -37,6 +37,7 @@ export const toAccountContextFromSnapshot = (
   snapshot: AuthSnapshot,
   copilotToken?: string,
 ): AccountContext => ({
+  id: account.id,
   githubToken: snapshot.githubToken,
   copilotToken,
   accountType: snapshot.accountType,
