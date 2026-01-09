@@ -8,6 +8,7 @@ import {
   extractErrorDetails,
   toAccountContext,
 } from "~/lib/handler-utils"
+import { applyRateLimitHeaders } from "~/lib/rate-limit-headers"
 import {
   getClientIpInfo,
   getRequestHistoryStore,
@@ -83,6 +84,8 @@ embeddingRoutes.post("/", async (c) => {
       })
       return selectionFailureResponse(c, payload.model, selection.reason)
     }
+
+    applyRateLimitHeaders(c, { accountId: selection.account.id })
 
     return await runEmbeddingsWithAccount({
       c,

@@ -25,6 +25,7 @@ export function computeDiff(
 
 export function toAccountContext(account: AccountRuntime): AccountContext {
   return {
+    id: account.id,
     githubToken: account.githubToken,
     copilotToken: account.copilotToken,
     accountType: account.accountType,

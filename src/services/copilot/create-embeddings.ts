@@ -1,7 +1,7 @@
 import type { AccountContext } from "~/lib/types/account"
 
-import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
-import { HTTPError } from "~/lib/error"
+import { copilotBaseUrl, copilotHeaders } from "~/lib/api-config"
+import { copilotFetchJsonWithRetry } from "~/lib/resilient-copilot-fetch"
 import { accountFromState } from "~/lib/state"
 
 export const createEmbeddings = async (
@@ -11,15 +11,22 @@ export const createEmbeddings = async (
   const ctx = account ?? accountFromState()
   if (!ctx.copilotToken) throw new Error("Copilot token not found")
 
-  const response = await fetch(`${copilotBaseUrl(ctx)}/embeddings`, {
+  const accountId = ctx.id ?? "unknown"
+
+  const url = `${copilotBaseUrl(ctx)}/embeddings`
+  const init: RequestInit = {
     method: "POST",
     headers: copilotHeaders(ctx),
     body: JSON.stringify(payload),
+  }
+
+  return copilotFetchJsonWithRetry<EmbeddingResponse>({
+    accountId,
+    operation: "POST /embeddings",
+    url,
+    init,
+    failureMessage: "Failed to create embeddings",
   })
-
-  if (!response.ok) throw new HTTPError("Failed to create embeddings", response)
-
-  return (await response.json()) as EmbeddingResponse
 }
 
 export interface EmbeddingRequest {

@@ -1,11 +1,11 @@
-import consola from "consola"
-import { events } from "fetch-event-stream"
-
 import type { AccountContext } from "~/lib/types/account"
 
-import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
+import { copilotBaseUrl, copilotHeaders } from "~/lib/api-config"
 import { getReasoningEffortForModel } from "~/lib/config"
-import { HTTPError } from "~/lib/error"
+import {
+  copilotFetchEventsWithRetry,
+  copilotFetchJsonWithRetry,
+} from "~/lib/resilient-copilot-fetch"
 import { accountFromState } from "~/lib/state"
 
 function isGpt5MiniFamily(modelId: string): boolean {
@@ -37,6 +37,8 @@ export const createChatCompletions = async (
   const ctx = account ?? accountFromState()
   if (!ctx.copilotToken) throw new Error("Copilot token not found")
 
+  const accountId = ctx.id ?? "unknown"
+
   const enableVision = payload.messages.some(
     (x) =>
       typeof x.content !== "string"
@@ -57,22 +59,30 @@ export const createChatCompletions = async (
 
   const upstreamPayload = applyDefaultReasoningEffort(payload)
 
-  const response = await fetch(`${copilotBaseUrl(ctx)}/chat/completions`, {
+  const url = `${copilotBaseUrl(ctx)}/chat/completions`
+  const init: RequestInit = {
     method: "POST",
     headers,
     body: JSON.stringify(upstreamPayload),
-  })
-
-  if (!response.ok) {
-    consola.error("Failed to create chat completions", response)
-    throw new HTTPError("Failed to create chat completions", response)
   }
 
   if (payload.stream) {
-    return events(response)
+    return copilotFetchEventsWithRetry({
+      accountId,
+      operation: "POST /chat/completions",
+      url,
+      init,
+      failureMessage: "Failed to create chat completions",
+    })
   }
 
-  return (await response.json()) as ChatCompletionResponse
+  return copilotFetchJsonWithRetry<ChatCompletionResponse>({
+    accountId,
+    operation: "POST /chat/completions",
+    url,
+    init,
+    failureMessage: "Failed to create chat completions",
+  })
 }
 
 // Streaming types

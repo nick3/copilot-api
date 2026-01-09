@@ -3,6 +3,7 @@ import { cors } from "hono/cors"
 import { logger } from "hono/logger"
 
 import { createApiKeyAuthMiddleware } from "~/lib/api-key-auth"
+import { rateLimitHeadersMiddleware } from "~/lib/rate-limit-headers"
 
 import { adminApiRoutes } from "./routes/admin-api/route"
 import { adminRoutes } from "./routes/admin/route"
@@ -18,6 +19,7 @@ export const server = new Hono()
 
 server.use(logger())
 server.use(cors())
+server.use("*", rateLimitHeadersMiddleware())
 server.use("*", createApiKeyAuthMiddleware())
 
 server.get("/", (c) => c.text("Server running"))

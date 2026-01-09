@@ -1,10 +1,10 @@
-import consola from "consola"
-import { events } from "fetch-event-stream"
-
 import type { AccountContext } from "~/lib/types/account"
 
 import { copilotBaseUrl, copilotHeaders } from "~/lib/api-config"
-import { HTTPError } from "~/lib/error"
+import {
+  copilotFetchEventsWithRetry,
+  copilotFetchJsonWithRetry,
+} from "~/lib/resilient-copilot-fetch"
 import { accountFromState } from "~/lib/state"
 
 export interface ResponsesPayload {
@@ -320,7 +320,7 @@ export interface ResponseTextDoneEvent {
   type: "response.output_text.done"
 }
 
-export type ResponsesStream = ReturnType<typeof events>
+export type ResponsesStream = AsyncIterable<unknown>
 export type CreateResponsesReturn = ResponsesResult | ResponsesStream
 
 interface ResponsesRequestOptions {
@@ -336,6 +336,8 @@ export const createResponses = async (
   const ctx = account ?? accountFromState()
   if (!ctx.copilotToken) throw new Error("Copilot token not found")
 
+  const accountId = ctx.id ?? "unknown"
+
   const headers: Record<string, string> = {
     ...copilotHeaders(ctx, vision),
     "X-Initiator": initiator,
@@ -344,20 +346,28 @@ export const createResponses = async (
   // service_tier is not supported by github copilot
   payload.service_tier = null
 
-  const response = await fetch(`${copilotBaseUrl(ctx)}/responses`, {
+  const url = `${copilotBaseUrl(ctx)}/responses`
+  const init: RequestInit = {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
-  })
-
-  if (!response.ok) {
-    consola.error("Failed to create responses", response)
-    throw new HTTPError("Failed to create responses", response)
   }
 
   if (payload.stream) {
-    return events(response)
+    return copilotFetchEventsWithRetry({
+      accountId,
+      operation: "POST /responses",
+      url,
+      init,
+      failureMessage: "Failed to create responses",
+    })
   }
 
-  return (await response.json()) as ResponsesResult
+  return copilotFetchJsonWithRetry<ResponsesResult>({
+    accountId,
+    operation: "POST /responses",
+    url,
+    init,
+    failureMessage: "Failed to create responses",
+  })
 }

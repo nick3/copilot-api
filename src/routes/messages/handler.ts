@@ -14,7 +14,7 @@ import {
   toAccountContext,
 } from "~/lib/handler-utils"
 import { createHandlerLogger } from "~/lib/logger"
-import { checkRateLimit } from "~/lib/rate-limit"
+import { applyRateLimitHeaders } from "~/lib/rate-limit-headers"
 import {
   extractResponsesUsageFromResult,
   extractResponsesUsageFromStreamEvent,
@@ -93,8 +93,6 @@ type InstrumentationContext = {
 }
 
 export async function handleCompletion(c: Context) {
-  await checkRateLimit(state)
-
   const store = getRequestHistoryStore()
 
   const requestId = randomUUID()
@@ -175,6 +173,8 @@ export async function handleCompletion(c: Context) {
   }
 
   const { account, reservation, selectedModel, endpoint, costUnits } = selection
+
+  applyRateLimitHeaders(c, { accountId: account.id })
 
   const premiumRemainingBefore = account.premiumRemaining
   const premiumUnlimitedBefore = account.unlimited

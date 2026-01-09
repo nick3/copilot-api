@@ -90,6 +90,8 @@ export interface AccountRuntime extends AccountMeta {
  * This is a subset of AccountRuntime used by service functions.
  */
 export interface AccountContext {
+  /** GitHub login (username). Optional for legacy single-account state context. */
+  id?: string
   /** GitHub personal access token */
   githubToken: string
   /** Copilot API token */

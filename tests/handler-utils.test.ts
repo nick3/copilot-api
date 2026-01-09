@@ -39,6 +39,7 @@ test("toAccountContext projects AccountRuntime to AccountContext", () => {
   }
 
   expect(toAccountContext(runtime)).toEqual({
+    id: "octocat",
     githubToken: "ghp_test",
     copilotToken: "copilot_test",
     accountType: "individual",

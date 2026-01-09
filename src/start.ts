@@ -236,7 +236,7 @@ export const start = defineCommand({
       type: "boolean",
       default: false,
       description:
-        "Wait instead of error when rate limit is hit. Has no effect if rate limit is not set",
+        "DEPRECATED: No longer needed. When --rate-limit is set, requests are always queued. This flag is ignored and will be removed.",
     },
     "github-token": {
       alias: "g",
@@ -268,6 +268,21 @@ export const start = defineCommand({
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       rateLimitRaw === undefined ? undefined : Number.parseInt(rateLimitRaw, 10)
 
+    // When rate limiting is enabled, we always queue (never reject).
+    const rateLimitWait = rateLimit === undefined ? false : true
+
+    if (args.wait) {
+      if (rateLimit === undefined) {
+        consola.warn(
+          "`--wait` is deprecated and has no effect unless `--rate-limit` is set. This flag will be removed in a future version.",
+        )
+      } else {
+        consola.warn(
+          "`--wait` is deprecated and ignored. When `--rate-limit` is set, the proxy always queues requests instead of returning 429.",
+        )
+      }
+    }
+
     let accountType: AccountType
     try {
       accountType = parseAccountType(args["account-type"])
@@ -282,7 +297,7 @@ export const start = defineCommand({
       accountType,
       manual: args.manual,
       rateLimit,
-      rateLimitWait: args.wait,
+      rateLimitWait,
       githubToken: args["github-token"],
       claudeCode: args["claude-code"],
       showToken: args["show-token"],

@@ -11,7 +11,7 @@ import {
   toAccountContext,
 } from "~/lib/handler-utils"
 import { createHandlerLogger } from "~/lib/logger"
-import { checkRateLimit } from "~/lib/rate-limit"
+import { applyRateLimitHeaders } from "~/lib/rate-limit-headers"
 import {
   getClientIpInfo,
   getRequestHistoryStore,
@@ -33,8 +33,6 @@ const logger = createHandlerLogger("chat-completions-handler")
 const CHAT_COMPLETIONS_ENDPOINT = "/chat/completions"
 
 export async function handleCompletion(c: Context) {
-  await checkRateLimit(state)
-
   const store = getRequestHistoryStore()
   const request = buildRequestContext(c)
 
@@ -65,6 +63,8 @@ export async function handleCompletion(c: Context) {
   }
 
   const { account, selectedModel } = selection
+
+  applyRateLimitHeaders(c, { accountId: account.id })
 
   const premiumRemainingBefore = account.premiumRemaining
   const premiumUnlimitedBefore = account.unlimited

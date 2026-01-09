@@ -3,19 +3,29 @@ import fs from "node:fs/promises"
 import type { AccountContext } from "~/lib/types/account"
 
 import { copilotBaseUrl, copilotHeaders } from "~/lib/api-config"
-import { HTTPError } from "~/lib/error"
 import { PATHS } from "~/lib/paths"
+import { copilotFetchJsonWithRetry } from "~/lib/resilient-copilot-fetch"
 import { accountFromState } from "~/lib/state"
 
 export const getModels = async (account?: AccountContext) => {
   const ctx = account ?? accountFromState()
-  const response = await fetch(`${copilotBaseUrl(ctx)}/models`, {
+  if (!ctx.copilotToken) throw new Error("Copilot token not found")
+
+  const accountId = ctx.id ?? "unknown"
+
+  const url = `${copilotBaseUrl(ctx)}/models`
+  const init: RequestInit = {
+    method: "GET",
     headers: copilotHeaders(ctx),
+  }
+
+  const models = await copilotFetchJsonWithRetry<ModelsResponse>({
+    accountId,
+    operation: "GET /models",
+    url,
+    init,
+    failureMessage: "Failed to get models",
   })
-
-  if (!response.ok) throw new HTTPError("Failed to get models", response)
-
-  const models = (await response.json()) as ModelsResponse
 
   // Persist models response for debugging/inspection.
   // Best effort: do not fail startup if the local write fails.
