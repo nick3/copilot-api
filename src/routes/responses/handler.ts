@@ -631,7 +631,7 @@ async function streamResponsesAndLog(params: {
       errorMessage: finalErrorMessage,
     })
 
-    const premium = await getPremiumInfo()
+    const premium = await getPremiumInfo(account)
     process.stdout.write(
       `${formatStreamLog({
         model: payload.model,
@@ -709,7 +709,7 @@ async function handleNonStreamingResponses(params: {
       "Forwarding native Responses result:",
       JSON.stringify(response).slice(-400),
     )
-    const premium = await getPremiumInfo()
+    const premium = await getPremiumInfo(account)
     process.stdout.write(
       `${formatStreamLog({
         model: payload.model,

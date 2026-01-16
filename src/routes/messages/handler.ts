@@ -490,7 +490,7 @@ async function handleChatCompletionsNonStreaming(params: {
       JSON.stringify(anthropicResponse),
     )
 
-    const premium = await getPremiumInfo()
+    const premium = await getPremiumInfo(instr.account)
     process.stdout.write(
       `${formatStreamLog({
         model,
@@ -601,7 +601,7 @@ async function handleResponsesNonStreaming(params: {
       JSON.stringify(anthropicResponse),
     )
 
-    const premium = await getPremiumInfo()
+    const premium = await getPremiumInfo(instr.account)
     process.stdout.write(
       `${formatStreamLog({
         model,

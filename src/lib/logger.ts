@@ -5,6 +5,8 @@ import util from "node:util"
 
 import { getCopilotUsage } from "~/services/github/get-copilot-usage"
 
+import type { AccountContext } from "./types/account"
+
 import { PATHS } from "./paths"
 import { state } from "./state"
 
@@ -210,12 +212,18 @@ export const formatStreamLog = ({
   return base
 }
 
-export const getPremiumInfo = async (): Promise<{
+export const getPremiumInfo = async (
+  account?: AccountContext,
+): Promise<{
   remaining: number
   total: number
 } | null> => {
+  // Require account context - multi-account mode doesn't use global state
+  if (!account) {
+    return null
+  }
   try {
-    const usage = await getCopilotUsage()
+    const usage = await getCopilotUsage(account)
     const pi = usage.quota_snapshots.premium_interactions
     if (!pi.unlimited) {
       return { remaining: pi.remaining, total: pi.entitlement }

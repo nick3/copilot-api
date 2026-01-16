@@ -244,7 +244,7 @@ export async function streamChatCompletionsAndLog(params: {
       errorMessage: finalError.errorMessage,
     })
 
-    const premium = await getPremiumInfo()
+    const premium = await getPremiumInfo(instr.account)
     process.stdout.write(
       `${formatStreamLog({
         model,
@@ -406,7 +406,7 @@ export async function streamResponsesAndLog(params: {
       errorMessage: finalError.errorMessage,
     })
 
-    const premium = await getPremiumInfo()
+    const premium = await getPremiumInfo(instr.account)
     process.stdout.write(
       `${formatStreamLog({
         model,

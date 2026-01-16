@@ -620,7 +620,7 @@ async function streamChatCompletionsAndLog(params: {
       errorMessage: finalErrorMessage,
     })
 
-    const premium = await getPremiumInfo()
+    const premium = await getPremiumInfo(account)
     process.stdout.write(
       `${formatStreamLog({
         model: payload.model,
@@ -699,7 +699,7 @@ async function handleNonStreamingRequest(params: {
     usage = normalizeChatCompletionsUsage(response.usage)
 
     logger.debug("Non-streaming response:", JSON.stringify(response))
-    const premium = await getPremiumInfo()
+    const premium = await getPremiumInfo(account)
     process.stdout.write(
       `${formatStreamLog({
         model: payload.model,
