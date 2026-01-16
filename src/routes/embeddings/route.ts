@@ -1,3 +1,4 @@
+import consola from "consola"
 import { Hono, type Context } from "hono"
 import { randomUUID } from "node:crypto"
 
@@ -208,41 +209,49 @@ async function runEmbeddingsWithAccount({
   } finally {
     const finishedAtMsFinal = finishedAtMs ?? Date.now()
 
-    await accountsManager.finalizeQuota(account, reservation)
+    try {
+      await accountsManager.finalizeQuota(account, reservation)
+    } catch (error) {
+      consola.warn("Failed to finalize quota:", error)
+    }
 
     const premiumRemainingAfter = account.premiumRemaining
     const premiumUnlimitedAfter = account.unlimited
 
-    store.insert({
-      requestId: ctx.requestId,
-      startedAtMs: ctx.startedAtMs,
-      finishedAtMs: finishedAtMsFinal,
-      durationMs: finishedAtMsFinal - ctx.startedAtMs,
-      method: ctx.method,
-      path: ctx.path,
-      upstreamEndpoint: endpoint,
-      stream: false,
-      accountId: account.id,
-      accountType: account.accountType,
-      costUnits,
-      clientModel: payload.model,
-      upstreamModel: selectedModel.id,
-      clientIp: ctx.clientIp,
-      clientIpSource: ctx.clientIpSource,
-      userAgent: ctx.userAgent,
-      ...usage,
-      premiumRemainingBefore,
-      premiumRemainingAfter,
-      premiumRemainingDiff: computeDiff(
+    try {
+      store.insert({
+        requestId: ctx.requestId,
+        startedAtMs: ctx.startedAtMs,
+        finishedAtMs: finishedAtMsFinal,
+        durationMs: finishedAtMsFinal - ctx.startedAtMs,
+        method: ctx.method,
+        path: ctx.path,
+        upstreamEndpoint: endpoint,
+        stream: false,
+        accountId: account.id,
+        accountType: account.accountType,
+        costUnits,
+        clientModel: payload.model,
+        upstreamModel: selectedModel.id,
+        clientIp: ctx.clientIp,
+        clientIpSource: ctx.clientIpSource,
+        userAgent: ctx.userAgent,
+        ...usage,
         premiumRemainingBefore,
         premiumRemainingAfter,
-      ),
-      premiumUnlimitedBefore,
-      premiumUnlimitedAfter,
-      httpStatus,
-      errorName,
-      errorStatus,
-      errorMessage,
-    })
+        premiumRemainingDiff: computeDiff(
+          premiumRemainingBefore,
+          premiumRemainingAfter,
+        ),
+        premiumUnlimitedBefore,
+        premiumUnlimitedAfter,
+        httpStatus,
+        errorName,
+        errorStatus,
+        errorMessage,
+      })
+    } catch (error) {
+      consola.warn("Failed to write request log:", error)
+    }
   }
 }

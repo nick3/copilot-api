@@ -13,11 +13,14 @@ import {
   extractErrorDetails,
   toAccountContext,
 } from "~/lib/handler-utils"
-import { createHandlerLogger } from "~/lib/logger"
+import {
+  createHandlerLogger,
+  formatStreamLog,
+  getPremiumInfo,
+} from "~/lib/logger"
 import { checkRateLimit } from "~/lib/rate-limit"
 import {
   extractResponsesUsageFromResult,
-  extractResponsesUsageFromStreamEvent,
   getClientIpInfo,
   getRequestHistoryStore,
   normalizeChatCompletionsUsage,
@@ -25,38 +28,27 @@ import {
 } from "~/lib/request-history"
 import { state } from "~/lib/state"
 import {
-  buildErrorEvent,
-  createResponsesStreamState,
-  translateResponsesStreamEvent,
-} from "~/routes/messages/responses-stream-translation"
-import {
   translateAnthropicMessagesToResponsesPayload,
   translateResponsesResultToAnthropic,
 } from "~/routes/messages/responses-translation"
+import { mergeToolResultForClaude } from "~/routes/messages/tool-result-merge"
 import { getResponsesRequestOptions } from "~/routes/responses/utils"
 import {
   createChatCompletions,
-  type ChatCompletionChunk,
   type ChatCompletionResponse,
   type ChatCompletionsPayload,
 } from "~/services/copilot/create-chat-completions"
 import {
   createResponses,
   type ResponsesResult,
-  type ResponseStreamEvent,
 } from "~/services/copilot/create-responses"
 
-import {
-  type AnthropicMessagesPayload,
-  type AnthropicStreamState,
-  type AnthropicTextBlock,
-  type AnthropicToolResultBlock,
-} from "./anthropic-types"
+import { type AnthropicMessagesPayload } from "./anthropic-types"
 import {
   translateToAnthropic,
   translateToOpenAI,
 } from "./non-stream-translation"
-import { translateChunkToAnthropicEvents } from "./stream-translation"
+import { streamChatCompletionsAndLog, streamResponsesAndLog } from "./streaming"
 
 const logger = createHandlerLogger("messages-handler")
 
@@ -264,6 +256,7 @@ const handleWithChatCompletions = async (
       c,
       response,
       instr,
+      model: openAIPayload.model,
     })
   }
 
@@ -274,6 +267,10 @@ const handleWithChatCompletions = async (
       stream,
       response,
       instr,
+      model: openAIPayload.model,
+      logger,
+      insertRequestLog,
+      finalizeQuotaAndGetPremiumSnapshot,
     }),
   )
 }
@@ -320,6 +317,10 @@ const handleWithResponsesApi = async (
         stream,
         response,
         instr,
+        model: responsesPayload.model,
+        logger,
+        insertRequestLog,
+        finalizeQuotaAndGetPremiumSnapshot,
       }),
     )
   }
@@ -328,6 +329,7 @@ const handleWithResponsesApi = async (
     c,
     result: response as ResponsesResult,
     instr,
+    model: responsesPayload.model,
   })
 }
 
@@ -335,14 +337,7 @@ type Store = ReturnType<typeof getRequestHistoryStore>
 
 type RequestLogInsert = Parameters<Store["insert"]>[0]
 
-type StreamSseStream = Parameters<Parameters<typeof streamSSE>[1]>[0]
-
 type ChatCompletionsResult = Awaited<ReturnType<typeof createChatCompletions>>
-
-type ChatCompletionsStream = Exclude<
-  ChatCompletionsResult,
-  ChatCompletionResponse
->
 
 function insertRequestLog(
   instr: InstrumentationContext,
@@ -383,24 +378,28 @@ function insertRequestLog(
     premiumUnlimitedBefore,
   } = instr
 
-  store.insert({
-    requestId,
-    startedAtMs,
-    method,
-    path,
-    clientIp,
-    clientIpSource,
-    userAgent,
-    clientModel,
-    upstreamEndpoint,
-    accountId: account.id,
-    accountType: account.accountType,
-    costUnits,
-    upstreamModel,
-    premiumRemainingBefore,
-    premiumUnlimitedBefore,
-    ...record,
-  })
+  try {
+    store.insert({
+      requestId,
+      startedAtMs,
+      method,
+      path,
+      clientIp,
+      clientIpSource,
+      userAgent,
+      clientModel,
+      upstreamEndpoint,
+      accountId: account.id,
+      accountType: account.accountType,
+      costUnits,
+      upstreamModel,
+      premiumRemainingBefore,
+      premiumUnlimitedBefore,
+      ...record,
+    })
+  } catch (error) {
+    logger.warn("Failed to write request log:", error)
+  }
 }
 
 async function finalizeQuotaAndGetPremiumSnapshot(
@@ -410,7 +409,11 @@ async function finalizeQuotaAndGetPremiumSnapshot(
   premiumUnlimitedAfter: boolean | undefined
   premiumRemainingDiff: number | undefined
 }> {
-  await accountsManager.finalizeQuota(instr.account, instr.reservation)
+  try {
+    await accountsManager.finalizeQuota(instr.account, instr.reservation)
+  } catch (error) {
+    logger.warn("Failed to finalize quota:", error)
+  }
 
   const premiumRemainingAfter = instr.account.premiumRemaining
   const premiumUnlimitedAfter = instr.account.unlimited
@@ -462,8 +465,9 @@ async function handleChatCompletionsNonStreaming(params: {
   c: Context
   response: ChatCompletionResponse
   instr: InstrumentationContext
+  model: string
 }): Promise<Response> {
-  const { c, response, instr } = params
+  const { c, response, instr, model } = params
 
   let httpStatus = 200
   const usage: NormalizedUsage = normalizeChatCompletionsUsage(response.usage)
@@ -486,6 +490,15 @@ async function handleChatCompletionsNonStreaming(params: {
       JSON.stringify(anthropicResponse),
     )
 
+    const premium = await getPremiumInfo()
+    process.stdout.write(
+      `${formatStreamLog({
+        model,
+        chunks: 0,
+        done: true,
+        premium,
+      })}\n`,
+    )
     return c.json(anthropicResponse)
   } catch (error) {
     const details = extractErrorDetails(error)
@@ -517,102 +530,6 @@ async function handleChatCompletionsNonStreaming(params: {
       premiumUnlimitedAfter,
       premiumRemainingDiff,
       httpStatus,
-      errorName,
-      errorStatus,
-      errorMessage,
-    })
-  }
-}
-
-async function streamChatCompletionsAndLog(params: {
-  stream: StreamSseStream
-  response: ChatCompletionsStream
-  instr: InstrumentationContext
-}): Promise<void> {
-  const { stream, response, instr } = params
-
-  let ttfbMs: number | undefined
-  let lastUsage: NormalizedUsage = {}
-
-  let errorName: string | undefined
-  let errorStatus: number | undefined
-  let errorMessage: string | undefined
-
-  const streamState: AnthropicStreamState = {
-    messageStartSent: false,
-    contentBlockIndex: 0,
-    contentBlockOpen: false,
-    toolCalls: {},
-    thinkingBlockOpen: false,
-  }
-
-  try {
-    for await (const rawEvent of response) {
-      if (ttfbMs === undefined) {
-        ttfbMs = Date.now() - instr.startedAtMs
-      }
-
-      logger.debug("Copilot raw stream event:", JSON.stringify(rawEvent))
-
-      const { data: rawData } = rawEvent as {
-        data?: string | Promise<string>
-      }
-      const data = typeof rawData === "string" ? rawData : await rawData
-
-      if (data === "[DONE]") {
-        break
-      }
-
-      if (!data) {
-        continue
-      }
-
-      const chunk = JSON.parse(data) as ChatCompletionChunk
-      if (chunk.usage) {
-        lastUsage = normalizeChatCompletionsUsage(chunk.usage)
-      }
-
-      const events = translateChunkToAnthropicEvents(chunk, streamState)
-      for (const event of events) {
-        logger.debug("Translated Anthropic event:", JSON.stringify(event))
-
-        await stream.writeSSE({
-          event: event.type,
-          data: JSON.stringify(event),
-        })
-      }
-    }
-  } catch (error) {
-    const details = extractErrorDetails(error)
-
-    errorName = details.errorName
-    errorStatus = details.errorStatus
-    errorMessage = details.errorMessage
-
-    logger.warn("Streaming error:", error)
-
-    if (details.unauthorized) {
-      accountsManager.markAccountFailed(instr.account.id, "Unauthorized (401)")
-    }
-  } finally {
-    const finishedAtMs = Date.now()
-
-    const {
-      premiumRemainingAfter,
-      premiumUnlimitedAfter,
-      premiumRemainingDiff,
-    } = await finalizeQuotaAndGetPremiumSnapshot(instr)
-
-    insertRequestLog(instr, {
-      finishedAtMs,
-      durationMs: finishedAtMs - instr.startedAtMs,
-      ttfbMs,
-      stream: true,
-      ...lastUsage,
-      premiumRemainingAfter,
-      premiumUnlimitedAfter,
-      premiumRemainingDiff,
-      httpStatus: errorStatus ?? (errorName ? 500 : 200),
       errorName,
       errorStatus,
       errorMessage,
@@ -657,8 +574,9 @@ async function handleResponsesNonStreaming(params: {
   c: Context
   result: ResponsesResult
   instr: InstrumentationContext
+  model: string
 }): Promise<Response> {
-  const { c, result, instr } = params
+  const { c, result, instr, model } = params
 
   let httpStatus = 200
   let usage: NormalizedUsage = {}
@@ -683,6 +601,15 @@ async function handleResponsesNonStreaming(params: {
       JSON.stringify(anthropicResponse),
     )
 
+    const premium = await getPremiumInfo()
+    process.stdout.write(
+      `${formatStreamLog({
+        model,
+        chunks: 0,
+        done: true,
+        premium,
+      })}\n`,
+    )
     return c.json(anthropicResponse)
   } catch (error) {
     const details = extractErrorDetails(error)
@@ -721,133 +648,6 @@ async function handleResponsesNonStreaming(params: {
   }
 }
 
-async function ensureResponsesStreamCompleted(params: {
-  stream: StreamSseStream
-  streamState: ReturnType<typeof createResponsesStreamState>
-  setStreamError: (name: string, message: string) => void
-}): Promise<void> {
-  const { stream, streamState, setStreamError } = params
-
-  if (streamState.messageCompleted) {
-    return
-  }
-
-  logger.warn("Responses stream ended without completion; sending error event")
-
-  const msg = "Responses stream ended without completion"
-  const errorEvent = buildErrorEvent(msg)
-
-  setStreamError("StreamIncomplete", msg)
-
-  await stream.writeSSE({
-    event: errorEvent.type,
-    data: JSON.stringify(errorEvent),
-  })
-}
-
-async function streamResponsesAndLog(params: {
-  stream: StreamSseStream
-  response: AsyncIterable<unknown>
-  instr: InstrumentationContext
-}): Promise<void> {
-  const { stream, response, instr } = params
-
-  let ttfbMs: number | undefined
-  let lastUsage: NormalizedUsage = {}
-
-  let errorName: string | undefined
-  let errorStatus: number | undefined
-  let errorMessage: string | undefined
-
-  const streamState = createResponsesStreamState()
-
-  try {
-    for await (const chunk of response) {
-      if (ttfbMs === undefined) {
-        ttfbMs = Date.now() - instr.startedAtMs
-      }
-
-      const eventName = (chunk as { event?: string }).event
-      if (eventName === "ping") {
-        await stream.writeSSE({ event: "ping", data: "" })
-        continue
-      }
-
-      const data = (chunk as { data?: string }).data
-      if (!data) {
-        continue
-      }
-
-      logger.debug("Responses raw stream event:", data)
-
-      const parsed = JSON.parse(data) as ResponseStreamEvent
-      const u = extractResponsesUsageFromStreamEvent(parsed)
-      if (u.usageJson) {
-        lastUsage = u
-      }
-
-      const events = translateResponsesStreamEvent(parsed, streamState)
-      for (const event of events) {
-        const eventData = JSON.stringify(event)
-        logger.debug("Translated Anthropic event:", eventData)
-        await stream.writeSSE({
-          event: event.type,
-          data: eventData,
-        })
-      }
-
-      if (streamState.messageCompleted) {
-        logger.debug("Message completed, ending stream")
-        break
-      }
-    }
-
-    await ensureResponsesStreamCompleted({
-      stream,
-      streamState,
-      setStreamError: (name, message) => {
-        errorName = name
-        errorMessage = message
-      },
-    })
-  } catch (error) {
-    const details = extractErrorDetails(error)
-
-    errorName = details.errorName
-    errorStatus = details.errorStatus
-    errorMessage = details.errorMessage
-
-    logger.warn("Streaming error:", error)
-
-    if (details.unauthorized) {
-      accountsManager.markAccountFailed(instr.account.id, "Unauthorized (401)")
-    }
-  } finally {
-    const finishedAtMs = Date.now()
-
-    const {
-      premiumRemainingAfter,
-      premiumUnlimitedAfter,
-      premiumRemainingDiff,
-    } = await finalizeQuotaAndGetPremiumSnapshot(instr)
-
-    insertRequestLog(instr, {
-      finishedAtMs,
-      durationMs: finishedAtMs - instr.startedAtMs,
-      ttfbMs,
-      stream: true,
-      ...lastUsage,
-      premiumRemainingAfter,
-      premiumUnlimitedAfter,
-      premiumRemainingDiff,
-      httpStatus: errorStatus ?? (errorName ? 500 : 200),
-      errorName,
-      errorStatus,
-      errorMessage,
-    })
-  }
-}
-
 const isNonStreaming = (
   response: Awaited<ReturnType<typeof createChatCompletions>>,
 ): response is ChatCompletionResponse => Object.hasOwn(response, "choices")
@@ -855,73 +655,3 @@ const isNonStreaming = (
 const isAsyncIterable = <T>(value: unknown): value is AsyncIterable<T> =>
   Boolean(value)
   && typeof (value as AsyncIterable<T>)[Symbol.asyncIterator] === "function"
-
-const mergeContentWithText = (
-  tr: AnthropicToolResultBlock,
-  textBlock: AnthropicTextBlock,
-): AnthropicToolResultBlock => {
-  if (typeof tr.content === "string") {
-    return { ...tr, content: `${tr.content}\n\n${textBlock.text}` }
-  }
-  return {
-    ...tr,
-    content: [...tr.content, textBlock],
-  }
-}
-
-const mergeContentWithTexts = (
-  tr: AnthropicToolResultBlock,
-  textBlocks: Array<AnthropicTextBlock>,
-): AnthropicToolResultBlock => {
-  if (typeof tr.content === "string") {
-    const appendedTexts = textBlocks.map((tb) => tb.text).join("\n\n")
-    return { ...tr, content: `${tr.content}\n\n${appendedTexts}` }
-  }
-  return { ...tr, content: [...tr.content, ...textBlocks] }
-}
-
-const mergeToolResultForClaude = (
-  anthropicBeta: string | undefined,
-  anthropicPayload: AnthropicMessagesPayload,
-): void => {
-  if (!anthropicBeta) return
-
-  for (const msg of anthropicPayload.messages) {
-    if (msg.role !== "user" || !Array.isArray(msg.content)) continue
-
-    const toolResults: Array<AnthropicToolResultBlock> = []
-    const textBlocks: Array<AnthropicTextBlock> = []
-    let valid = true
-
-    for (const block of msg.content) {
-      if (block.type === "tool_result") {
-        toolResults.push(block)
-      } else if (block.type === "text") {
-        textBlocks.push(block)
-      } else {
-        valid = false
-        break
-      }
-    }
-
-    if (!valid || toolResults.length === 0 || textBlocks.length === 0) continue
-
-    msg.content = mergeToolResult(toolResults, textBlocks)
-  }
-}
-
-const mergeToolResult = (
-  toolResults: Array<AnthropicToolResultBlock>,
-  textBlocks: Array<AnthropicTextBlock>,
-): Array<AnthropicToolResultBlock> => {
-  // equal lengths -> pairwise merge
-  if (toolResults.length === textBlocks.length) {
-    return toolResults.map((tr, i) => mergeContentWithText(tr, textBlocks[i]))
-  }
-
-  // lengths differ -> append all textBlocks to the last tool_result
-  const lastIndex = toolResults.length - 1
-  return toolResults.map((tr, i) =>
-    i === lastIndex ? mergeContentWithTexts(tr, textBlocks) : tr,
-  )
-}

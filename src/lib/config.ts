@@ -7,6 +7,7 @@ export interface AppConfig {
   extraPrompts?: Record<string, string>
   smallModel?: string
   freeModelLoadBalancing?: boolean
+  forceAgent?: boolean
   apiKey?: string
   modelReasoningEfforts?: Record<
     string,
@@ -29,6 +30,7 @@ const defaultConfig: AppConfig = {
   },
   smallModel: "gpt-5-mini",
   freeModelLoadBalancing: true,
+  forceAgent: false,
   modelReasoningEfforts: {
     "gpt-5-mini": "low",
   },
@@ -125,6 +127,23 @@ function mergeDefaultFreeModelLoadBalancing(config: AppConfig): {
   }
 }
 
+function mergeDefaultForceAgent(config: AppConfig): {
+  mergedConfig: AppConfig
+  changed: boolean
+} {
+  if (typeof config.forceAgent === "boolean") {
+    return { mergedConfig: config, changed: false }
+  }
+
+  return {
+    mergedConfig: {
+      ...config,
+      forceAgent: defaultConfig.forceAgent ?? false,
+    },
+    changed: true,
+  }
+}
+
 type ConfigMergeResult = {
   mergedConfig: AppConfig
   changed: boolean
@@ -154,6 +173,7 @@ export function mergeConfigWithDefaults(): AppConfig {
   const { mergedConfig, changed } = applyConfigMerges(config, [
     mergeDefaultExtraPrompts,
     mergeDefaultFreeModelLoadBalancing,
+    mergeDefaultForceAgent,
   ])
 
   if (changed) {
@@ -190,6 +210,11 @@ export function getSmallModel(): string {
 export function isFreeModelLoadBalancingEnabled(): boolean {
   const config = getConfig()
   return config.freeModelLoadBalancing ?? true
+}
+
+export function isForceAgentEnabled(): boolean {
+  const config = getConfig()
+  return config.forceAgent ?? false
 }
 
 export function getReasoningEffortForModel(

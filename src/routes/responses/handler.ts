@@ -11,7 +11,11 @@ import {
   extractErrorDetails,
   toAccountContext,
 } from "~/lib/handler-utils"
-import { createHandlerLogger } from "~/lib/logger"
+import {
+  createHandlerLogger,
+  formatStreamLog,
+  getPremiumInfo,
+} from "~/lib/logger"
 import { checkRateLimit } from "~/lib/rate-limit"
 import {
   extractResponsesUsageFromResult,
@@ -21,6 +25,7 @@ import {
   type NormalizedUsage,
 } from "~/lib/request-history"
 import { state } from "~/lib/state"
+import { setupPingInterval } from "~/lib/utils"
 import {
   createResponses,
   type ResponsesPayload,
@@ -167,16 +172,31 @@ function insertRequestLog(
     | "userAgent"
   >,
 ): void {
-  store.insert({
-    requestId: request.requestId,
-    startedAtMs: request.startedAtMs,
-    method: request.method,
-    path: request.path,
-    clientIp: request.clientIp,
-    clientIpSource: request.clientIpSource,
-    userAgent: request.userAgent,
-    ...record,
-  })
+  try {
+    store.insert({
+      requestId: request.requestId,
+      startedAtMs: request.startedAtMs,
+      method: request.method,
+      path: request.path,
+      clientIp: request.clientIp,
+      clientIpSource: request.clientIpSource,
+      userAgent: request.userAgent,
+      ...record,
+    })
+  } catch (error) {
+    logger.warn("Failed to write request log:", error)
+  }
+}
+
+async function finalizeQuotaSafely(
+  account: AccountSelectionOk["account"],
+  reservation: AccountSelectionOk["reservation"],
+): Promise<void> {
+  try {
+    await accountsManager.finalizeQuota(account, reservation)
+  } catch (error) {
+    logger.warn("Failed to finalize quota:", error)
+  }
 }
 
 function recordSelectionFailure(
@@ -363,7 +383,7 @@ async function handleUpstreamCreateError(params: {
     accountsManager.markAccountFailed(account.id, "Unauthorized (401)")
   }
 
-  await accountsManager.finalizeQuota(account, reservation)
+  await finalizeQuotaSafely(account, reservation)
 
   const premiumRemainingAfter = account.premiumRemaining
   const premiumUnlimitedAfter = account.unlimited
@@ -442,7 +462,7 @@ async function handleNonStreamingUpstreamResult(params: {
 
     throw error
   } finally {
-    await accountsManager.finalizeQuota(account, reservation)
+    await finalizeQuotaSafely(account, reservation)
 
     const premiumRemainingAfter = account.premiumRemaining
     const premiumUnlimitedAfter = account.unlimited
@@ -474,6 +494,7 @@ async function handleNonStreamingUpstreamResult(params: {
   }
 }
 
+// eslint-disable-next-line max-lines-per-function
 async function streamResponsesAndLog(params: {
   stream: StreamSseStream
   response: AsyncIterable<unknown>
@@ -503,6 +524,14 @@ async function streamResponsesAndLog(params: {
   let errorStatus: number | undefined
   let errorMessage: string | undefined
 
+  const pingFailed = { value: false }
+  let streamCompleted = false
+  const pingInterval = setupPingInterval(stream, 3000, (error) => {
+    pingFailed.value = true
+    logger.warn("SSE ping failed:", error)
+  })
+  let chunkCount = 0
+
   try {
     for await (const chunk of response) {
       if (ttfbMs === undefined) {
@@ -516,6 +545,17 @@ async function streamResponsesAndLog(params: {
         lastUsage = usage
       }
 
+      if (event !== "ping") {
+        chunkCount++
+        process.stdout.write(
+          formatStreamLog({
+            model: payload.model,
+            chunks: chunkCount,
+            done: false,
+          }),
+        )
+      }
+
       logger.debug("Responses stream chunk:", JSON.stringify(chunk))
 
       await stream.writeSSE({
@@ -524,6 +564,8 @@ async function streamResponsesAndLog(params: {
         data: data ?? "",
       })
     }
+
+    streamCompleted = true
   } catch (error) {
     const details = extractErrorDetails(error)
     errorName = details.errorName
@@ -531,13 +573,37 @@ async function streamResponsesAndLog(params: {
     errorMessage = details.errorMessage
 
     logger.warn("Responses streaming error:", error)
+    try {
+      const errorEvent = {
+        error: {
+          message: details.errorMessage,
+          type: "error",
+        },
+      }
+      await stream.writeSSE({
+        event: "error",
+        data: JSON.stringify(errorEvent),
+      })
+    } catch (writeError) {
+      logger.warn("Failed to send streaming error event:", writeError)
+    }
   } finally {
+    clearInterval(pingInterval)
     const finishedAtMs = Date.now()
 
-    await accountsManager.finalizeQuota(account, reservation)
+    await finalizeQuotaSafely(account, reservation)
 
     const premiumRemainingAfter = account.premiumRemaining
     const premiumUnlimitedAfter = account.unlimited
+
+    const finalErrorName =
+      pingFailed.value && !errorName && !streamCompleted ?
+        "PingFailed"
+      : errorName
+    const finalErrorMessage =
+      pingFailed.value && !errorName && !streamCompleted ?
+        "SSE ping failed"
+      : errorMessage
 
     insertRequestLog(store, request, {
       finishedAtMs,
@@ -559,14 +625,25 @@ async function streamResponsesAndLog(params: {
       ),
       premiumUnlimitedBefore,
       premiumUnlimitedAfter,
-      httpStatus: errorStatus ?? (errorName ? 500 : 200),
-      errorName,
+      httpStatus: errorStatus ?? (finalErrorName ? 500 : 200),
+      errorName: finalErrorName,
       errorStatus,
-      errorMessage,
+      errorMessage: finalErrorMessage,
     })
+
+    const premium = await getPremiumInfo()
+    process.stdout.write(
+      `${formatStreamLog({
+        model: payload.model,
+        chunks: chunkCount,
+        done: !finalErrorName,
+        premium,
+      })}\n`,
+    )
   }
 }
 
+// eslint-disable-next-line max-lines-per-function
 async function handleNonStreamingResponses(params: {
   c: Context
   store: Store
@@ -632,6 +709,15 @@ async function handleNonStreamingResponses(params: {
       "Forwarding native Responses result:",
       JSON.stringify(response).slice(-400),
     )
+    const premium = await getPremiumInfo()
+    process.stdout.write(
+      `${formatStreamLog({
+        model: payload.model,
+        chunks: 0,
+        done: true,
+        premium,
+      })}\n`,
+    )
     return c.json(response)
   } catch (error) {
     finishedAtMs = Date.now()
@@ -651,7 +737,7 @@ async function handleNonStreamingResponses(params: {
   } finally {
     const finishedAtMsFinal = finishedAtMs ?? Date.now()
 
-    await accountsManager.finalizeQuota(account, reservation)
+    await finalizeQuotaSafely(account, reservation)
 
     const premiumRemainingAfter = account.premiumRemaining
     const premiumUnlimitedAfter = account.unlimited
