@@ -12,7 +12,9 @@ const getPayloadItems = (
 
   const { input } = payload
 
-  if (Array.isArray(input)) {
+  if (typeof input === "string") {
+    result.push({ role: "user", content: input })
+  } else if (Array.isArray(input)) {
     result.push(...input)
   }
 

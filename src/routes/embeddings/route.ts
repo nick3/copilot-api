@@ -209,9 +209,11 @@ async function runEmbeddingsWithAccount({
   } finally {
     const finishedAtMsFinal = finishedAtMs ?? Date.now()
 
+    let finalizeOk = true
     try {
       await accountsManager.finalizeQuota(account, reservation)
     } catch (error) {
+      finalizeOk = false
       consola.warn("Failed to finalize quota:", error)
     }
 
@@ -239,10 +241,10 @@ async function runEmbeddingsWithAccount({
         ...usage,
         premiumRemainingBefore,
         premiumRemainingAfter,
-        premiumRemainingDiff: computeDiff(
-          premiumRemainingBefore,
-          premiumRemainingAfter,
-        ),
+        premiumRemainingDiff:
+          finalizeOk ?
+            computeDiff(premiumRemainingBefore, premiumRemainingAfter)
+          : undefined,
         premiumUnlimitedBefore,
         premiumUnlimitedAfter,
         httpStatus,

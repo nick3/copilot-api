@@ -2,7 +2,7 @@ import type {
   AnthropicMessagesPayload,
   AnthropicTextBlock,
   AnthropicToolResultBlock,
-} from "./anthropic-types"
+} from "~/routes/messages/anthropic-types"
 
 /**
  * Merge a single text block into a tool_result.

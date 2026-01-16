@@ -38,6 +38,12 @@ type ChatCompletionsStream = Exclude<
   ChatCompletionResponse
 >
 
+type AccountSelection = Awaited<
+  ReturnType<(typeof accountsManager)["selectAccountForRequest"]>
+>
+
+type AccountSelectionOk = Extract<AccountSelection, { ok: true }>
+
 export type InstrumentationContext = {
   store: ReturnType<
     typeof import("~/lib/request-history").getRequestHistoryStore
@@ -51,7 +57,7 @@ export type InstrumentationContext = {
   userAgent?: string
   clientModel: string
   account: import("~/lib/types/account").AccountRuntime
-  reservation: unknown
+  reservation: AccountSelectionOk["reservation"]
   upstreamModel: string
   upstreamEndpoint: string
   costUnits: number

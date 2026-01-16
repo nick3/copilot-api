@@ -32,7 +32,17 @@ export const setupPingInterval = (
   intervalMs: number = 3000,
   onError?: (error: unknown) => void,
 ) => {
-  const pingInterval = setInterval(async () => {
+  let inFlight = false
+
+  const pingInterval = setInterval(() => {
+    if (inFlight) return
+    inFlight = true
+    void sendPing().finally(() => {
+      inFlight = false
+    })
+  }, intervalMs)
+
+  async function sendPing() {
     try {
       await stream.writeSSE({
         event: "ping",
@@ -44,7 +54,7 @@ export const setupPingInterval = (
       clearInterval(pingInterval)
       onError?.(error)
     }
-  }, intervalMs)
+  }
 
   return pingInterval
 }
