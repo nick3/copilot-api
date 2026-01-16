@@ -256,7 +256,7 @@ The `<target>` can be either the account ID (GitHub username) or a 1-based index
 - **extraPrompts:** Map of `model -> prompt` appended to the first system prompt when translating Anthropic-style requests to Copilot. Use this to inject guardrails or guidance per model. Missing default entries are auto-added without overwriting your custom prompts.
 - **smallModel:** Fallback model used for tool-less warmup messages (e.g., Claude Code probe requests) to avoid spending premium requests; defaults to `gpt-5-mini`.
 - **freeModelLoadBalancing:** Enable round-robin routing for free-model requests across multiple accounts. Defaults to `true`. Set to `false` to route free-model requests sequentially (same ordering strategy as premium models).
-- **forceAgent:** When `true`, force all forwarded requests to use `X-Initiator: agent`, ignoring message-role inference. Defaults to `false`.
+- **forceAgent:** When `true`, set `X-Initiator` to `agent` only if any message has role `assistant` or `tool`; otherwise use `user`. When `false`, `X-Initiator` is inferred from the last message (`user` → `user`, otherwise `agent`). Defaults to `false`.
 - **apiKey (optional):** API key used to protect selected endpoints (see **API Key authentication** below). Prefer setting the `COPILOT_API_KEY` environment variable (takes precedence over `config.json`). The server does not generate an API key automatically — you must provide one. If no key is configured, protected endpoints remain publicly accessible (fail-open). **Do not commit secrets.**
 - **modelReasoningEfforts:** Per-model `reasoning.effort` sent to the Copilot Responses API. Allowed values are `none`, `minimal`, `low`, `medium`, `high`, and `xhigh`. If a model isn’t listed, `high` is used by default.
 
