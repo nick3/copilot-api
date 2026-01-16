@@ -63,6 +63,10 @@ export const getResponsesRequestOptions = (
 }
 
 export const hasAgentInitiator = (payload: ResponsesPayload): boolean => {
+  const forceAgent = isForceAgentEnabled()
+  if (forceAgent) {
+    return hasAssistantOrToolRole(payload)
+  }
   const lastRole = getLastRole(payload)
   return lastRole !== "user"
 }
