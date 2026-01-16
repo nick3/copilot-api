@@ -67,7 +67,7 @@ export type InstrumentationContext = {
 
 export type InsertRequestLog = (
   instr: InstrumentationContext,
-  record: object,
+  record: Record<string, unknown>,
 ) => void
 
 export type FinalizeQuotaAndGetPremiumSnapshot = (

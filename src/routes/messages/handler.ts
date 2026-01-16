@@ -341,24 +341,7 @@ type ChatCompletionsResult = Awaited<ReturnType<typeof createChatCompletions>>
 
 function insertRequestLog(
   instr: InstrumentationContext,
-  record: Omit<
-    RequestLogInsert,
-    | "requestId"
-    | "startedAtMs"
-    | "method"
-    | "path"
-    | "clientIp"
-    | "clientIpSource"
-    | "userAgent"
-    | "clientModel"
-    | "upstreamEndpoint"
-    | "accountId"
-    | "accountType"
-    | "costUnits"
-    | "upstreamModel"
-    | "premiumRemainingBefore"
-    | "premiumUnlimitedBefore"
-  >,
+  record: Record<string, unknown>,
 ): void {
   const {
     store,
@@ -396,7 +379,7 @@ function insertRequestLog(
       premiumRemainingBefore,
       premiumUnlimitedBefore,
       ...record,
-    })
+    } as RequestLogInsert)
   } catch (error) {
     logger.warn("Failed to write request log:", error)
   }
