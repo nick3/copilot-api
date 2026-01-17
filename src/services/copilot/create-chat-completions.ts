@@ -30,6 +30,20 @@ function applyDefaultReasoningEffort(
   }
 }
 
+function computeInitiatorForMessages(
+  messages: ChatCompletionsPayload["messages"],
+): "agent" | "user" {
+  const forceAgent = isForceAgentEnabled()
+  if (forceAgent) {
+    const hasAssistantOrTool = messages.some((msg) =>
+      ["assistant", "tool"].includes(msg.role),
+    )
+    return hasAssistantOrTool ? "agent" : "user"
+  }
+  const lastMessage = messages.at(-1)
+  return lastMessage?.role === "user" ? "user" : "agent"
+}
+
 export const createChatCompletions = async (
   payload: ChatCompletionsPayload,
   account?: AccountContext,
@@ -43,19 +57,12 @@ export const createChatCompletions = async (
       && x.content?.some((x) => x.type === "image_url"),
   )
 
-  // Agent/user check for X-Initiator header
-  const forceAgent = isForceAgentEnabled()
-  const hasAssistantOrTool = payload.messages.some((msg) =>
-    ["assistant", "tool"].includes(msg.role),
-  )
-  const lastMessage = payload.messages.at(-1)
-  const isLastUser = lastMessage?.role === "user"
-  const isAgentCall = forceAgent ? hasAssistantOrTool : !isLastUser
+  const initiator = computeInitiatorForMessages(payload.messages)
 
   // Build headers and add X-Initiator
   const headers: Record<string, string> = {
     ...copilotHeaders(ctx, enableVision),
-    "X-Initiator": isAgentCall ? "agent" : "user",
+    "X-Initiator": initiator,
   }
 
   const upstreamPayload = applyDefaultReasoningEffort(payload)

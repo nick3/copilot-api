@@ -193,6 +193,14 @@ export interface StreamLogOptions {
   premium?: { remaining: number; total: number } | null
 }
 
+const getPremiumColorCode = (remaining: number, total: number): string => {
+  if (total <= 0) return "\x1b[31m"
+  const pct = remaining / total
+  if (pct > 0.5) return "\x1b[32m"
+  if (pct > 0.2) return "\x1b[33m"
+  return "\x1b[31m"
+}
+
 export const formatStreamLog = ({
   model,
   chunks,
@@ -200,16 +208,12 @@ export const formatStreamLog = ({
   premium,
 }: StreamLogOptions): string => {
   const base = `\x1b[2K\r↪ ${model} ${chunks}${done ? " ✓" : ""}`
-  if (done && premium) {
-    const pct = premium.total > 0 ? premium.remaining / premium.total : 0
-    let numColor = "\x1b[31m"
-    if (pct > 0.5) numColor = "\x1b[32m"
-    else if (pct > 0.2) numColor = "\x1b[33m"
-    const reset = "\x1b[0m"
-    const dim = "\x1b[2m"
-    return `${base} [${numColor}${premium.remaining}${reset} ${dim}left${reset}]`
-  }
-  return base
+  if (!done || !premium) return base
+
+  const numColor = getPremiumColorCode(premium.remaining, premium.total)
+  const reset = "\x1b[0m"
+  const dim = "\x1b[2m"
+  return `${base} [${numColor}${premium.remaining}${reset} ${dim}left${reset}]`
 }
 
 export const getPremiumInfo = async (

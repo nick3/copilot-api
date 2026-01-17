@@ -45,31 +45,24 @@ const hasAssistantOrToolRole = (payload: ResponsesPayload): boolean =>
     return role === "assistant" || role === "tool"
   })
 
+const computeInitiator = (payload: ResponsesPayload): "agent" | "user" => {
+  const forceAgent = isForceAgentEnabled()
+  if (forceAgent) {
+    return hasAssistantOrToolRole(payload) ? "agent" : "user"
+  }
+  return getLastRole(payload) === "user" ? "user" : "agent"
+}
+
 export const getResponsesRequestOptions = (
   payload: ResponsesPayload,
 ): { vision: boolean; initiator: "agent" | "user" } => {
   const vision = hasVisionInput(payload)
-  const forceAgent = isForceAgentEnabled()
-  const hasAssistantOrTool = hasAssistantOrToolRole(payload)
-  const isLastUser = getLastRole(payload) === "user"
-  let initiator: "agent" | "user"
-  if (forceAgent) {
-    initiator = hasAssistantOrTool ? "agent" : "user"
-  } else {
-    initiator = isLastUser ? "user" : "agent"
-  }
-
+  const initiator = computeInitiator(payload)
   return { vision, initiator }
 }
 
-export const hasAgentInitiator = (payload: ResponsesPayload): boolean => {
-  const forceAgent = isForceAgentEnabled()
-  if (forceAgent) {
-    return hasAssistantOrToolRole(payload)
-  }
-  const lastRole = getLastRole(payload)
-  return lastRole !== "user"
-}
+export const hasAgentInitiator = (payload: ResponsesPayload): boolean =>
+  computeInitiator(payload) === "agent"
 
 export const hasVisionInput = (payload: ResponsesPayload): boolean => {
   const values = getPayloadItems(payload)

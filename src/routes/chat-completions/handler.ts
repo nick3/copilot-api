@@ -490,6 +490,19 @@ async function handleNonStreamingUpstreamResponse(params: {
   }
 }
 
+function computeFinalStreamError(params: {
+  pingFailed: boolean
+  streamCompleted: boolean
+  errorName: string | undefined
+  errorMessage: string | undefined
+}): { errorName: string | undefined; errorMessage: string | undefined } {
+  const { pingFailed, streamCompleted, errorName, errorMessage } = params
+  if (pingFailed && !errorName && !streamCompleted) {
+    return { errorName: "PingFailed", errorMessage: "SSE ping failed" }
+  }
+  return { errorName, errorMessage }
+}
+
 // eslint-disable-next-line max-lines-per-function
 async function streamChatCompletionsAndLog(params: {
   stream: StreamSseStream
@@ -585,14 +598,12 @@ async function streamChatCompletionsAndLog(params: {
     const premiumRemainingAfter = account.premiumRemaining
     const premiumUnlimitedAfter = account.unlimited
 
-    const finalErrorName =
-      pingFailed.value && !errorName && !streamCompleted ?
-        "PingFailed"
-      : errorName
-    const finalErrorMessage =
-      pingFailed.value && !errorName && !streamCompleted ?
-        "SSE ping failed"
-      : errorMessage
+    const finalError = computeFinalStreamError({
+      pingFailed: pingFailed.value,
+      streamCompleted,
+      errorName,
+      errorMessage,
+    })
 
     insertRequestLog(store, request, {
       finishedAtMs,
@@ -614,10 +625,10 @@ async function streamChatCompletionsAndLog(params: {
       ),
       premiumUnlimitedBefore,
       premiumUnlimitedAfter,
-      httpStatus: errorStatus ?? (finalErrorName ? 500 : 200),
-      errorName: finalErrorName,
+      httpStatus: errorStatus ?? (finalError.errorName ? 500 : 200),
+      errorName: finalError.errorName,
       errorStatus,
-      errorMessage: finalErrorMessage,
+      errorMessage: finalError.errorMessage,
     })
 
     const premium = await getPremiumInfo(account)
@@ -625,7 +636,7 @@ async function streamChatCompletionsAndLog(params: {
       `${formatStreamLog({
         model: payload.model,
         chunks: chunkCount,
-        done: !finalErrorName,
+        done: !finalError.errorName,
         premium,
       })}\n`,
     )
