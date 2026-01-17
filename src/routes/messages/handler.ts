@@ -27,10 +27,19 @@ import {
   type NormalizedUsage,
 } from "~/lib/request-history"
 import { state } from "~/lib/state"
+import { type AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
+import {
+  translateToAnthropic,
+  translateToOpenAI,
+} from "~/routes/messages/non-stream-translation"
 import {
   translateAnthropicMessagesToResponsesPayload,
   translateResponsesResultToAnthropic,
 } from "~/routes/messages/responses-translation"
+import {
+  streamChatCompletionsAndLog,
+  streamResponsesAndLog,
+} from "~/routes/messages/streaming"
 import { mergeToolResultForClaude } from "~/routes/messages/tool-result-merge"
 import { getResponsesRequestOptions } from "~/routes/responses/utils"
 import {
@@ -42,13 +51,6 @@ import {
   createResponses,
   type ResponsesResult,
 } from "~/services/copilot/create-responses"
-
-import { type AnthropicMessagesPayload } from "./anthropic-types"
-import {
-  translateToAnthropic,
-  translateToOpenAI,
-} from "./non-stream-translation"
-import { streamChatCompletionsAndLog, streamResponsesAndLog } from "./streaming"
 
 const logger = createHandlerLogger("messages-handler")
 
@@ -392,9 +394,11 @@ async function finalizeQuotaAndGetPremiumSnapshot(
   premiumUnlimitedAfter: boolean | undefined
   premiumRemainingDiff: number | undefined
 }> {
+  let finalized = true
   try {
     await accountsManager.finalizeQuota(instr.account, instr.reservation)
   } catch (error) {
+    finalized = false
     logger.warn("Failed to finalize quota:", error)
   }
 
@@ -404,10 +408,10 @@ async function finalizeQuotaAndGetPremiumSnapshot(
   return {
     premiumRemainingAfter,
     premiumUnlimitedAfter,
-    premiumRemainingDiff: computeDiff(
-      instr.premiumRemainingBefore,
-      premiumRemainingAfter,
-    ),
+    premiumRemainingDiff:
+      finalized ?
+        computeDiff(instr.premiumRemainingBefore, premiumRemainingAfter)
+      : undefined,
   }
 }
 
