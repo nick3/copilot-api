@@ -1,4 +1,5 @@
 import consola from "consola"
+import { createHash } from "node:crypto"
 
 import {
   getExtraPromptForModel,
@@ -46,6 +47,19 @@ import {
 const MESSAGE_TYPE = "message"
 
 export const THINKING_TEXT = "Thinking..."
+
+export const MAX_REASONING_ID_LENGTH = 64
+
+const toBase64Url = (base64: string): string =>
+  base64.replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "")
+
+export const normalizeReasoningId = (id: string): string => {
+  if (id.length <= MAX_REASONING_ID_LENGTH) {
+    return id
+  }
+
+  return toBase64Url(createHash("sha256").update(id).digest("base64"))
+}
 
 export const translateAnthropicMessagesToResponsesPayload = (
   payload: AnthropicMessagesPayload,
@@ -253,7 +267,8 @@ const createReasoningContent = (
   // when use in codex cli, reasoning id is empty, so it will cause miss cache occasionally
   const array = block.signature.split("@")
   const signature = array[0]
-  const id = array[1]
+  const rawId = array[1]
+  const id = typeof rawId === "string" ? normalizeReasoningId(rawId) : undefined
   const thinking = block.thinking === THINKING_TEXT ? "" : block.thinking
   return {
     id,
@@ -386,7 +401,10 @@ const mapOutputToAnthropicContent = (
           contentBlocks.push({
             type: "thinking",
             thinking: thinkingText,
-            signature: (item.encrypted_content ?? "") + "@" + item.id,
+            signature:
+              (item.encrypted_content ?? "")
+              + "@"
+              + normalizeReasoningId(item.id),
           })
         }
         break

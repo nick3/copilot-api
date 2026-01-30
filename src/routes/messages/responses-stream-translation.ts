@@ -18,6 +18,7 @@ import {
 
 import { type AnthropicStreamEventData } from "./anthropic-types"
 import {
+  normalizeReasoningId,
   THINKING_TEXT,
   translateResponsesResultToAnthropic,
 } from "./responses-translation"
@@ -203,7 +204,8 @@ const handleOutputItemDone = (
 
   const outputIndex = rawEvent.output_index
   const blockIndex = openThinkingBlockIfNeeded(state, outputIndex, events)
-  const signature = (item.encrypted_content ?? "") + "@" + item.id
+  const signature =
+    (item.encrypted_content ?? "") + "@" + normalizeReasoningId(item.id)
   if (signature) {
     // Compatible with opencode, it will filter out blocks where the thinking text is empty, so we add a default thinking text here
     if (!item.summary || item.summary.length === 0) {
