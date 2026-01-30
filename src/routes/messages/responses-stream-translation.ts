@@ -204,8 +204,9 @@ const handleOutputItemDone = (
 
   const outputIndex = rawEvent.output_index
   const blockIndex = openThinkingBlockIfNeeded(state, outputIndex, events)
-  const signature =
-    (item.encrypted_content ?? "") + "@" + normalizeReasoningId(item.id)
+  const encryptedContent = item.encrypted_content ?? ""
+  const normalizedId = normalizeReasoningId(item.id) ?? ""
+  const signature = `${encryptedContent}@${normalizedId}`
   if (signature) {
     // Compatible with opencode, it will filter out blocks where the thinking text is empty, so we add a default thinking text here
     if (!item.summary || item.summary.length === 0) {

@@ -53,7 +53,11 @@ export const MAX_REASONING_ID_LENGTH = 64
 const toBase64Url = (base64: string): string =>
   base64.replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "")
 
-export const normalizeReasoningId = (id: string): string => {
+export const normalizeReasoningId = (id: unknown): string | undefined => {
+  if (typeof id !== "string" || id.length === 0) {
+    return undefined
+  }
+
   if (id.length <= MAX_REASONING_ID_LENGTH) {
     return id
   }
@@ -265,10 +269,11 @@ const createReasoningContent = (
   // align with vscode-copilot-chat extractThinkingData, should add id, otherwise it will cause miss cache occasionally —— the usage input cached tokens to be 0
   // https://github.com/microsoft/vscode-copilot-chat/blob/main/src/platform/endpoint/node/responsesApi.ts#L162
   // when use in codex cli, reasoning id is empty, so it will cause miss cache occasionally
-  const array = block.signature.split("@")
-  const signature = array[0]
-  const rawId = array[1]
-  const id = typeof rawId === "string" ? normalizeReasoningId(rawId) : undefined
+  const lastAt = block.signature.lastIndexOf("@")
+  const signature =
+    lastAt === -1 ? block.signature : block.signature.slice(0, lastAt)
+  const rawId = lastAt === -1 ? undefined : block.signature.slice(lastAt + 1)
+  const id = normalizeReasoningId(rawId)
   const thinking = block.thinking === THINKING_TEXT ? "" : block.thinking
   return {
     id,
@@ -398,13 +403,12 @@ const mapOutputToAnthropicContent = (
       case "reasoning": {
         const thinkingText = extractReasoningText(item)
         if (thinkingText.length > 0) {
+          const encryptedContent = item.encrypted_content ?? ""
+          const normalizedId = normalizeReasoningId(item.id) ?? ""
           contentBlocks.push({
             type: "thinking",
             thinking: thinkingText,
-            signature:
-              (item.encrypted_content ?? "")
-              + "@"
-              + normalizeReasoningId(item.id),
+            signature: `${encryptedContent}@${normalizedId}`,
           })
         }
         break
