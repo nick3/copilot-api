@@ -1,5 +1,4 @@
 import consola from "consola"
-import { createHash } from "node:crypto"
 
 import {
   getExtraPromptForModel,
@@ -50,19 +49,19 @@ export const THINKING_TEXT = "Thinking..."
 
 export const MAX_REASONING_ID_LENGTH = 64
 
-const toBase64Url = (base64: string): string =>
-  base64.replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "")
-
 export const normalizeReasoningId = (id: unknown): string | undefined => {
-  if (typeof id !== "string" || id.length === 0) {
+  if (typeof id !== "string") {
     return undefined
   }
 
-  if (id.length <= MAX_REASONING_ID_LENGTH) {
-    return id
+  // NOTE: Copilot Responses API validates input item IDs; if an ID is too long,
+  // it may not be a real server-issued ID. In that case we omit it rather than
+  // generating a synthetic ID that could fail upstream validation.
+  if (id.length === 0 || id.length > MAX_REASONING_ID_LENGTH) {
+    return undefined
   }
 
-  return toBase64Url(createHash("sha256").update(id).digest("base64"))
+  return id
 }
 
 export const translateAnthropicMessagesToResponsesPayload = (
