@@ -19,10 +19,10 @@ export function MagicCard({
   children,
   className,
   gradientSize = 200,
-  gradientColor = "#262626",
-  gradientOpacity = 0.8,
-  gradientFrom = "#9E7AFF",
-  gradientTo = "#FE8BBB",
+  gradientColor = "color-mix(in oklch, var(--accent) 20%, transparent)",
+  gradientOpacity = 0.45,
+  gradientFrom = "var(--accent)",
+  gradientTo = "var(--primary)",
 }: MagicCardProps) {
   const mouseX = useMotionValue(-gradientSize)
   const mouseY = useMotionValue(-gradientSize)
@@ -74,18 +74,21 @@ export function MagicCard({
 
   return (
     <div
-      className={cn("group relative rounded-[inherit]", className)}
+      className={cn(
+        "group relative rounded-[inherit] border border-border/70 bg-card/80 shadow-[0_18px_40px_-32px_rgba(0,0,0,0.55)]",
+        className
+      )}
       onPointerMove={handlePointerMove}
       onPointerLeave={reset}
       onPointerEnter={reset}
     >
       <motion.div
-        className="bg-border pointer-events-none absolute inset-0 rounded-[inherit] duration-300 group-hover:opacity-100"
+        className="bg-border/80 pointer-events-none absolute inset-0 rounded-[inherit] duration-300 group-hover:opacity-100"
         style={{
           background: borderGradient,
         }}
       />
-      <div className="bg-background absolute inset-px rounded-[inherit]" />
+      <div className="bg-card absolute inset-px rounded-[inherit]" />
       <motion.div
         className="pointer-events-none absolute inset-px rounded-[inherit] opacity-0 transition-opacity duration-300 group-hover:opacity-100"
         style={{

@@ -1,8 +1,6 @@
-import type { ReactNode } from "react"
+import type { CSSProperties, ReactNode } from "react"
 import { forwardRef } from "react"
 
-import { BorderBeam } from "@/components/ui/border-beam"
-import { MagicCard } from "@/components/ui/magic-card"
 import { cn } from "@/lib/utils"
 
 export type SettingsSectionCardProps = {
@@ -10,40 +8,35 @@ export type SettingsSectionCardProps = {
   isActive: boolean
   children: ReactNode
   className?: string
+  style?: CSSProperties
 }
 
 /**
- * Settings section wrapper with MagicCard effect and BorderBeam on active state.
- * Wraps existing card components to add visual effects.
+ * Settings section wrapper with a signal bar on active state.
  */
 export const SettingsSectionCard = forwardRef<HTMLDivElement, SettingsSectionCardProps>(
-  ({ id, isActive, children, className }, ref) => {
+  ({ id, isActive, children, className, style }, ref) => {
     return (
       <div
         ref={ref}
         id={id}
         data-section-id={id}
-        className={cn("relative scroll-mt-6", className)}
+        style={style}
+        className={cn(
+          "relative scroll-mt-6 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-4",
+          className
+        )}
       >
-        <MagicCard
-          className="rounded-xl overflow-hidden"
-          gradientSize={200}
-          gradientOpacity={0.6}
-        >
-          {isActive && (
-            <BorderBeam
-              size={50}
-              duration={6}
-              colorFrom="#9E7AFF"
-              colorTo="#FE8BBB"
-              borderWidth={2}
-              className="opacity-70"
-            />
+        <div
+          className={cn(
+            "relative",
+            isActive
+              ? "before:absolute before:inset-y-3 before:-left-4 before:w-1 before:bg-accent before:shadow-[0_0_18px_var(--accent)] before:content-[''] after:absolute after:-left-4 after:top-3 after:h-6 after:w-2 after:border after:border-accent/60 after:content-['']"
+              : undefined,
           )}
-          <div className="relative">
-            {children}
-          </div>
-        </MagicCard>
+        >
+          {children}
+        </div>
       </div>
     )
   }

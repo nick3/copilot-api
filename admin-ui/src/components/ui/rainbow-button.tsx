@@ -7,20 +7,28 @@ import { cn } from "@/lib/utils"
 
 const rainbowButtonVariants = cva(
   cn(
-    "relative cursor-pointer group transition-all animate-rainbow",
+    "relative cursor-pointer group transition-colors",
     "inline-flex items-center justify-center gap-2 shrink-0",
-    "rounded-md outline-none focus-visible:ring-[3px] aria-invalid:border-destructive",
-    "text-sm font-medium whitespace-nowrap",
+    "rounded-sm border outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+    "font-display text-[0.75rem] font-semibold uppercase tracking-[0.2em] whitespace-nowrap",
     "disabled:pointer-events-none disabled:opacity-50",
     "[&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 [&_svg]:shrink-0"
   ),
   {
     variants: {
       variant: {
-        default:
-          "border-0 bg-[linear-gradient(#121213,#121213),linear-gradient(#121213_50%,rgba(18,18,19,0.6)_80%,rgba(18,18,19,0)),linear-gradient(90deg,var(--color-1),var(--color-5),var(--color-3),var(--color-4),var(--color-2))] bg-[length:200%] text-primary-foreground [background-clip:padding-box,border-box,border-box] [background-origin:border-box] [border:calc(0.125rem)_solid_transparent] before:absolute before:bottom-[-20%] before:left-1/2 before:z-0 before:h-1/5 before:w-3/5 before:-translate-x-1/2 before:animate-rainbow before:bg-[linear-gradient(90deg,var(--color-1),var(--color-5),var(--color-3),var(--color-4),var(--color-2))] before:[filter:blur(0.75rem)] dark:bg-[linear-gradient(#fff,#fff),linear-gradient(#fff_50%,rgba(255,255,255,0.6)_80%,rgba(0,0,0,0)),linear-gradient(90deg,var(--color-1),var(--color-5),var(--color-3),var(--color-4),var(--color-2))]",
-        outline:
-          "border border-input border-b-transparent bg-[linear-gradient(#ffffff,#ffffff),linear-gradient(#ffffff_50%,rgba(18,18,19,0.6)_80%,rgba(18,18,19,0)),linear-gradient(90deg,var(--color-1),var(--color-5),var(--color-3),var(--color-4),var(--color-2))] bg-[length:200%] text-accent-foreground [background-clip:padding-box,border-box,border-box] [background-origin:border-box] before:absolute before:bottom-[-20%] before:left-1/2 before:z-0 before:h-1/5 before:w-3/5 before:-translate-x-1/2 before:animate-rainbow before:bg-[linear-gradient(90deg,var(--color-1),var(--color-5),var(--color-3),var(--color-4),var(--color-2))] before:[filter:blur(0.75rem)] dark:bg-[linear-gradient(#0a0a0a,#0a0a0a),linear-gradient(#0a0a0a_50%,rgba(255,255,255,0.6)_80%,rgba(0,0,0,0)),linear-gradient(90deg,var(--color-1),var(--color-5),var(--color-3),var(--color-4),var(--color-2))]",
+        default: cn(
+          "bg-accent text-accent-foreground border-accent/80 shadow-[0_18px_35px_-28px_rgba(0,0,0,0.7)]",
+          "before:absolute before:inset-0 before:bg-[linear-gradient(135deg,transparent_0%,transparent_42%,rgba(0,0,0,0.22)_42%,rgba(0,0,0,0.22)_52%,transparent_52%,transparent_100%)] before:bg-[length:18px_18px] before:opacity-45 before:content-[''] before:pointer-events-none",
+          "after:absolute after:inset-y-1 after:right-1 after:w-1 after:bg-foreground/20 after:content-[''] after:pointer-events-none",
+          "dark:before:bg-[linear-gradient(135deg,transparent_0%,transparent_42%,rgba(255,255,255,0.16)_42%,rgba(255,255,255,0.16)_52%,transparent_52%,transparent_100%)]"
+        ),
+        outline: cn(
+          "bg-transparent text-foreground border-border/70 shadow-[0_12px_24px_-20px_rgba(0,0,0,0.6)]",
+          "before:absolute before:inset-0 before:bg-[linear-gradient(135deg,transparent_0%,transparent_42%,rgba(0,0,0,0.15)_42%,rgba(0,0,0,0.15)_52%,transparent_52%,transparent_100%)] before:bg-[length:18px_18px] before:opacity-35 before:content-[''] before:pointer-events-none",
+          "after:absolute after:inset-y-1 after:right-1 after:w-1 after:bg-foreground/10 after:content-[''] after:pointer-events-none",
+          "dark:before:bg-[linear-gradient(135deg,transparent_0%,transparent_42%,rgba(255,255,255,0.12)_42%,rgba(255,255,255,0.12)_52%,transparent_52%,transparent_100%)]"
+        ),
       },
       size: {
         default: "h-9 px-4 py-2",

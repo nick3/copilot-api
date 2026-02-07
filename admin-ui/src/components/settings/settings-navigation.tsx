@@ -1,7 +1,6 @@
 import { useTranslation } from "react-i18next"
 
 import type { SettingsSection } from "@/hooks/use-active-section"
-import { AnimatedGradientText } from "@/components/ui/animated-gradient-text"
 import { cn } from "@/lib/utils"
 
 export type SettingsNavigationProps = {
@@ -13,7 +12,6 @@ export type SettingsNavigationProps = {
 
 /**
  * Sticky sidebar navigation for settings page.
- * Uses AnimatedGradientText for active section highlight.
  */
 export function SettingsNavigation({
   sections,
@@ -26,12 +24,12 @@ export function SettingsNavigation({
   return (
     <nav
       className={cn(
-        "sticky top-6 space-y-1 rounded-lg border bg-card p-2",
+        "sticky top-6 space-y-2 rounded-sm border border-border/70 bg-card/75 p-3 shadow-[0_18px_40px_-32px_rgba(0,0,0,0.6)] backdrop-blur-sm",
         className,
       )}
       aria-label={t("settingsPage.navigation.ariaLabel")}
     >
-      <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+      <div className="font-display px-2 py-2 text-[0.65rem] uppercase tracking-[0.24em] text-muted-foreground">
         {t("nav.settings")}
       </div>
       {sections.map((section) => {
@@ -42,26 +40,18 @@ export function SettingsNavigation({
             type="button"
             onClick={() => onSectionClick(section.id)}
             className={cn(
-              "w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
-              "hover:bg-accent hover:text-accent-foreground",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              isActive && "bg-accent/50",
+              "relative w-full text-left px-3 py-2 rounded-sm text-[0.72rem] font-semibold uppercase tracking-[0.2em] transition-colors border border-transparent",
+              "hover:bg-accent/10 hover:border-border/60",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+              isActive &&
+                "bg-accent/18 border-accent/70 text-foreground shadow-[0_0_0_1px_var(--accent)] before:absolute before:inset-y-1 before:left-1 before:w-1 before:bg-accent before:content-['']",
             )}
             aria-current={isActive ? "page" : undefined}
             aria-controls={section.id}
           >
-            {isActive ? (
-              <AnimatedGradientText
-                speed={1.5}
-                colorFrom="#9E7AFF"
-                colorTo="#FE8BBB"
-                className="font-medium"
-              >
-                {section.label}
-              </AnimatedGradientText>
-            ) : (
-              <span className="text-muted-foreground">{section.label}</span>
-            )}
+            <span className={isActive ? "text-foreground" : "text-muted-foreground"}>
+              {section.label}
+            </span>
           </button>
         )
       })}

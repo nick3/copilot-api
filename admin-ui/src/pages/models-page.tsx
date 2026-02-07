@@ -391,7 +391,7 @@ export function ModelsPage(): React.JSX.Element {
   }, [load])
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {error ? (
         <InlineAlert
           variant="error"

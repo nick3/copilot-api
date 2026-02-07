@@ -30,13 +30,13 @@ function iconForVariant(variant: InlineAlertVariant): React.JSX.Element {
 function classNameForVariant(variant: InlineAlertVariant): string {
   switch (variant) {
     case "success":
-      return "border-emerald-500/20 bg-emerald-500/10"
+      return "border-l-emerald-500/80 bg-emerald-500/8"
     case "warning":
-      return "border-amber-500/20 bg-amber-500/10"
+      return "border-l-amber-500/80 bg-amber-500/8"
     case "error":
-      return "border-destructive/20 bg-destructive/10"
+      return "border-l-destructive/80 bg-destructive/10"
     default:
-      return "border-border/60 bg-muted/30"
+      return "border-l-accent/80 bg-muted/25"
   }
 }
 
@@ -54,7 +54,7 @@ export function InlineAlert({
     <div
       role={variant === "error" ? "alert" : "status"}
       className={cn(
-        "flex items-start gap-3 rounded-lg border p-3",
+        "flex items-start gap-3 rounded-sm border border-border/70 border-l-[4px] p-3 shadow-[0_14px_28px_-22px_rgba(0,0,0,0.5)]",
         classNameForVariant(variant),
         className
       )}
@@ -62,7 +62,7 @@ export function InlineAlert({
       <div className="mt-0.5 shrink-0 text-foreground">{icon}</div>
 
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium leading-5">{title}</div>
+        <div className="font-display text-[0.75rem] leading-5">{title}</div>
         {description ? (
           <div className="text-muted-foreground mt-1 text-sm leading-5">
             {description}

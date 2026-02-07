@@ -47,10 +47,10 @@ function SwitchComponent(
       data-state={isChecked ? "checked" : "unchecked"}
       data-disabled={disabled ? "true" : "false"}
       className={cn(
-        "inline-flex h-6 w-11 shrink-0 items-center rounded-full border border-input bg-input/30 shadow-xs transition-[color,box-shadow] outline-none",
-        "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]",
+        "inline-flex h-6 w-12 shrink-0 items-center rounded-sm border border-input bg-input/35 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)] transition-[color,box-shadow,border-color] outline-none",
+        "focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/45",
         "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
-        isChecked ? "bg-primary border-primary" : "bg-input/30",
+        isChecked ? "bg-accent border-accent" : "bg-input/40",
         className,
       )}
       onClick={handleClick}
@@ -60,8 +60,8 @@ function SwitchComponent(
       <span
         data-state={isChecked ? "checked" : "unchecked"}
         className={cn(
-          "pointer-events-none inline-block size-4 rounded-full bg-background shadow-sm transition-transform",
-          isChecked ? "translate-x-5" : "translate-x-1",
+          "pointer-events-none inline-block size-4 rounded-sm bg-background shadow-[0_4px_10px_-6px_rgba(0,0,0,0.45)] transition-transform",
+          isChecked ? "translate-x-6" : "translate-x-1",
         )}
       />
     </button>

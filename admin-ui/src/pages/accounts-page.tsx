@@ -233,10 +233,10 @@ export function AccountsPage(): React.JSX.Element {
   const toMs = String(nowMs)
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
+    <div className="space-y-6">
+      <div className="panel-slab flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">
-          <span className="text-muted-foreground text-sm">{t("accountsPage.statsWindowLabel")}</span>
+          <span className="panel-chip">{t("accountsPage.statsWindowLabel")}</span>
           <Select value={windowPreset} onValueChange={(v) => setWindowPreset(v as WindowPreset)}>
             <SelectTrigger size="sm" className="w-40">
               <SelectValue />
@@ -273,7 +273,7 @@ export function AccountsPage(): React.JSX.Element {
       ) : null}
 
       <BentoGrid className="auto-rows-min grid-cols-1 gap-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-8">
-        <MagicCard className="rounded-xl">
+        <MagicCard className="rounded-sm">
           <div className="p-4">
             <div className="text-muted-foreground text-xs">{t("nav.accounts")}</div>
             <div className="mt-1 text-2xl font-semibold">
@@ -282,7 +282,7 @@ export function AccountsPage(): React.JSX.Element {
           </div>
         </MagicCard>
 
-        <MagicCard className="rounded-xl">
+        <MagicCard className="rounded-sm">
           <div className="p-4">
             <div className="text-muted-foreground text-xs">{t("common.failed")}</div>
             <div className="mt-1 text-2xl font-semibold">
@@ -291,7 +291,7 @@ export function AccountsPage(): React.JSX.Element {
           </div>
         </MagicCard>
 
-        <MagicCard className="rounded-xl">
+        <MagicCard className="rounded-sm">
           <div className="p-4">
             <div className="text-muted-foreground text-xs">{t("nav.requests")}</div>
             <div className="mt-1 text-2xl font-semibold">
@@ -300,7 +300,7 @@ export function AccountsPage(): React.JSX.Element {
           </div>
         </MagicCard>
 
-        <MagicCard className="rounded-xl">
+        <MagicCard className="rounded-sm">
           <div className="p-4">
             <div className="text-muted-foreground text-xs">{t("common.errors")}</div>
             <div className="mt-1 text-2xl font-semibold">
@@ -309,7 +309,7 @@ export function AccountsPage(): React.JSX.Element {
           </div>
         </MagicCard>
 
-        <MagicCard className="rounded-xl">
+        <MagicCard className="rounded-sm">
           <div className="p-4">
             <div className="text-muted-foreground text-xs">{t("common.errorRate")}</div>
             <div className="mt-1 flex items-baseline gap-1 text-2xl font-semibold">
@@ -319,7 +319,7 @@ export function AccountsPage(): React.JSX.Element {
           </div>
         </MagicCard>
 
-        <MagicCard className="rounded-xl">
+        <MagicCard className="rounded-sm">
           <div className="p-4">
             <div className="text-muted-foreground text-xs">{t("common.tokensPerRequest")}</div>
             <div className="mt-1 text-2xl font-semibold">
@@ -328,7 +328,7 @@ export function AccountsPage(): React.JSX.Element {
           </div>
         </MagicCard>
 
-        <MagicCard className="rounded-xl">
+        <MagicCard className="rounded-sm">
           <div className="p-4">
             <div className="text-muted-foreground text-xs">{t("common.tokens")}</div>
             <div className="mt-1 text-2xl font-semibold">
@@ -337,7 +337,7 @@ export function AccountsPage(): React.JSX.Element {
           </div>
         </MagicCard>
 
-        <MagicCard className="rounded-xl">
+        <MagicCard className="rounded-sm">
           <div className="p-4">
             <div className="text-muted-foreground text-xs">{t("common.avgDurationMs")}</div>
             <div className="mt-1 text-2xl font-semibold">

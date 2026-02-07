@@ -41,7 +41,7 @@ function Progress({
       aria-valuemin={0}
       aria-valuemax={100}
       className={cn(
-        "bg-muted/60 relative h-1.5 w-full overflow-hidden rounded-full ring-1 ring-border/40",
+        "bg-muted/60 relative h-2 w-full overflow-hidden rounded-sm ring-1 ring-border/70",
         className
       )}
       style={{
@@ -53,17 +53,15 @@ function Progress({
       <div
         data-slot="progress-indicator"
         className={cn(
-          "relative h-full rounded-full",
+          "relative h-full rounded-sm",
           "[container-type:inline-size] overflow-hidden",
           "transition-[width] duration-700 ease-out",
-          // Magic UI vibe: animated multi-stop gradient (same tokens used by RainbowButton)
-          "bg-[linear-gradient(90deg,var(--color-1),var(--color-5),var(--color-3),var(--color-4),var(--color-2))] bg-[length:200%_100%]",
-          animated ? "animate-rainbow" : undefined,
+          "bg-[linear-gradient(90deg,var(--accent),var(--primary))]",
+          "after:absolute after:inset-0 after:bg-[linear-gradient(135deg,transparent_0%,transparent_45%,rgba(0,0,0,0.25)_45%,rgba(0,0,0,0.25)_55%,transparent_55%,transparent_100%)] after:bg-[length:14px_14px] after:opacity-40 after:content-['']",
           shimmer
             ? "before:absolute before:inset-y-0 before:left-0 before:w-3/5 before:rounded-full before:bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.55),transparent)] before:opacity-50 before:animate-shimmer-slide before:content-['']"
             : undefined,
-          // subtle glow
-          "dark:shadow-[0_0_12px_rgba(255,255,255,0.12)] shadow-[0_0_8px_rgba(0,0,0,0.06)]",
+          animated ? "shadow-[0_0_18px_rgba(0,0,0,0.2)]" : undefined,
           indicatorClassName
         )}
         style={{ width: `${safeValue}%` }}

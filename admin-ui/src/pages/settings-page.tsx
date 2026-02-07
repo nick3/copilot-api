@@ -41,9 +41,9 @@ import {
 } from "@/components/ui/card"
 
 const SETTINGS_SECTION_IDS = [
+  "aliases",
   "general",
   "reasoning",
-  "aliases",
   "prompts",
   "advanced",
 ] as const
@@ -1963,25 +1963,33 @@ function SettingsPageView({
 
   const sections = useMemo<Array<SettingsSection>>(() => {
     return [
+      { id: "aliases", label: t("settingsPage.sections.aliases") },
       { id: "general", label: t("settingsPage.sections.general") },
       { id: "reasoning", label: t("settingsPage.sections.reasoning") },
-      { id: "aliases", label: t("settingsPage.sections.aliases") },
       { id: "prompts", label: t("settingsPage.sections.prompts") },
       { id: "advanced", label: t("settingsPage.sections.advanced") },
     ]
   }, [t])
+
+  const sectionDelays = {
+    aliases: "0ms",
+    general: "80ms",
+    reasoning: "160ms",
+    prompts: "240ms",
+    advanced: "320ms",
+  } as const
 
   const { activeSection, registerSection, scrollToSection } = useActiveSection({
     sectionIds: [...SETTINGS_SECTION_IDS],
   })
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="panel-slab flex flex-wrap items-center gap-3">
         <div className="min-w-0">
-          <div className="text-lg font-semibold">{t("nav.settings")}</div>
-          <div className="text-muted-foreground text-sm">{t("settingsPage.subtitle")}</div>
+          <div className="panel-title">{t("nav.settings")}</div>
+          <div className="panel-subtitle">{t("settingsPage.subtitle")}</div>
         </div>
 
         <div className="ml-auto flex flex-col items-end gap-1 text-right">
@@ -2030,52 +2038,12 @@ function SettingsPageView({
 
         {/* Content Area */}
         <main className="space-y-6 lg:col-span-10">
-          {/* General Settings */}
-          <SettingsSectionCard
-            id="general"
-            isActive={activeSection === "general"}
-            ref={(el) => registerSection("general", el)}
-          >
-            <GeneralSettingsCard
-              hasModels={hasModels}
-              smallModelLabel={smallModelLabel}
-              smallModelValue={smallModelValue}
-              smallModelInputValue={smallModelInputValue}
-              models={models}
-              apiKeyValue={apiKeyValue}
-              envOverrideNote={envOverrideNote}
-              onSmallModelSelect={onSmallModelSelect}
-              onSmallModelInput={onSmallModelInput}
-              onApiKeyChange={onApiKeyChange}
-            />
-          </SettingsSectionCard>
-
-
-          {/* Reasoning Efforts */}
-          <SettingsSectionCard
-            id="reasoning"
-            isActive={activeSection === "reasoning"}
-            ref={(el) => registerSection("reasoning", el)}
-          >
-            <ReasoningEffortsCard
-              mode={reasoningMode}
-              json={reasoningJson}
-              jsonIssue={reasoningJsonIssue}
-              items={reasoningItems}
-              models={models}
-              onToggleMode={onReasoningToggleMode}
-              onJsonChange={onReasoningJsonChange}
-              onAddItem={onReasoningAddItem}
-              onRemoveItem={onReasoningRemoveItem}
-              onUpdateItem={onReasoningUpdateItem}
-            />
-          </SettingsSectionCard>
-
           {/* Model Aliases */}
           <SettingsSectionCard
             id="aliases"
             isActive={activeSection === "aliases"}
             ref={(el) => registerSection("aliases", el)}
+            style={{ animationDelay: sectionDelays.aliases }}
           >
             <ModelAliasesCard
               allowOriginalModelNamesForAliases={allowOriginalModelNamesForAliases}
@@ -2092,11 +2060,54 @@ function SettingsPageView({
             />
           </SettingsSectionCard>
 
+          {/* General Settings */}
+          <SettingsSectionCard
+            id="general"
+            isActive={activeSection === "general"}
+            ref={(el) => registerSection("general", el)}
+            style={{ animationDelay: sectionDelays.general }}
+          >
+            <GeneralSettingsCard
+              hasModels={hasModels}
+              smallModelLabel={smallModelLabel}
+              smallModelValue={smallModelValue}
+              smallModelInputValue={smallModelInputValue}
+              models={models}
+              apiKeyValue={apiKeyValue}
+              envOverrideNote={envOverrideNote}
+              onSmallModelSelect={onSmallModelSelect}
+              onSmallModelInput={onSmallModelInput}
+              onApiKeyChange={onApiKeyChange}
+            />
+          </SettingsSectionCard>
+
+          {/* Reasoning Efforts */}
+          <SettingsSectionCard
+            id="reasoning"
+            isActive={activeSection === "reasoning"}
+            ref={(el) => registerSection("reasoning", el)}
+            style={{ animationDelay: sectionDelays.reasoning }}
+          >
+            <ReasoningEffortsCard
+              mode={reasoningMode}
+              json={reasoningJson}
+              jsonIssue={reasoningJsonIssue}
+              items={reasoningItems}
+              models={models}
+              onToggleMode={onReasoningToggleMode}
+              onJsonChange={onReasoningJsonChange}
+              onAddItem={onReasoningAddItem}
+              onRemoveItem={onReasoningRemoveItem}
+              onUpdateItem={onReasoningUpdateItem}
+            />
+          </SettingsSectionCard>
+
           {/* Extra Prompts */}
           <SettingsSectionCard
             id="prompts"
             isActive={activeSection === "prompts"}
             ref={(el) => registerSection("prompts", el)}
+            style={{ animationDelay: sectionDelays.prompts }}
           >
             <ExtraPromptsCard
               mode={extraMode}
@@ -2117,6 +2128,7 @@ function SettingsPageView({
             id="advanced"
             isActive={activeSection === "advanced"}
             ref={(el) => registerSection("advanced", el)}
+            style={{ animationDelay: sectionDelays.advanced }}
           >
             <AdvancedSettingsCard
               loadBalancingEnabled={loadBalancingEnabled}

@@ -321,7 +321,7 @@ export function RequestsPage(): React.JSX.Element {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <Card className="gap-4 py-4">
         <CardHeader className="px-4">
           <CardTitle>{t("nav.requests")}</CardTitle>

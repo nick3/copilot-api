@@ -29,8 +29,10 @@ function NavItem({
       to={to}
       className={({ isActive }) =>
         cn(
-          "text-sm font-medium transition-colors hover:text-foreground",
-          isActive ? "text-foreground" : "text-muted-foreground"
+          "font-display relative text-[0.7rem] uppercase tracking-[0.22em] transition-colors",
+          isActive
+            ? "text-foreground after:absolute after:-bottom-2 after:left-0 after:h-[2px] after:w-full after:bg-accent after:shadow-[0_0_12px_var(--accent)] after:content-['']"
+            : "text-muted-foreground hover:text-foreground"
         )
       }
     >
@@ -63,7 +65,8 @@ export function AppShell(): React.JSX.Element {
 
   return (
     <div className="min-h-svh bg-background text-foreground">
-      <header className="bg-background/70 sticky top-0 z-50 border-b backdrop-blur">
+      <header className="bg-background/80 sticky top-0 z-50 border-b border-border/70 backdrop-blur relative">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent/70 to-transparent" />
         <div className="flex w-full items-center gap-3 px-4 py-3 lg:px-6">
           <div className="md:hidden">
             <Sheet>
@@ -75,7 +78,7 @@ export function AppShell(): React.JSX.Element {
               <SheetContent side="left" className="w-72">
                 <SheetHeader>
                   <SheetTitle>
-                    <AnimatedGradientText className="text-base font-semibold">
+                    <AnimatedGradientText className="font-display text-sm uppercase tracking-[0.32em]">
                       {t("app.title")}
                     </AnimatedGradientText>
                   </SheetTitle>
@@ -88,7 +91,7 @@ export function AppShell(): React.JSX.Element {
           </div>
 
           <div className="min-w-0">
-            <AnimatedGradientText className="text-base font-semibold">
+            <AnimatedGradientText className="font-display text-sm uppercase tracking-[0.32em]">
               {t("app.title")}
             </AnimatedGradientText>
           </div>
@@ -106,7 +109,7 @@ export function AppShell(): React.JSX.Element {
         </div>
       </header>
 
-      <main className="w-full px-4 py-4 lg:px-6 lg:py-6">
+      <main className="mx-auto w-full max-w-[1440px] px-4 py-6 lg:px-6 lg:py-8 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2">
         <Outlet />
       </main>
     </div>

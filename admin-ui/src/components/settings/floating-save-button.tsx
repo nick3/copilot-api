@@ -25,8 +25,9 @@ export function FloatingSaveButton({
   return (
     <div
       className={cn(
-        "fixed bottom-6 right-6 z-50",
-        "shadow-lg rounded-full",
+        "fixed bottom-6 right-6 z-50 relative",
+        "rounded-sm shadow-[0_22px_45px_-30px_rgba(0,0,0,0.7)]",
+        "before:absolute before:-inset-1 before:border before:border-accent/40 before:content-['']",
         className
       )}
     >
@@ -35,7 +36,7 @@ export function FloatingSaveButton({
         size="lg"
         onClick={onSave}
         disabled={!canSave}
-        className="shadow-2xl"
+        className="min-w-[200px]"
       >
         {saving
           ? t("settingsPage.saveButton.saving")
