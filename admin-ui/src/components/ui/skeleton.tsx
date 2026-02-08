@@ -11,7 +11,7 @@ function Skeleton({ className, ...props }: React.ComponentProps<"div">) {
       data-slot="skeleton"
       aria-hidden="true"
       className={cn(
-        "bg-muted rounded-md",
+        "bg-muted rounded-sm",
         effective === "off" ? undefined : "animate-pulse",
         className
       )}
