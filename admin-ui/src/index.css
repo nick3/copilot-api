@@ -234,12 +234,14 @@
     @apply rounded-sm border border-border/70 bg-card/80 px-4 py-3 shadow-[0_18px_40px_-32px_rgba(0,0,0,0.55)] backdrop-blur-sm;
   }
   .panel-title {
-    @apply font-display text-sm uppercase tracking-[0.28em] text-foreground;
+    font-family: var(--font-display);
+    @apply text-sm uppercase tracking-[0.28em] text-foreground;
   }
   .panel-subtitle {
     @apply text-muted-foreground text-xs uppercase tracking-[0.2em];
   }
   .panel-chip {
-    @apply font-display text-[0.6rem] uppercase tracking-[0.26em] text-muted-foreground;
+    font-family: var(--font-display);
+    @apply text-[0.6rem] uppercase tracking-[0.26em] text-muted-foreground;
   }
 }
