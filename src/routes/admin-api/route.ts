@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import { Hono, type Context } from "hono"
 import { randomUUID } from "node:crypto"
 import fs from "node:fs/promises"
@@ -156,6 +155,7 @@ const CONFIG_KEYS = new Set<keyof AppConfig>([
   "forceAgent",
   "compactUseSmallModel",
   "messageStartInputTokensFallback",
+  "thinkingTextFallback",
   "modelRefreshIntervalHours",
 ])
 
@@ -391,6 +391,7 @@ function applyOptionalBoolean(
     | "forceAgent"
     | "compactUseSmallModel"
     | "messageStartInputTokensFallback"
+    | "thinkingTextFallback"
     | "allowOriginalModelNamesForAliases",
   value: unknown,
 ): string | undefined {
@@ -461,6 +462,36 @@ function applyModelAliases(
   return undefined
 }
 
+type ConfigPatchHandler = (
+  next: AppConfig,
+  value: unknown,
+) => string | undefined
+
+const CONFIG_PATCH_HANDLERS: Readonly<
+  Partial<Record<keyof AppConfig, ConfigPatchHandler>>
+> = {
+  extraPrompts: applyExtraPrompts,
+  smallModel: (next, value) => applyOptionalString(next, "smallModel", value),
+  freeModelLoadBalancing: (next, value) =>
+    applyOptionalBoolean(next, "freeModelLoadBalancing", value),
+  apiKey: (next, value) => applyOptionalString(next, "apiKey", value),
+  modelReasoningEfforts: applyReasoningEfforts,
+  modelAliases: applyModelAliases,
+  allowOriginalModelNamesForAliases: (next, value) =>
+    applyOptionalBoolean(next, "allowOriginalModelNamesForAliases", value),
+  useFunctionApplyPatch: (next, value) =>
+    applyOptionalBoolean(next, "useFunctionApplyPatch", value),
+  forceAgent: (next, value) => applyOptionalBoolean(next, "forceAgent", value),
+  compactUseSmallModel: (next, value) =>
+    applyOptionalBoolean(next, "compactUseSmallModel", value),
+  messageStartInputTokensFallback: (next, value) =>
+    applyOptionalBoolean(next, "messageStartInputTokensFallback", value),
+  thinkingTextFallback: (next, value) =>
+    applyOptionalBoolean(next, "thinkingTextFallback", value),
+  modelRefreshIntervalHours: (next, value) =>
+    applyOptionalNumber(next, "modelRefreshIntervalHours", value),
+}
+
 function applyConfigPatch(
   base: AppConfig,
   input: Record<string, unknown>,
@@ -473,70 +504,12 @@ function applyConfigPatch(
       return { error: `Unknown config key: ${rawKey}` }
     }
 
-    let error: string | undefined
-
-    switch (rawKey) {
-      case "extraPrompts": {
-        error = applyExtraPrompts(next, value)
-        break
-      }
-      case "smallModel": {
-        error = applyOptionalString(next, "smallModel", value)
-        break
-      }
-      case "freeModelLoadBalancing": {
-        error = applyOptionalBoolean(next, "freeModelLoadBalancing", value)
-        break
-      }
-      case "apiKey": {
-        error = applyOptionalString(next, "apiKey", value)
-        break
-      }
-      case "modelReasoningEfforts": {
-        error = applyReasoningEfforts(next, value)
-        break
-      }
-      case "modelAliases": {
-        error = applyModelAliases(next, value)
-        break
-      }
-      case "allowOriginalModelNamesForAliases": {
-        error = applyOptionalBoolean(
-          next,
-          "allowOriginalModelNamesForAliases",
-          value,
-        )
-        break
-      }
-      case "useFunctionApplyPatch": {
-        error = applyOptionalBoolean(next, "useFunctionApplyPatch", value)
-        break
-      }
-      case "forceAgent": {
-        error = applyOptionalBoolean(next, "forceAgent", value)
-        break
-      }
-      case "compactUseSmallModel": {
-        error = applyOptionalBoolean(next, "compactUseSmallModel", value)
-        break
-      }
-      case "messageStartInputTokensFallback": {
-        error = applyOptionalBoolean(
-          next,
-          "messageStartInputTokensFallback",
-          value,
-        )
-        break
-      }
-      case "modelRefreshIntervalHours": {
-        error = applyOptionalNumber(next, "modelRefreshIntervalHours", value)
-        break
-      }
-      default: {
-        return { error: `Unsupported config key: ${rawKey}` }
-      }
+    const handler = CONFIG_PATCH_HANDLERS[key]
+    if (!handler) {
+      return { error: `Unsupported config key: ${rawKey}` }
     }
 
+    const error = handler(next, value)
     if (error) return { error }
   }
 

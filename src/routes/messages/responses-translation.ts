@@ -47,6 +47,10 @@ const MESSAGE_TYPE = "message"
 
 export const THINKING_TEXT = "Thinking..."
 
+type ThinkingTextFallbackOptions = {
+  thinkingTextFallback?: boolean
+}
+
 export const translateAnthropicMessagesToResponsesPayload = (
   payload: AnthropicMessagesPayload,
   modelOverride?: string,
@@ -351,8 +355,14 @@ const convertAnthropicToolChoice = (
 
 export const translateResponsesResultToAnthropic = (
   response: ResponsesResult,
+  options?: ThinkingTextFallbackOptions,
 ): AnthropicResponse => {
-  const contentBlocks = mapOutputToAnthropicContent(response.output)
+  const thinkingTextFallbackEnabled = options?.thinkingTextFallback ?? true
+
+  const contentBlocks = mapOutputToAnthropicContent(
+    response.output,
+    thinkingTextFallbackEnabled,
+  )
   const usage = mapResponsesUsage(response)
   let anthropicContent = fallbackContentBlocks(response.output_text)
   if (contentBlocks.length > 0) {
@@ -375,18 +385,24 @@ export const translateResponsesResultToAnthropic = (
 
 const mapOutputToAnthropicContent = (
   output: Array<ResponseOutputItem>,
+  thinkingTextFallbackEnabled: boolean,
 ): Array<AnthropicAssistantContentBlock> => {
   const contentBlocks: Array<AnthropicAssistantContentBlock> = []
 
   for (const item of output) {
     switch (item.type) {
       case "reasoning": {
-        const thinkingText = extractReasoningText(item)
-        if (thinkingText.length > 0) {
+        const signature = (item.encrypted_content ?? "") + "@" + item.id
+        const thinkingText = extractReasoningText(
+          item,
+          thinkingTextFallbackEnabled,
+        )
+
+        if (signature.length > 0 || thinkingText.length > 0) {
           contentBlocks.push({
             type: "thinking",
             thinking: thinkingText,
-            signature: (item.encrypted_content ?? "") + "@" + item.id,
+            signature,
           })
         }
         break
@@ -454,7 +470,10 @@ const combineMessageTextContent = (
   return aggregated
 }
 
-const extractReasoningText = (item: ResponseOutputReasoning): string => {
+const extractReasoningText = (
+  item: ResponseOutputReasoning,
+  thinkingTextFallbackEnabled: boolean,
+): string => {
   const segments: Array<string> = []
 
   const collectFromBlocks = (blocks?: Array<ResponseReasoningBlock>) => {
@@ -472,7 +491,7 @@ const extractReasoningText = (item: ResponseOutputReasoning): string => {
 
   // Compatible with opencode, it will filter out blocks where the thinking text is empty, so we add a default thinking text here
   if (!item.summary || item.summary.length === 0) {
-    return THINKING_TEXT
+    return thinkingTextFallbackEnabled ? THINKING_TEXT : ""
   }
 
   collectFromBlocks(item.summary)

@@ -18,6 +18,7 @@ export interface AppConfig {
   forceAgent?: boolean
   compactUseSmallModel?: boolean
   messageStartInputTokensFallback?: boolean
+  thinkingTextFallback?: boolean
   modelRefreshIntervalHours?: number
 }
 
@@ -42,6 +43,7 @@ const defaultConfig: AppConfig = {
   useFunctionApplyPatch: true,
   compactUseSmallModel: true,
   messageStartInputTokensFallback: false,
+  thinkingTextFallback: true,
   modelRefreshIntervalHours: 24,
 }
 
@@ -430,6 +432,11 @@ export function getModelRefreshIntervalMs(): number {
 export function isMessageStartInputTokensFallbackEnabled(): boolean {
   const config = getConfig()
   return config.messageStartInputTokensFallback ?? false
+}
+
+export function isThinkingTextFallbackEnabled(): boolean {
+  const config = getConfig()
+  return config.thinkingTextFallback ?? true
 }
 
 export function getReasoningEffortForModel(

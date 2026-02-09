@@ -343,7 +343,9 @@
       "compactUseSmallModelLabel": "compact 使用小模型",
       "compactUseSmallModelHint": "启用后，compact 请求使用配置的小模型；否则使用请求的模型。",
       "messageStartInputTokensFallbackLabel": "在流开始时估算输入 tokens",
-      "messageStartInputTokensFallbackHint": "启用后，当上游 usage 不可用时，会估算 message_start 的 input tokens。"
+      "messageStartInputTokensFallbackHint": "启用后，当上游 usage 不可用时，会估算 message_start 的 input tokens。",
+      "thinkingTextFallbackLabel": "自动补齐空 thinking（Thinking...）",
+      "thinkingTextFallbackHint": "启用后，当上游返回 signature/opaque 但缺少 thinking 文本时，会将 thinking 填充为“Thinking...”，以兼容可能丢弃空 thinking block 的客户端。关闭后将返回空 thinking（部分客户端可能会丢弃该 block，并可能影响缓存命中）。"
     }
   },
   "notFound": {

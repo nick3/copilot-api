@@ -11,6 +11,15 @@ import {
 import { THINKING_TEXT } from "./non-stream-translation"
 import { mapOpenAIStopReasonToAnthropic } from "./utils"
 
+type ThinkingTextFallbackOptions = {
+  thinkingTextFallback?: boolean
+}
+
+type StreamTranslationContext = {
+  events: Array<AnthropicStreamEventData>
+  thinkingTextFallbackEnabled: boolean
+}
+
 function isToolBlockOpen(state: AnthropicStreamState): boolean {
   if (!state.contentBlockOpen) {
     return false
@@ -24,11 +33,18 @@ function isToolBlockOpen(state: AnthropicStreamState): boolean {
 export function translateChunkToAnthropicEvents(
   chunk: ChatCompletionChunk,
   state: AnthropicStreamState,
+  options?: ThinkingTextFallbackOptions,
 ): Array<AnthropicStreamEventData> {
   const events: Array<AnthropicStreamEventData> = []
 
   if (chunk.choices.length === 0) {
     return events
+  }
+
+  const thinkingTextFallbackEnabled = options?.thinkingTextFallback ?? true
+  const context: StreamTranslationContext = {
+    events,
+    thinkingTextFallbackEnabled,
   }
 
   const choice = chunk.choices[0]
@@ -40,9 +56,9 @@ export function translateChunkToAnthropicEvents(
 
   handleContent(delta, state, events)
 
-  handleToolCalls(delta, state, events)
+  handleToolCalls(delta, state, context)
 
-  handleFinish(choice, state, { events, chunk })
+  handleFinish(choice, state, { ...context, chunk })
 
   return events
 }
@@ -53,6 +69,7 @@ function handleFinish(
   context: {
     events: Array<AnthropicStreamEventData>
     chunk: ChatCompletionChunk
+    thinkingTextFallbackEnabled: boolean
   },
 ) {
   const { events, chunk } = context
@@ -66,7 +83,7 @@ function handleFinish(
       state.contentBlockOpen = false
       state.contentBlockIndex++
       if (!toolBlockOpen) {
-        handleReasoningOpaque(choice.delta, events, state)
+        handleReasoningOpaque(choice.delta, state, context)
       }
     }
 
@@ -99,12 +116,13 @@ function handleFinish(
 function handleToolCalls(
   delta: Delta,
   state: AnthropicStreamState,
-  events: Array<AnthropicStreamEventData>,
+  context: StreamTranslationContext,
 ) {
+  const { events } = context
   if (delta.tool_calls && delta.tool_calls.length > 0) {
     closeThinkingBlockIfOpen(state, events)
 
-    handleReasoningOpaqueInToolCalls(state, events, delta)
+    handleReasoningOpaqueInToolCalls(state, context, delta)
 
     for (const toolCall of delta.tool_calls) {
       if (toolCall.id && toolCall.function?.name) {
@@ -160,9 +178,10 @@ function handleToolCalls(
 
 function handleReasoningOpaqueInToolCalls(
   state: AnthropicStreamState,
-  events: Array<AnthropicStreamEventData>,
+  context: StreamTranslationContext,
   delta: Delta,
 ) {
+  const { events } = context
   if (state.contentBlockOpen && !isToolBlockOpen(state)) {
     events.push({
       type: "content_block_stop",
@@ -171,7 +190,7 @@ function handleReasoningOpaqueInToolCalls(
     state.contentBlockIndex++
     state.contentBlockOpen = false
   }
-  handleReasoningOpaque(delta, events, state)
+  handleReasoningOpaque(delta, state, context)
 }
 
 function handleContent(
@@ -288,27 +307,33 @@ function handleMessageStart(
 
 function handleReasoningOpaque(
   delta: Delta,
-  events: Array<AnthropicStreamEventData>,
   state: AnthropicStreamState,
+  context: StreamTranslationContext,
 ) {
+  const { events, thinkingTextFallbackEnabled } = context
   if (delta.reasoning_opaque && delta.reasoning_opaque.length > 0) {
-    events.push(
-      {
-        type: "content_block_start",
-        index: state.contentBlockIndex,
-        content_block: {
-          type: "thinking",
-          thinking: "",
-        },
+    events.push({
+      type: "content_block_start",
+      index: state.contentBlockIndex,
+      content_block: {
+        type: "thinking",
+        thinking: "",
       },
-      {
+    })
+
+    // Compatible with opencode, it will filter out blocks where the thinking text is empty, so we add a default thinking text here
+    if (thinkingTextFallbackEnabled) {
+      events.push({
         type: "content_block_delta",
         index: state.contentBlockIndex,
         delta: {
           type: "thinking_delta",
-          thinking: THINKING_TEXT, // Compatible with opencode, it will filter out blocks where the thinking text is empty, so we add a default thinking text here
+          thinking: THINKING_TEXT,
         },
-      },
+      })
+    }
+
+    events.push(
       {
         type: "content_block_delta",
         index: state.contentBlockIndex,

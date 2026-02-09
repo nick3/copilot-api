@@ -343,7 +343,9 @@
       "compactUseSmallModelLabel": "Compact uses small model",
       "compactUseSmallModelHint": "When enabled, compact requests use the configured smallModel; otherwise they use the requested model.",
       "messageStartInputTokensFallbackLabel": "Estimate input tokens at stream start",
-      "messageStartInputTokensFallbackHint": "When enabled, estimates message_start input tokens when upstream usage is unavailable."
+      "messageStartInputTokensFallbackHint": "When enabled, estimates message_start input tokens when upstream usage is unavailable.",
+      "thinkingTextFallbackLabel": "Fill missing thinking text (Thinking...)",
+      "thinkingTextFallbackHint": "When enabled, if upstream returns a thinking signature/opaque without any summary/text, the server fills thinking with \"Thinking...\" for client compatibility. When disabled, thinking text remains empty (some clients may drop empty thinking blocks, potentially affecting cache reuse)."
     }
   },
   "notFound": {

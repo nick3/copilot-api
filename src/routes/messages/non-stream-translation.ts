@@ -29,6 +29,10 @@ import { mapOpenAIStopReasonToAnthropic } from "./utils"
 // Compatible with opencode, it will filter out blocks where the thinking text is empty, so we need add a default thinking text
 export const THINKING_TEXT = "Thinking..."
 
+type ThinkingTextFallbackOptions = {
+  thinkingTextFallback?: boolean
+}
+
 // Payload translation
 export function translateToOpenAI(
   payload: AnthropicMessagesPayload,
@@ -358,7 +362,10 @@ function translateAnthropicToolChoiceToOpenAI(
 
 export function translateToAnthropic(
   response: ChatCompletionResponse,
+  options?: ThinkingTextFallbackOptions,
 ): AnthropicResponse {
+  const thinkingTextFallbackEnabled = options?.thinkingTextFallback ?? true
+
   // Merge content from all choices
   const assistantContentBlocks: Array<AnthropicAssistantContentBlock> = []
   let stopReason = response.choices[0]?.finish_reason ?? null
@@ -369,6 +376,7 @@ export function translateToAnthropic(
     const thinkBlocks = getAnthropicThinkBlocks(
       choice.message.reasoning_text,
       choice.message.reasoning_opaque,
+      thinkingTextFallbackEnabled,
     )
     const toolUseBlocks = getAnthropicToolUseBlocks(choice.message.tool_calls)
 
@@ -388,18 +396,27 @@ export function translateToAnthropic(
     content: assistantContentBlocks,
     stop_reason: mapOpenAIStopReasonToAnthropic(stopReason),
     stop_sequence: null,
-    usage: {
-      input_tokens:
-        (response.usage?.prompt_tokens ?? 0)
-        - (response.usage?.prompt_tokens_details?.cached_tokens ?? 0),
-      output_tokens: response.usage?.completion_tokens ?? 0,
-      ...(response.usage?.prompt_tokens_details?.cached_tokens
-        !== undefined && {
-        cache_read_input_tokens:
-          response.usage.prompt_tokens_details.cached_tokens,
-      }),
-    },
+    usage: mapChatCompletionsUsage(response.usage),
   }
+}
+
+function mapChatCompletionsUsage(
+  usage: ChatCompletionResponse["usage"],
+): AnthropicResponse["usage"] {
+  const promptTokens = usage?.prompt_tokens ?? 0
+  const cachedTokens = usage?.prompt_tokens_details?.cached_tokens
+  const completionTokens = usage?.completion_tokens ?? 0
+
+  const result: AnthropicResponse["usage"] = {
+    input_tokens: promptTokens - (cachedTokens ?? 0),
+    output_tokens: completionTokens,
+  }
+
+  if (cachedTokens !== undefined) {
+    result.cache_read_input_tokens = cachedTokens
+  }
+
+  return result
 }
 
 function getAnthropicTextBlocks(
@@ -421,6 +438,7 @@ function getAnthropicTextBlocks(
 function getAnthropicThinkBlocks(
   reasoningText: string | null | undefined,
   reasoningOpaque: string | null | undefined,
+  thinkingTextFallbackEnabled: boolean,
 ): Array<AnthropicThinkingBlock> {
   if (reasoningText && reasoningText.length > 0) {
     return [
@@ -435,7 +453,8 @@ function getAnthropicThinkBlocks(
     return [
       {
         type: "thinking",
-        thinking: THINKING_TEXT, // Compatible with opencode, it will filter out blocks where the thinking text is empty, so we add a default thinking text here
+        // Compatible with opencode, it will filter out blocks where the thinking text is empty, so we add a default thinking text here
+        thinking: thinkingTextFallbackEnabled ? THINKING_TEXT : "",
         signature: reasoningOpaque,
       },
     ]

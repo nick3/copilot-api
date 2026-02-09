@@ -101,6 +101,7 @@ export type AdminConfig = {
   forceAgent?: boolean
   compactUseSmallModel?: boolean
   messageStartInputTokensFallback?: boolean
+  thinkingTextFallback?: boolean
   modelRefreshIntervalHours?: number
 }
 

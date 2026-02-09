@@ -1343,6 +1343,7 @@ type AdvancedSettingsCardProps = {
   forceAgent: boolean
   compactUseSmallModel: boolean
   messageStartInputTokensFallback: boolean
+  thinkingTextFallback: boolean
   onToggleLoadBalancing: (value: boolean) => void
   onModelRefreshIntervalChange: (value: string) => void
   onToggleAllowOriginalModelNamesForAliases: (value: boolean) => void
@@ -1350,6 +1351,7 @@ type AdvancedSettingsCardProps = {
   onToggleForceAgent: (value: boolean) => void
   onToggleCompactUseSmallModel: (value: boolean) => void
   onToggleMessageStartInputTokensFallback: (value: boolean) => void
+  onToggleThinkingTextFallback: (value: boolean) => void
 }
 
 function AdvancedSettingsCard({
@@ -1361,6 +1363,7 @@ function AdvancedSettingsCard({
   forceAgent,
   compactUseSmallModel,
   messageStartInputTokensFallback,
+  thinkingTextFallback,
   onToggleLoadBalancing,
   onModelRefreshIntervalChange,
   onToggleAllowOriginalModelNamesForAliases,
@@ -1368,6 +1371,7 @@ function AdvancedSettingsCard({
   onToggleForceAgent,
   onToggleCompactUseSmallModel,
   onToggleMessageStartInputTokensFallback,
+  onToggleThinkingTextFallback,
 }: AdvancedSettingsCardProps): React.JSX.Element {
   const { t } = useTranslation()
 
@@ -1485,6 +1489,21 @@ function AdvancedSettingsCard({
             onCheckedChange={onToggleMessageStartInputTokensFallback}
           />
         </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="text-sm font-medium">
+              {t("settingsPage.advanced.thinkingTextFallbackLabel")}
+            </div>
+            <div className="text-muted-foreground text-xs">
+              {t("settingsPage.advanced.thinkingTextFallbackHint")}
+            </div>
+          </div>
+          <Switch
+            checked={thinkingTextFallback}
+            onCheckedChange={onToggleThinkingTextFallback}
+          />
+        </div>
       </CardContent>
     </Card>
   )
@@ -1545,11 +1564,13 @@ type SettingsPageViewProps = {
   forceAgent: boolean
   compactUseSmallModel: boolean
   messageStartInputTokensFallback: boolean
+  thinkingTextFallback: boolean
   onAllowOriginalModelNamesForAliasesToggle: (value: boolean) => void
   onUseFunctionApplyPatchToggle: (value: boolean) => void
   onForceAgentToggle: (value: boolean) => void
   onCompactUseSmallModelToggle: (value: boolean) => void
   onMessageStartInputTokensFallbackToggle: (value: boolean) => void
+  onThinkingTextFallbackToggle: (value: boolean) => void
 }
 
 function useSettingsPageState(): SettingsPageViewProps {
@@ -1804,6 +1825,13 @@ function useSettingsPageState(): SettingsPageViewProps {
     [setDraft],
   )
 
+  const handleThinkingTextFallbackToggle = useCallback(
+    (value: boolean) => {
+      setDraft((prev) => ({ ...prev, thinkingTextFallback: value }))
+    },
+    [setDraft],
+  )
+
   const hasModels = models.length > 0
   const smallModelValue = draft.smallModel ? draft.smallModel : "__default__"
   const canSave =
@@ -1832,6 +1860,7 @@ function useSettingsPageState(): SettingsPageViewProps {
   const compactUseSmallModel = draft.compactUseSmallModel ?? true
   const messageStartInputTokensFallback =
     draft.messageStartInputTokensFallback ?? false
+  const thinkingTextFallback = draft.thinkingTextFallback ?? true
 
   return {
     loading,
@@ -1888,6 +1917,7 @@ function useSettingsPageState(): SettingsPageViewProps {
     forceAgent,
     compactUseSmallModel,
     messageStartInputTokensFallback,
+    thinkingTextFallback,
     onAllowOriginalModelNamesForAliasesToggle:
       handleAllowOriginalModelNamesForAliasesToggle,
     onUseFunctionApplyPatchToggle: handleUseFunctionApplyPatchToggle,
@@ -1895,6 +1925,7 @@ function useSettingsPageState(): SettingsPageViewProps {
     onCompactUseSmallModelToggle: handleCompactUseSmallModelToggle,
     onMessageStartInputTokensFallbackToggle:
       handleMessageStartInputTokensFallbackToggle,
+    onThinkingTextFallbackToggle: handleThinkingTextFallbackToggle,
   }
 }
 
@@ -1953,11 +1984,13 @@ function SettingsPageView({
   forceAgent,
   compactUseSmallModel,
   messageStartInputTokensFallback,
+  thinkingTextFallback,
   onAllowOriginalModelNamesForAliasesToggle,
   onUseFunctionApplyPatchToggle,
   onForceAgentToggle,
   onCompactUseSmallModelToggle,
   onMessageStartInputTokensFallbackToggle,
+  onThinkingTextFallbackToggle,
 }: SettingsPageViewProps): React.JSX.Element {
   const { t } = useTranslation()
 
@@ -2127,6 +2160,7 @@ function SettingsPageView({
               forceAgent={forceAgent}
               compactUseSmallModel={compactUseSmallModel}
               messageStartInputTokensFallback={messageStartInputTokensFallback}
+              thinkingTextFallback={thinkingTextFallback}
               onToggleLoadBalancing={onLoadBalancingToggle}
               onModelRefreshIntervalChange={onModelRefreshIntervalChange}
               onToggleAllowOriginalModelNamesForAliases={
@@ -2138,6 +2172,7 @@ function SettingsPageView({
               onToggleMessageStartInputTokensFallback={
                 onMessageStartInputTokensFallbackToggle
               }
+              onToggleThinkingTextFallback={onThinkingTextFallbackToggle}
             />
           </SettingsSectionCard>
         </main>

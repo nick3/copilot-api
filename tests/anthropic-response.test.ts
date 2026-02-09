@@ -67,6 +67,154 @@ function isValidAnthropicStreamEvent(payload: unknown): boolean {
   return anthropicStreamEventSchema.safeParse(payload).success
 }
 
+const OPENAI_SIMPLE_TEXT_STREAM: Array<ChatCompletionChunk> = [
+  {
+    id: "cmpl-1",
+    object: "chat.completion.chunk",
+    created: 1677652288,
+    model: "gpt-4o-2024-05-13",
+    choices: [
+      {
+        index: 0,
+        delta: { role: "assistant" },
+        finish_reason: null,
+        logprobs: null,
+      },
+    ],
+  },
+  {
+    id: "cmpl-1",
+    object: "chat.completion.chunk",
+    created: 1677652288,
+    model: "gpt-4o-2024-05-13",
+    choices: [
+      {
+        index: 0,
+        delta: { content: "Hello" },
+        finish_reason: null,
+        logprobs: null,
+      },
+    ],
+  },
+  {
+    id: "cmpl-1",
+    object: "chat.completion.chunk",
+    created: 1677652288,
+    model: "gpt-4o-2024-05-13",
+    choices: [
+      {
+        index: 0,
+        delta: { content: " there" },
+        finish_reason: null,
+        logprobs: null,
+      },
+    ],
+  },
+  {
+    id: "cmpl-1",
+    object: "chat.completion.chunk",
+    created: 1677652288,
+    model: "gpt-4o-2024-05-13",
+    choices: [{ index: 0, delta: {}, finish_reason: "stop", logprobs: null }],
+  },
+]
+
+const OPENAI_TOOL_CALL_STREAM: Array<ChatCompletionChunk> = [
+  {
+    id: "cmpl-2",
+    object: "chat.completion.chunk",
+    created: 1677652288,
+    model: "gpt-4o-2024-05-13",
+    choices: [
+      {
+        index: 0,
+        delta: { role: "assistant" },
+        finish_reason: null,
+        logprobs: null,
+      },
+    ],
+  },
+  {
+    id: "cmpl-2",
+    object: "chat.completion.chunk",
+    created: 1677652288,
+    model: "gpt-4o-2024-05-13",
+    choices: [
+      {
+        index: 0,
+        delta: {
+          tool_calls: [
+            {
+              index: 0,
+              id: "call_xyz",
+              type: "function",
+              function: { name: "get_weather", arguments: "" },
+            },
+          ],
+        },
+        finish_reason: null,
+        logprobs: null,
+      },
+    ],
+  },
+  {
+    id: "cmpl-2",
+    object: "chat.completion.chunk",
+    created: 1677652288,
+    model: "gpt-4o-2024-05-13",
+    choices: [
+      {
+        index: 0,
+        delta: {
+          tool_calls: [{ index: 0, function: { arguments: '{"loc' } }],
+        },
+        finish_reason: null,
+        logprobs: null,
+      },
+    ],
+  },
+  {
+    id: "cmpl-2",
+    object: "chat.completion.chunk",
+    created: 1677652288,
+    model: "gpt-4o-2024-05-13",
+    choices: [
+      {
+        index: 0,
+        delta: {
+          tool_calls: [
+            { index: 0, function: { arguments: 'ation": "Paris"}' } },
+          ],
+        },
+        finish_reason: null,
+        logprobs: null,
+      },
+    ],
+  },
+  {
+    id: "cmpl-2",
+    object: "chat.completion.chunk",
+    created: 1677652288,
+    model: "gpt-4o-2024-05-13",
+    choices: [
+      { index: 0, delta: {}, finish_reason: "tool_calls", logprobs: null },
+    ],
+  },
+]
+
+function createBaseStreamState(
+  overrides: Partial<AnthropicStreamState> = {},
+): AnthropicStreamState {
+  return {
+    messageStartSent: false,
+    contentBlockIndex: 0,
+    contentBlockOpen: false,
+    toolCalls: {},
+    thinkingBlockOpen: false,
+    ...overrides,
+  }
+}
+
 describe("OpenAI to Anthropic Non-Streaming Response Translation", () => {
   test("should translate a simple text response correctly", () => {
     const openAIResponse: ChatCompletionResponse = {
@@ -189,78 +337,115 @@ describe("OpenAI to Anthropic Non-Streaming Response Translation", () => {
     expect(isValidAnthropicResponse(anthropicResponse)).toBe(true)
     expect(anthropicResponse.stop_reason).toBe("max_tokens")
   })
+
+  test("should optionally fill missing thinking text when only reasoning_opaque is present", () => {
+    const openAIResponse: ChatCompletionResponse = {
+      id: "chatcmpl-thinking",
+      object: "chat.completion",
+      created: 1677652288,
+      model: "gpt-4o-2024-05-13",
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content: "Hello",
+            reasoning_opaque: "opaque_sig",
+          },
+          finish_reason: "stop",
+          logprobs: null,
+        },
+      ],
+      usage: {
+        prompt_tokens: 1,
+        completion_tokens: 1,
+        total_tokens: 2,
+      },
+    }
+
+    const withFallback = translateToAnthropic(openAIResponse)
+    expect(withFallback.content[0]?.type).toBe("thinking")
+    if (withFallback.content[0]?.type === "thinking") {
+      expect(withFallback.content[0].thinking).toBe("Thinking...")
+      expect(withFallback.content[0].signature).toBe("opaque_sig")
+    }
+
+    const withoutFallback = translateToAnthropic(openAIResponse, {
+      thinkingTextFallback: false,
+    })
+    expect(withoutFallback.content[0]?.type).toBe("thinking")
+    if (withoutFallback.content[0]?.type === "thinking") {
+      expect(withoutFallback.content[0].thinking).toBe("")
+      expect(withoutFallback.content[0].signature).toBe("opaque_sig")
+    }
+  })
 })
 
 describe("OpenAI to Anthropic Streaming Response Translation", () => {
   test("should translate a simple text stream correctly", () => {
-    const openAIStream: Array<ChatCompletionChunk> = [
-      {
-        id: "cmpl-1",
-        object: "chat.completion.chunk",
-        created: 1677652288,
-        model: "gpt-4o-2024-05-13",
-        choices: [
-          {
-            index: 0,
-            delta: { role: "assistant" },
-            finish_reason: null,
-            logprobs: null,
-          },
-        ],
-      },
-      {
-        id: "cmpl-1",
-        object: "chat.completion.chunk",
-        created: 1677652288,
-        model: "gpt-4o-2024-05-13",
-        choices: [
-          {
-            index: 0,
-            delta: { content: "Hello" },
-            finish_reason: null,
-            logprobs: null,
-          },
-        ],
-      },
-      {
-        id: "cmpl-1",
-        object: "chat.completion.chunk",
-        created: 1677652288,
-        model: "gpt-4o-2024-05-13",
-        choices: [
-          {
-            index: 0,
-            delta: { content: " there" },
-            finish_reason: null,
-            logprobs: null,
-          },
-        ],
-      },
-      {
-        id: "cmpl-1",
-        object: "chat.completion.chunk",
-        created: 1677652288,
-        model: "gpt-4o-2024-05-13",
-        choices: [
-          { index: 0, delta: {}, finish_reason: "stop", logprobs: null },
-        ],
-      },
-    ]
-
-    const streamState: AnthropicStreamState = {
-      messageStartSent: false,
-      contentBlockIndex: 0,
-      contentBlockOpen: false,
-      toolCalls: {},
-      thinkingBlockOpen: false,
-    }
-    const translatedStream = openAIStream.flatMap((chunk) =>
+    const streamState = createBaseStreamState()
+    const translatedStream = OPENAI_SIMPLE_TEXT_STREAM.flatMap((chunk) =>
       translateChunkToAnthropicEvents(chunk, streamState),
     )
 
     for (const event of translatedStream) {
       expect(isValidAnthropicStreamEvent(event)).toBe(true)
     }
+  })
+
+  test("should optionally fill missing thinking delta when only reasoning_opaque is present", () => {
+    const chunk: ChatCompletionChunk = {
+      id: "cmpl-thinking",
+      object: "chat.completion.chunk",
+      created: 1677652288,
+      model: "gpt-4o-2024-05-13",
+      choices: [
+        {
+          index: 0,
+          delta: { content: "Hello", reasoning_opaque: "opaque_sig" },
+          finish_reason: "stop",
+          logprobs: null,
+        },
+      ],
+    }
+
+    const stateWithFallback = createBaseStreamState()
+
+    const eventsWithFallback = translateChunkToAnthropicEvents(
+      chunk,
+      stateWithFallback,
+    )
+    expect(
+      eventsWithFallback.some(
+        (event) =>
+          event.type === "content_block_delta"
+          && event.delta.type === "thinking_delta"
+          && event.delta.thinking === "Thinking...",
+      ),
+    ).toBe(true)
+
+    const stateWithoutFallback = createBaseStreamState()
+
+    const eventsWithoutFallback = translateChunkToAnthropicEvents(
+      chunk,
+      stateWithoutFallback,
+      { thinkingTextFallback: false },
+    )
+    expect(
+      eventsWithoutFallback.some(
+        (event) =>
+          event.type === "content_block_delta"
+          && event.delta.type === "thinking_delta",
+      ),
+    ).toBe(false)
+    expect(
+      eventsWithoutFallback.some(
+        (event) =>
+          event.type === "content_block_delta"
+          && event.delta.type === "signature_delta"
+          && event.delta.signature === "opaque_sig",
+      ),
+    ).toBe(true)
   })
 
   test("should use historical usage when upstream usage is missing", () => {
@@ -279,15 +464,10 @@ describe("OpenAI to Anthropic Streaming Response Translation", () => {
       ],
     }
 
-    const streamState: AnthropicStreamState = {
-      messageStartSent: false,
-      contentBlockIndex: 0,
-      contentBlockOpen: false,
-      toolCalls: {},
-      thinkingBlockOpen: false,
+    const streamState = createBaseStreamState({
       historicalInputTokens: 42,
       historicalCachedInputTokens: 7,
-    }
+    })
 
     const events = translateChunkToAnthropicEvents(chunk, streamState)
     const messageStart = events.find((event) => event.type === "message_start")
@@ -300,98 +480,8 @@ describe("OpenAI to Anthropic Streaming Response Translation", () => {
   })
 
   test("should translate a stream with tool calls", () => {
-    const openAIStream: Array<ChatCompletionChunk> = [
-      {
-        id: "cmpl-2",
-        object: "chat.completion.chunk",
-        created: 1677652288,
-        model: "gpt-4o-2024-05-13",
-        choices: [
-          {
-            index: 0,
-            delta: { role: "assistant" },
-            finish_reason: null,
-            logprobs: null,
-          },
-        ],
-      },
-      {
-        id: "cmpl-2",
-        object: "chat.completion.chunk",
-        created: 1677652288,
-        model: "gpt-4o-2024-05-13",
-        choices: [
-          {
-            index: 0,
-            delta: {
-              tool_calls: [
-                {
-                  index: 0,
-                  id: "call_xyz",
-                  type: "function",
-                  function: { name: "get_weather", arguments: "" },
-                },
-              ],
-            },
-            finish_reason: null,
-            logprobs: null,
-          },
-        ],
-      },
-      {
-        id: "cmpl-2",
-        object: "chat.completion.chunk",
-        created: 1677652288,
-        model: "gpt-4o-2024-05-13",
-        choices: [
-          {
-            index: 0,
-            delta: {
-              tool_calls: [{ index: 0, function: { arguments: '{"loc' } }],
-            },
-            finish_reason: null,
-            logprobs: null,
-          },
-        ],
-      },
-      {
-        id: "cmpl-2",
-        object: "chat.completion.chunk",
-        created: 1677652288,
-        model: "gpt-4o-2024-05-13",
-        choices: [
-          {
-            index: 0,
-            delta: {
-              tool_calls: [
-                { index: 0, function: { arguments: 'ation": "Paris"}' } },
-              ],
-            },
-            finish_reason: null,
-            logprobs: null,
-          },
-        ],
-      },
-      {
-        id: "cmpl-2",
-        object: "chat.completion.chunk",
-        created: 1677652288,
-        model: "gpt-4o-2024-05-13",
-        choices: [
-          { index: 0, delta: {}, finish_reason: "tool_calls", logprobs: null },
-        ],
-      },
-    ]
-
-    // Streaming translation requires state
-    const streamState: AnthropicStreamState = {
-      messageStartSent: false,
-      contentBlockIndex: 0,
-      contentBlockOpen: false,
-      toolCalls: {},
-      thinkingBlockOpen: false,
-    }
-    const translatedStream = openAIStream.flatMap((chunk) =>
+    const streamState = createBaseStreamState()
+    const translatedStream = OPENAI_TOOL_CALL_STREAM.flatMap((chunk) =>
       translateChunkToAnthropicEvents(chunk, streamState),
     )
 

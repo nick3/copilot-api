@@ -13,6 +13,7 @@ import {
   getReasoningEffortForModel,
   getSmallModel,
   isMessageStartInputTokensFallbackEnabled,
+  isThinkingTextFallbackEnabled,
   shouldCompactUseSmallModel,
 } from "~/lib/config"
 import {
@@ -580,7 +581,10 @@ async function handleChatCompletionsNonStreaming(params: {
       JSON.stringify(response),
     )
 
-    const anthropicResponse = translateToAnthropic(response)
+    const thinkingTextFallbackEnabled = isThinkingTextFallbackEnabled()
+    const anthropicResponse = translateToAnthropic(response, {
+      thinkingTextFallback: thinkingTextFallbackEnabled,
+    })
     logger.debug(
       "Translated Anthropic response:",
       JSON.stringify(anthropicResponse),
@@ -634,6 +638,8 @@ async function streamChatCompletionsAndLog(params: {
   const { stream, response, instr, estimatedInputTokens, historicalUsage } =
     params
 
+  const thinkingTextFallbackEnabled = isThinkingTextFallbackEnabled()
+
   let ttfbMs: number | undefined
   let lastUsage: NormalizedUsage = {}
 
@@ -679,7 +685,9 @@ async function streamChatCompletionsAndLog(params: {
         lastUsage = normalizeChatCompletionsUsage(chunk.usage)
       }
 
-      const events = translateChunkToAnthropicEvents(chunk, streamState)
+      const events = translateChunkToAnthropicEvents(chunk, streamState, {
+        thinkingTextFallback: thinkingTextFallbackEnabled,
+      })
       for (const event of events) {
         logger.debug("Translated Anthropic event:", JSON.stringify(event))
 
@@ -784,7 +792,10 @@ async function handleResponsesNonStreaming(params: {
       JSON.stringify(result).slice(-400),
     )
 
-    const anthropicResponse = translateResponsesResultToAnthropic(result)
+    const thinkingTextFallbackEnabled = isThinkingTextFallbackEnabled()
+    const anthropicResponse = translateResponsesResultToAnthropic(result, {
+      thinkingTextFallback: thinkingTextFallbackEnabled,
+    })
     logger.debug(
       "Translated Anthropic response:",
       JSON.stringify(anthropicResponse),
@@ -862,6 +873,8 @@ async function streamResponsesAndLog(params: {
   const { stream, response, instr, estimatedInputTokens, historicalUsage } =
     params
 
+  const thinkingTextFallbackEnabled = isThinkingTextFallbackEnabled()
+
   let ttfbMs: number | undefined
   let lastUsage: NormalizedUsage = {}
 
@@ -900,7 +913,9 @@ async function streamResponsesAndLog(params: {
         lastUsage = u
       }
 
-      const events = translateResponsesStreamEvent(parsed, streamState)
+      const events = translateResponsesStreamEvent(parsed, streamState, {
+        thinkingTextFallback: thinkingTextFallbackEnabled,
+      })
       for (const event of events) {
         const eventData = JSON.stringify(event)
         logger.debug("Translated Anthropic event:", eventData)

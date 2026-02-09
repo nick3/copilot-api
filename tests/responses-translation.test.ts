@@ -157,4 +157,72 @@ describe("translateResponsesResultToAnthropic", () => {
       expect(textBlock.text).toBe("Added the task to your todo list.")
     }
   })
+
+  it("optionally fills missing thinking text when reasoning summary is empty", () => {
+    const responsesResult: ResponsesResult = {
+      id: "resp_thinking",
+      object: "response",
+      created_at: 0,
+      model: "gpt-4.1",
+      output: [
+        {
+          id: "reason_empty",
+          type: "reasoning",
+          summary: [],
+          status: "completed",
+          encrypted_content: "encrypted_reasoning_content",
+        },
+        {
+          id: "message_1",
+          type: "message",
+          role: "assistant",
+          status: "completed",
+          content: [
+            {
+              type: "output_text",
+              text: "Done.",
+              annotations: [],
+            },
+          ],
+        },
+      ],
+      output_text: "Done.",
+      status: "completed",
+      usage: {
+        input_tokens: 10,
+        output_tokens: 5,
+        total_tokens: 15,
+      },
+      error: null,
+      incomplete_details: null,
+      instructions: null,
+      metadata: null,
+      parallel_tool_calls: false,
+      temperature: null,
+      tool_choice: null,
+      tools: [],
+      top_p: null,
+    }
+
+    const withFallback = translateResponsesResultToAnthropic(responsesResult)
+    expect(withFallback.content[0]?.type).toBe("thinking")
+    if (withFallback.content[0]?.type === "thinking") {
+      expect(withFallback.content[0].thinking).toBe("Thinking...")
+      expect(withFallback.content[0].signature).toBe(
+        "encrypted_reasoning_content@reason_empty",
+      )
+    }
+
+    const withoutFallback = translateResponsesResultToAnthropic(
+      responsesResult,
+      { thinkingTextFallback: false },
+    )
+    expect(withoutFallback.content[0]?.type).toBe("thinking")
+    if (withoutFallback.content[0]?.type === "thinking") {
+      expect(withoutFallback.content[0].thinking).toBe("")
+      expect(withoutFallback.content[0].signature).toBe(
+        "encrypted_reasoning_content@reason_empty",
+      )
+    }
+  })
 })

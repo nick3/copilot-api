@@ -24,6 +24,10 @@ import {
 
 const MAX_CONSECUTIVE_FUNCTION_CALL_WHITESPACE = 20
 
+type ThinkingTextFallbackOptions = {
+  thinkingTextFallback?: boolean
+}
+
 class FunctionCallArgumentsValidationError extends Error {
   constructor(message: string) {
     super(message)
@@ -91,7 +95,9 @@ export const createResponsesStreamState = (): ResponsesStreamState => ({
 export const translateResponsesStreamEvent = (
   rawEvent: ResponseStreamEvent,
   state: ResponsesStreamState,
+  options?: ThinkingTextFallbackOptions,
 ): Array<AnthropicStreamEventData> => {
+  const thinkingTextFallbackEnabled = options?.thinkingTextFallback ?? true
   const eventType = rawEvent.type
   switch (eventType) {
     case "response.created": {
@@ -118,7 +124,7 @@ export const translateResponsesStreamEvent = (
       return handleOutputTextDone(rawEvent, state)
     }
     case "response.output_item.done": {
-      return handleOutputItemDone(rawEvent, state)
+      return handleOutputItemDone(rawEvent, state, thinkingTextFallbackEnabled)
     }
 
     case "response.function_call_arguments.delta": {
@@ -193,6 +199,7 @@ const handleOutputItemAdded = (
 const handleOutputItemDone = (
   rawEvent: ResponseOutputItemDoneEvent,
   state: ResponsesStreamState,
+  thinkingTextFallbackEnabled: boolean,
 ): Array<AnthropicStreamEventData> => {
   const events = new Array<AnthropicStreamEventData>()
   const item = rawEvent.item
@@ -206,7 +213,10 @@ const handleOutputItemDone = (
   const signature = (item.encrypted_content ?? "") + "@" + item.id
   if (signature) {
     // Compatible with opencode, it will filter out blocks where the thinking text is empty, so we add a default thinking text here
-    if (!item.summary || item.summary.length === 0) {
+    if (
+      thinkingTextFallbackEnabled
+      && (!item.summary || item.summary.length === 0)
+    ) {
       events.push({
         type: "content_block_delta",
         index: blockIndex,
