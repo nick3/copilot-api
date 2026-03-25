@@ -87,9 +87,9 @@ import { parseSubagentMarkerFromFirstUser } from "./subagent-marker"
 import {
   estimateInputTokens,
   handleSelectionFailure,
-  isWarmupProbeRequest,
   maybeBlockOriginalModelName,
   mergeToolResultForClaude,
+  shouldUseSmallModelForWarmup,
 } from "./utils"
 
 const logger = createHandlerLogger("messages-handler")
@@ -161,8 +161,11 @@ export async function handleCompletion(c: Context) {
   const anthropicBeta = c.req.header("anthropic-beta")
   const isCompact = isCompactRequest(anthropicPayload)
 
-  // Fix warmup probe: force small model for Claude Code warmup requests (CLAUDE_CODE_SUBAGENT_MODEL also works).
-  if (anthropicBeta && isWarmupProbeRequest(anthropicPayload)) {
+  // Align warmup handling with the legacy heuristic used in caozhiyuan:
+  // anthropic-beta + no tools + non-compact requests route to the small model.
+  if (
+    shouldUseSmallModelForWarmup(anthropicPayload, anthropicBeta, isCompact)
+  ) {
     anthropicPayload.model = getSmallModel()
   }
 

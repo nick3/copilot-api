@@ -145,37 +145,13 @@ type SelectionFailureContext = {
   selection: SelectionFailure
 }
 
-export const isWarmupProbeRequest = (
+export const shouldUseSmallModelForWarmup = (
   payload: AnthropicMessagesPayload,
+  anthropicBetaHeader: string | undefined,
+  isCompact: boolean,
 ): boolean => {
-  const lastMsg = payload.messages.at(-1)
-  if (!lastMsg || lastMsg.role !== "user" || !Array.isArray(lastMsg.content)) {
-    return false
-  }
-
-  const lastBlock = lastMsg.content.at(-1)
-  if (!lastBlock || lastBlock.type !== "text") {
-    return false
-  }
-
-  const text = lastBlock.text.trim().toLowerCase()
-  const isEphemeral = lastBlock.cache_control?.type === "ephemeral"
-  if (!isEphemeral) return false
-
-  if (text === "warmup") return true
-
-  if (text === "hello") {
-    const preludeBlocks = lastMsg.content.slice(0, -1)
-    if (preludeBlocks.length === 0) return false
-
-    return preludeBlocks.every(
-      (block) =>
-        block.type === "text"
-        && block.text.trimStart().toLowerCase().startsWith("<system-reminder"),
-    )
-  }
-
-  return false
+  const noTools = !payload.tools || payload.tools.length === 0
+  return Boolean(anthropicBetaHeader) && noTools && !isCompact
 }
 
 export const handleSelectionFailure = (
