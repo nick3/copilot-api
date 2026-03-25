@@ -2,10 +2,10 @@ FROM oven/bun:1.3.7-alpine AS builder
 WORKDIR /app
 
 COPY ./package.json ./bun.lock ./
-RUN bun install --frozen-lockfile --registry https://registry.npmjs.org --network-concurrency 8
+RUN bun install --frozen-lockfile --registry https://registry.npmjs.org --network-concurrency 8 --no-verify
 
 COPY ./admin-ui/package.json ./admin-ui/bun.lock ./admin-ui/
-RUN bun install --frozen-lockfile --cwd admin-ui --registry https://registry.npmjs.org --network-concurrency 8
+RUN bun install --frozen-lockfile --cwd admin-ui --registry https://registry.npmjs.org --network-concurrency 8 --no-verify
 
 COPY . .
 RUN bun run build
@@ -13,9 +13,8 @@ RUN bun run build
 FROM oven/bun:1.3.7-alpine AS runner
 WORKDIR /app
 
-COPY ./package.json ./bun.lock ./
-RUN bun install --frozen-lockfile --production --ignore-scripts --no-cache --registry https://registry.npmjs.org --network-concurrency 8
-
+COPY ./package.json ./
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 
 EXPOSE 4141
