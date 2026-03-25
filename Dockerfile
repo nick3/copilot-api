@@ -1,20 +1,20 @@
-FROM oven/bun:1.2.19-alpine AS builder
+FROM oven/bun:1.3.7-alpine AS builder
 WORKDIR /app
 
 COPY ./package.json ./bun.lock ./
-RUN bun install --frozen-lockfile
+RUN bun install --frozen-lockfile --registry https://registry.npmjs.org --network-concurrency 8
 
 COPY ./admin-ui/package.json ./admin-ui/bun.lock ./admin-ui/
-RUN bun install --frozen-lockfile --cwd admin-ui
+RUN bun install --frozen-lockfile --cwd admin-ui --registry https://registry.npmjs.org --network-concurrency 8
 
 COPY . .
 RUN bun run build
 
-FROM oven/bun:1.2.19-alpine AS runner
+FROM oven/bun:1.3.7-alpine AS runner
 WORKDIR /app
 
 COPY ./package.json ./bun.lock ./
-RUN bun install --frozen-lockfile --production --ignore-scripts --no-cache
+RUN bun install --frozen-lockfile --production --ignore-scripts --no-cache --registry https://registry.npmjs.org --network-concurrency 8
 
 COPY --from=builder /app/dist ./dist
 
