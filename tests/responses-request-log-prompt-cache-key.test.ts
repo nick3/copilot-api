@@ -19,19 +19,13 @@ const testHome = await fs.mkdtemp(
 )
 process.env.COPILOT_API_HOME = testHome
 
-const [
-  { accountsManager },
-  { getAdminDb },
-  { state },
-  { responsesRoutes },
-  { generateRequestIdFromPayload },
-] = await Promise.all([
-  import("~/lib/accounts-manager"),
-  import("~/lib/admin-db"),
-  import("~/lib/state"),
-  import("~/routes/responses/route"),
-  import("~/lib/utils"),
-])
+const [{ accountsManager }, { getAdminDb }, { state }, { responsesRoutes }] =
+  await Promise.all([
+    import("~/lib/accounts-manager"),
+    import("~/lib/admin-db").then(({ getAdminDb }) => ({ getAdminDb })),
+    import("~/lib/state"),
+    import("~/routes/responses/route"),
+  ])
 
 type RequestLogSnapshot = {
   prompt_cache_key: string | null
@@ -151,10 +145,6 @@ function getLatestRequestLog(): RequestLogSnapshot | null {
     .get() as RequestLogSnapshot | null
 }
 
-function expectedRequestId(promptCacheKey: string, input: string): string {
-  return generateRequestIdFromPayload({ messages: input }, promptCacheKey)
-}
-
 beforeEach(() => {
   state.manualApprove = false
   state.verbose = false
@@ -173,7 +163,6 @@ afterEach(() => {
 })
 
 afterAll(async () => {
-  getAdminDb().close()
   await fs.rm(testHome, { recursive: true, force: true })
 })
 
@@ -225,9 +214,9 @@ describe("responses request log prompt_cache_key persistence", () => {
 
     expect(response.status).toBe(200)
     expect(getLatestRequestLog()?.prompt_cache_key).toBe(payloadPromptCacheKey)
-    expect(selectionRequestId).toBe(
-      expectedRequestId(payloadPromptCacheKey, input),
-    )
+    // Session-level affinity: the handler passes normalizedPromptCacheKey
+    // directly (not the per-message hash) to selectAccountForRequest.
+    expect(selectionRequestId).toBe(payloadPromptCacheKey)
   })
 
   test("falls back to metadata user_id session_id when payload.prompt_cache_key is missing", async () => {
@@ -275,6 +264,8 @@ describe("responses request log prompt_cache_key persistence", () => {
 
     expect(response.status).toBe(200)
     expect(getLatestRequestLog()?.prompt_cache_key).toBe(metadataSessionId)
-    expect(selectionRequestId).toBe(expectedRequestId(metadataSessionId, input))
+    // Session-level affinity: normalizedPromptCacheKey falls back to
+    // metadataSessionId, which is passed directly as the requestId.
+    expect(selectionRequestId).toBe(metadataSessionId)
   })
 })

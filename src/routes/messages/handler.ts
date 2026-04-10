@@ -169,6 +169,11 @@ export async function handleCompletion(c: Context) {
   const anthropicBeta = c.req.header("anthropic-beta")
   const isCompact = isCompactRequest(anthropicPayload)
 
+  // Capture the original model before warmup/compact mutations for affinity routing.
+  // This ensures compact requests (switched to smallModel) share the same affinity
+  // cache entry as normal requests, preventing upstream 401 errors.
+  const originalClientModel = anthropicPayload.model
+
   // Fix warmup probe: force small model for Claude Code warmup requests (CLAUDE_CODE_SUBAGENT_MODEL also works).
   if (anthropicBeta && isWarmupProbeRequest(anthropicPayload)) {
     anthropicPayload.model = getSmallModel()
@@ -251,6 +256,7 @@ export async function handleCompletion(c: Context) {
 
   const selection = await accountsManager.selectAccountForRequest(candidates, {
     requestId: sessionId ?? upstreamRequestId,
+    affinityModelId: originalClientModel,
   })
   if (!selection.ok) {
     return handleSelectionFailure({

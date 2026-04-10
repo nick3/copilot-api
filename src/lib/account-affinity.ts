@@ -2,6 +2,13 @@ import type { AccountRuntime } from "~/lib/types/account"
 
 export interface AffinityContext {
   requestId?: string
+  /**
+   * Override the model ID used in the affinity cache key.
+   * When set, this value replaces `candidates[0].modelId` in the key,
+   * allowing compact/warmup requests (whose model is switched to a small
+   * model) to share the same affinity entry as the original model.
+   */
+  affinityModelId?: string
 }
 
 interface AffinityCacheEntry {

@@ -7,7 +7,7 @@ import type { Model } from "~/services/copilot/get-models"
 import { accountsManager } from "~/lib/accounts-manager"
 import { getSmallModel } from "~/lib/config"
 import { state } from "~/lib/state"
-import { generateRequestIdFromPayload, getUUID } from "~/lib/utils"
+import { getUUID } from "~/lib/utils"
 import { messageRoutes } from "~/routes/messages/route"
 
 type SelectionResult = Awaited<
@@ -382,17 +382,15 @@ describe("messages handler orchestration", () => {
       }),
     )
 
+    // Session-level affinity: when x-session-id is present, the handler passes
+    // the session ID directly (not the per-message upstreamRequestId) to
+    // selectAccountForRequest so that all messages in the same session share
+    // the same affinity cache entry.
     const expectedSessionId = getUUID("session-123")
-    const expectedRequestId = generateRequestIdFromPayload(
-      {
-        messages: payload.messages,
-      },
-      expectedSessionId,
-    )
 
     expect(response.status).toBe(200)
     expect(selectionCandidates[0]?.modelId).toBe(getSmallModel())
     expect(selectionCandidates[0]?.endpoint).toBe("/v1/messages")
-    expect(selectionRequestId).toBe(expectedRequestId)
+    expect(selectionRequestId).toBe(expectedSessionId)
   })
 })

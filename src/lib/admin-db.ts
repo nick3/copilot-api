@@ -5,7 +5,13 @@ import path from "node:path"
 import { PATHS } from "./paths"
 
 const ADMIN_DB_FILENAME = "admin.sqlite"
-const DEFAULT_DB_PATH = path.join(PATHS.APP_DIR, ADMIN_DB_FILENAME)
+
+/** Resolve the DB path dynamically so that env-var changes
+ *  (e.g. COPILOT_API_HOME in tests) are picked up after a singleton reset. */
+function resolveDbPath(): string {
+  const appDir = process.env.COPILOT_API_HOME || PATHS.APP_DIR
+  return path.join(appDir, ADMIN_DB_FILENAME)
+}
 
 let sharedDb: Database | null = null
 let initialized = false
@@ -36,10 +42,10 @@ function warnAdminDbInitFailure(error: unknown): void {
 }
 
 export function getAdminDbPath(): string {
-  return DEFAULT_DB_PATH
+  return resolveDbPath()
 }
 
-export function openAdminDb(filePath: string = DEFAULT_DB_PATH): Database {
+export function openAdminDb(filePath: string = resolveDbPath()): Database {
   return new Database(filePath)
 }
 
@@ -68,6 +74,16 @@ export function getAdminDb(): Database {
     }
   }
   return sharedDb
+}
+
+/** Close the shared DB instance and reset the singleton so the next
+ *  `getAdminDb()` call creates a fresh connection. */
+export function closeAdminDb(): void {
+  if (sharedDb) {
+    sharedDb.close()
+    sharedDb = null
+    initialized = false
+  }
 }
 
 export function getAdminDbUserVersion(db: Database = getAdminDb()): number {

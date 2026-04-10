@@ -23,7 +23,7 @@ process.env.COPILOT_API_HOME = testHome
 const [{ accountsManager }, { getAdminDb }, { state }, { messageRoutes }] =
   await Promise.all([
     import("~/lib/accounts-manager"),
-    import("~/lib/admin-db"),
+    import("~/lib/admin-db").then(({ getAdminDb }) => ({ getAdminDb })),
     import("~/lib/state"),
     import("~/routes/messages/route"),
   ])
@@ -147,7 +147,6 @@ afterEach(() => {
 })
 
 afterAll(async () => {
-  getAdminDb().close()
   await fs.rm(testHome, { recursive: true, force: true })
 })
 
