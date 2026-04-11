@@ -138,6 +138,7 @@ export type SelectAccountForRequestResult =
   | {
       ok: false
       reason: SelectAccountForRequestFailureReason
+      selectionReason?: AccountSelectionReason
     }
 
 export type AccountStatusEntry = {
@@ -160,6 +161,15 @@ function getInitialSelectionReason(
   }
 
   return rotationStart > 0 ? "rotated_after_miss" : "affinity_miss"
+}
+
+function preserveSubagentSelectionReason(
+  initialSelectionReason: AccountSelectionReason,
+  nextSelectionReason: AccountSelectionReason,
+): AccountSelectionReason {
+  return initialSelectionReason.startsWith("subagent_") ?
+      initialSelectionReason
+    : nextSelectionReason
 }
 
 /** Manages multiple GitHub Copilot accounts at runtime. */
@@ -1112,7 +1122,10 @@ export class AccountsManager {
     const { result, cacheKey, selectionReason, ownershipWriteSessionId } =
       params
     if (!result.ok) {
-      return result
+      return {
+        ...result,
+        selectionReason,
+      }
     }
 
     this.loadBalanceCursor++
@@ -1181,7 +1194,6 @@ export class AccountsManager {
 
     return {
       result: ownerResult,
-      selectionReason: "subagent_owner_hit",
     }
   }
 
@@ -1215,12 +1227,21 @@ export class AccountsManager {
       candidates,
     )
     if (!affinityResult) {
-      return { selectionReason: "preferred_account_unavailable" }
+      return {
+        selectionReason: preserveSubagentSelectionReason(
+          initialSelectionReason,
+          "preferred_account_unavailable",
+        ),
+      }
     }
 
+    const selectionReason = preserveSubagentSelectionReason(
+      initialSelectionReason,
+      "affinity_hit",
+    )
     affinityResult.affinityHit = true
     affinityResult.affinityCacheKey = cacheKey
-    affinityResult.selectionReason = "affinity_hit"
+    affinityResult.selectionReason = selectionReason
     affinityResult.confirmAffinity = () => {
       if (!this.accountAffinityEnabled) return
       this.affinityCache.set(cacheKey, affinityResult.account.id)
@@ -1228,7 +1249,7 @@ export class AccountsManager {
 
     return {
       result: affinityResult,
-      selectionReason: "affinity_hit",
+      selectionReason,
     }
   }
 

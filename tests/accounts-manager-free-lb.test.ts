@@ -716,3 +716,61 @@ test("ownership: subagent owner miss falls back to existing path", async () => {
   expect(selection.selectionReason).toBe("subagent_owner_miss")
   expect(selection.confirmOwnership).toBeUndefined()
 })
+
+test("ownership: unusable owner keeps fallback reason when affinity cache hits", async () => {
+  const model = makeModel({ id: "free-model" })
+
+  const a: AccountRuntime = {
+    id: "a",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_a",
+    models: makeModelsResponse([model]),
+  }
+  const b: AccountRuntime = {
+    id: "b",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_b",
+    models: makeModelsResponse([model]),
+  }
+
+  const manager = setupManager([a, b])
+
+  const mainRequest = await manager.selectAccountForRequest(
+    [{ modelId: "free-model", endpoint: "/chat/completions" }],
+    { ownershipWriteSessionId: "root-session-1" },
+  )
+  expect(mainRequest.ok).toBe(true)
+  if (!mainRequest.ok) return
+  expect(mainRequest.account.id).toBe("a")
+  mainRequest.confirmOwnership?.()
+
+  const affinitySeed = await manager.selectAccountForRequest(
+    [{ modelId: "free-model", endpoint: "/chat/completions" }],
+    { requestId: "session-affinity" },
+  )
+  expect(affinitySeed.ok).toBe(true)
+  if (!affinitySeed.ok) return
+  expect(affinitySeed.account.id).toBe("b")
+  affinitySeed.confirmAffinity?.()
+
+  a.failed = true
+  a.failureReason = "owner unavailable"
+
+  const subagentRequest = await manager.selectAccountForRequest(
+    [{ modelId: "free-model", endpoint: "/chat/completions" }],
+    {
+      ownershipLookupSessionId: "root-session-1",
+      requestId: "session-affinity",
+    },
+  )
+  expect(subagentRequest.ok).toBe(true)
+  if (!subagentRequest.ok) return
+
+  expect(subagentRequest.account.id).toBe("b")
+  expect(subagentRequest.affinityHit).toBe(true)
+  expect(subagentRequest.selectionReason).toBe(
+    "subagent_owner_unusable_fallback",
+  )
+})

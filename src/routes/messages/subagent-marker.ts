@@ -34,9 +34,9 @@ const isSubagentMarker = (value: unknown): value is SubagentMarker => {
     typeof candidate.session_id === "string"
     && typeof candidate.agent_id === "string"
     && typeof candidate.agent_type === "string"
-    && candidate.session_id.length > 0
-    && candidate.agent_id.length > 0
-    && candidate.agent_type.length > 0
+    && candidate.session_id.trim().length > 0
+    && candidate.agent_id.trim().length > 0
+    && candidate.agent_type.trim().length > 0
   )
 }
 

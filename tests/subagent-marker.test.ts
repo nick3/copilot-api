@@ -154,6 +154,25 @@ Agent Explore started (agent-1)
     })
   })
 
+  test("returns invalid when required fields are blank after trimming", () => {
+    const payload = basePayload([
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: '<system-reminder>__SUBAGENT_MARKER__{"session_id":"   ","agent_id":"a-1","agent_type":"claude-subagent"}</system-reminder>',
+          },
+        ],
+      },
+    ])
+
+    expect(inspectSubagentMarkerFromFirstUser(payload)).toEqual({
+      kind: "invalid",
+      marker: null,
+    })
+  })
+
   test("returns none when no marker exists", () => {
     const payload = basePayload([
       {

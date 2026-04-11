@@ -174,7 +174,12 @@ export async function handleCompletion(c: Context) {
   const markerInspection = inspectSubagentMarkerFromFirstUser(anthropicPayload)
   const subagentMarker =
     markerInspection.kind === "valid" ? markerInspection.marker : null
-  const initiatorOverride = subagentMarker ? "agent" : undefined
+  const isSubagentRequest = subagentMarker !== null
+  const invalidSubagentMarkerSelectionReason: AccountSelectionReason | undefined =
+    markerInspection.kind === "invalid" ?
+      "subagent_marker_invalid_fallback"
+    : undefined
+  const initiatorOverride = isSubagentRequest ? "agent" : undefined
   if (subagentMarker) {
     debugJson(logger, "Detected Subagent marker:", subagentMarker)
   }
@@ -243,7 +248,8 @@ export async function handleCompletion(c: Context) {
     safetyIdentifier: normalizedSafetyIdentifier,
     promptCacheKey: normalizedPromptCacheKey,
     initiator: initiatorOverride,
-    isSubagent: Boolean(subagentMarker),
+    isSubagent: isSubagentRequest,
+    selectionReason: invalidSubagentMarkerSelectionReason,
   })
   if (blockedResponse) return blockedResponse
 
@@ -290,6 +296,8 @@ export async function handleCompletion(c: Context) {
     ownershipLookupSessionId,
     ownershipWriteSessionId,
   })
+  const selectionReason =
+    invalidSubagentMarkerSelectionReason ?? selection.selectionReason
   if (!selection.ok) {
     return handleSelectionFailure({
       c,
@@ -307,17 +315,14 @@ export async function handleCompletion(c: Context) {
       safetyIdentifier: normalizedSafetyIdentifier,
       promptCacheKey: normalizedPromptCacheKey,
       initiator: fallbackInitiator,
-      isSubagent: Boolean(subagentMarker),
+      isSubagent: isSubagentRequest,
       affinityKeyUsed: affinityKey.affinityKeyUsed,
       affinityKeySource: affinityKey.affinityKeySource,
+      selectionReason,
       selection,
     })
   }
   const { account, reservation, selectedModel, endpoint, costUnits } = selection
-  const selectionReason =
-    markerInspection.kind === "invalid" ?
-      "subagent_marker_invalid_fallback"
-    : selection.selectionReason
   openAIPayload.model = selectedModel.id
   anthropicPayload.model = selectedModel.id
   const premiumRemainingBefore = account.premiumRemaining
@@ -337,7 +342,7 @@ export async function handleCompletion(c: Context) {
     userId,
     safetyIdentifier: normalizedSafetyIdentifier,
     promptCacheKey: normalizedPromptCacheKey,
-    isSubagent: Boolean(subagentMarker),
+    isSubagent: isSubagentRequest,
     clientModel,
     account,
     reservation,

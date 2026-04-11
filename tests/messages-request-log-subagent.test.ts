@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import fs from "node:fs/promises"
+import path from "node:path"
 
 import "./shared-admin-db-test-home"
 
+import { mergeConfigWithDefaults } from "~/lib/config"
+import { PATHS } from "~/lib/paths"
 import type { AccountRuntime } from "~/lib/types/account"
 import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
 import type { Model } from "~/services/copilot/get-models"
@@ -99,6 +103,49 @@ function buildAnthropicResponse(model: string, text: string) {
   }
 }
 
+function mockSuccessfulMessagesFetch(): void {
+  const fetchMock = mock(() =>
+    Promise.resolve(
+      new Response(JSON.stringify(buildAnthropicResponse("messages-model", "ok")), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    ),
+  )
+
+  // @ts-expect-error test mock only implements the used subset
+  fetchHolder.fetch = fetchMock
+}
+
+async function withConfig(
+  config: {
+    modelAliases: Record<string, string>
+    allowOriginalModelNamesForAliases: boolean
+    smallModel: string
+  },
+  run: () => Promise<void>,
+): Promise<void> {
+  const original = await fs.readFile(PATHS.CONFIG_PATH, "utf8").catch(() => null)
+  await fs.mkdir(path.dirname(PATHS.CONFIG_PATH), { recursive: true })
+  await fs.writeFile(
+    PATHS.CONFIG_PATH,
+    `${JSON.stringify(config, null, 2)}\n`,
+    "utf8",
+  )
+  mergeConfigWithDefaults()
+
+  try {
+    await run()
+  } finally {
+    if (original === null) {
+      await fs.rm(PATHS.CONFIG_PATH, { force: true })
+    } else {
+      await fs.writeFile(PATHS.CONFIG_PATH, original, "utf8")
+    }
+    mergeConfigWithDefaults()
+  }
+}
+
 function createPayload(
   overrides: Partial<AnthropicMessagesPayload> = {},
 ): AnthropicMessagesPayload {
@@ -139,20 +186,7 @@ afterEach(() => {
 
 describe("messages request log subagent persistence", () => {
   test("writes is_subagent = 1 for __SUBAGENT_MARKER__ requests", async () => {
-    const fetchMock = mock(() =>
-      Promise.resolve(
-        new Response(
-          JSON.stringify(buildAnthropicResponse("messages-model", "ok")),
-          {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          },
-        ),
-      ),
-    )
-
-    // @ts-expect-error test mock only implements the used subset
-    fetchHolder.fetch = fetchMock
+    mockSuccessfulMessagesFetch()
 
     const stableSessionId = "stable-session-for-subagent-test"
 
@@ -194,20 +228,7 @@ describe("messages request log subagent persistence", () => {
   })
 
   test("logs invalid subagent markers with fallback selection reason", async () => {
-    const fetchMock = mock(() =>
-      Promise.resolve(
-        new Response(
-          JSON.stringify(buildAnthropicResponse("messages-model", "ok")),
-          {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          },
-        ),
-      ),
-    )
-
-    // @ts-expect-error test mock only implements the used subset
-    fetchHolder.fetch = fetchMock
+    mockSuccessfulMessagesFetch()
 
     const response = await messageRoutes.fetch(
       new Request("http://local/", {
@@ -241,21 +262,93 @@ describe("messages request log subagent persistence", () => {
     expect(latest?.selection_reason).toBe("subagent_marker_invalid_fallback")
   })
 
-  test("keeps tool_result continuations out of is_subagent without marker", async () => {
-    const fetchMock = mock(() =>
-      Promise.resolve(
-        new Response(
-          JSON.stringify(buildAnthropicResponse("messages-model", "ok")),
-          {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          },
+  test("logs invalid subagent marker fallback reason even when selection fails", async () => {
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve({
+        ok: false,
+        reason: "NO_QUOTA",
+      })
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          createPayload({
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: '<system-reminder>__SUBAGENT_MARKER__{"session_id":"sub-session"}</system-reminder>',
+                  },
+                  {
+                    type: "text",
+                    text: "hello",
+                  },
+                ],
+              },
+            ],
+          }),
         ),
-      ),
+      }),
     )
 
-    // @ts-expect-error test mock only implements the used subset
-    fetchHolder.fetch = fetchMock
+    expect(response.status).toBe(429)
+    const latest = getLatestRequestLog()
+    expect(latest?.is_subagent).toBe(0)
+    expect(latest?.selection_reason).toBe("subagent_marker_invalid_fallback")
+  })
+
+  test("logs invalid subagent marker fallback reason for blocked original model", async () => {
+    await withConfig(
+      {
+        modelAliases: {
+          fast: "gpt-5-mini",
+        },
+        allowOriginalModelNamesForAliases: false,
+        smallModel: "fast",
+      },
+      async () => {
+        const response = await messageRoutes.fetch(
+          new Request("http://local/", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(
+              createPayload({
+                model: "gpt-5-mini",
+                messages: [
+                  {
+                    role: "user",
+                    content: [
+                      {
+                        type: "text",
+                        text: '<system-reminder>__SUBAGENT_MARKER__{"session_id":"sub-session"}</system-reminder>',
+                      },
+                      {
+                        type: "text",
+                        text: "hello",
+                      },
+                    ],
+                  },
+                ],
+              }),
+            ),
+          }),
+        )
+
+        expect(response.status).toBe(400)
+        const latest = getLatestRequestLog()
+        expect(latest?.selection_reason).toBe(
+          "subagent_marker_invalid_fallback",
+        )
+      },
+    )
+  })
+
+  test("keeps tool_result continuations out of is_subagent without marker", async () => {
+    mockSuccessfulMessagesFetch()
 
     const response = await messageRoutes.fetch(
       new Request("http://local/", {
