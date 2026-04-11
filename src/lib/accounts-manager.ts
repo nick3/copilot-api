@@ -181,6 +181,7 @@ export class AccountsManager {
   private accountAffinityEnabled = true
   private affinityCache = new AccountAffinityCache()
   private sessionOwnership = new SessionOwnershipCache()
+  private sessionOwnershipGeneration = 0
   private loadBalanceCursor = 0
 
   private quotaRefreshSnapshotByAccount = new WeakMap<
@@ -1152,7 +1153,11 @@ export class AccountsManager {
       return
     }
 
+    const generation = this.sessionOwnershipGeneration
     result.confirmOwnership = () => {
+      if (generation !== this.sessionOwnershipGeneration) {
+        return
+      }
       this.sessionOwnership.set(rootSessionId, result.account.id)
     }
   }
@@ -1779,11 +1784,13 @@ export class AccountsManager {
    * Shutdown the manager and clean up resources.
    */
   shutdown(): void {
+    this.sessionOwnershipGeneration++
     this.stopRegistryWatcher()
     this.stopAllTokenRefresh()
     this.stopAllSessionRefresh()
     this.stopModelsRefresh()
     this.affinityCache.clear()
+    this.sessionOwnership.clear()
     this.loadBalanceCursor = 0
     this.accounts.clear()
     this.accountOrder = []

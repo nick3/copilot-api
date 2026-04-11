@@ -717,6 +717,121 @@ test("ownership: subagent owner miss falls back to existing path", async () => {
   expect(selection.confirmOwnership).toBeUndefined()
 })
 
+test("ownership: shutdown clears cached owner before next lifecycle", async () => {
+  const model = makeModel({ id: "free-model" })
+
+  const a: AccountRuntime = {
+    id: "a",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_a",
+    models: makeModelsResponse([model]),
+  }
+  const b: AccountRuntime = {
+    id: "b",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_b",
+    models: makeModelsResponse([model]),
+  }
+
+  const manager = setupManager([a, b])
+
+  const warmup = await manager.selectAccountForRequest([
+    { modelId: "free-model", endpoint: "/chat/completions" },
+  ])
+  expect(warmup.ok).toBe(true)
+  if (!warmup.ok) return
+  expect(warmup.account.id).toBe("a")
+
+  const ownedRequest = await manager.selectAccountForRequest(
+    [{ modelId: "free-model", endpoint: "/chat/completions" }],
+    { ownershipWriteSessionId: "root-session-1" },
+  )
+  expect(ownedRequest.ok).toBe(true)
+  if (!ownedRequest.ok) return
+  expect(ownedRequest.account.id).toBe("b")
+  ownedRequest.confirmOwnership?.()
+
+  manager.shutdown()
+
+  const internals = manager as unknown as {
+    accounts: Map<string, AccountRuntime>
+    accountOrder: Array<string>
+  }
+  internals.accounts.set(a.id, a)
+  internals.accounts.set(b.id, b)
+  internals.accountOrder.push(a.id, b.id)
+
+  const afterShutdown = await manager.selectAccountForRequest(
+    [{ modelId: "free-model", endpoint: "/chat/completions" }],
+    { ownershipLookupSessionId: "root-session-1" },
+  )
+  expect(afterShutdown.ok).toBe(true)
+  if (!afterShutdown.ok) return
+
+  expect(afterShutdown.account.id).toBe("a")
+  expect(afterShutdown.selectionReason).toBe("subagent_owner_miss")
+})
+
+test("ownership: shutdown ignores delayed confirmOwnership callbacks", async () => {
+  const model = makeModel({ id: "free-model" })
+
+  const a: AccountRuntime = {
+    id: "a",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_a",
+    models: makeModelsResponse([model]),
+  }
+  const b: AccountRuntime = {
+    id: "b",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_b",
+    models: makeModelsResponse([model]),
+  }
+
+  const manager = setupManager([a, b])
+
+  const warmup = await manager.selectAccountForRequest([
+    { modelId: "free-model", endpoint: "/chat/completions" },
+  ])
+  expect(warmup.ok).toBe(true)
+  if (!warmup.ok) return
+  expect(warmup.account.id).toBe("a")
+
+  const ownedRequest = await manager.selectAccountForRequest(
+    [{ modelId: "free-model", endpoint: "/chat/completions" }],
+    { ownershipWriteSessionId: "root-session-1" },
+  )
+  expect(ownedRequest.ok).toBe(true)
+  if (!ownedRequest.ok) return
+  expect(ownedRequest.account.id).toBe("b")
+
+  manager.shutdown()
+
+  const internals = manager as unknown as {
+    accounts: Map<string, AccountRuntime>
+    accountOrder: Array<string>
+  }
+  internals.accounts.set(a.id, a)
+  internals.accounts.set(b.id, b)
+  internals.accountOrder.push(a.id, b.id)
+
+  ownedRequest.confirmOwnership?.()
+
+  const afterShutdown = await manager.selectAccountForRequest(
+    [{ modelId: "free-model", endpoint: "/chat/completions" }],
+    { ownershipLookupSessionId: "root-session-1" },
+  )
+  expect(afterShutdown.ok).toBe(true)
+  if (!afterShutdown.ok) return
+
+  expect(afterShutdown.account.id).toBe("a")
+  expect(afterShutdown.selectionReason).toBe("subagent_owner_miss")
+})
+
 test("ownership: unusable owner keeps fallback reason when affinity cache hits", async () => {
   const model = makeModel({ id: "free-model" })
 
