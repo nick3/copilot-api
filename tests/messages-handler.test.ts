@@ -540,6 +540,65 @@ describe("messages handler ownership context", () => {
     expect(selectionOwnershipWriteSessionId).toBe(getUUID("root-session-123"))
   })
 
+  test("documentation mentions of the marker literal do not suppress ownership writes", async () => {
+    let selectionOwnershipLookupSessionId: string | undefined
+    let selectionOwnershipWriteSessionId: string | undefined
+
+    accountsManager.selectAccountForRequest = (_candidates, options) => {
+      selectionOwnershipLookupSessionId = options?.ownershipLookupSessionId
+      selectionOwnershipWriteSessionId = options?.ownershipWriteSessionId
+      return Promise.resolve(buildSelection("/v1/messages", "messages-model"))
+    }
+
+    const fetchMock = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify(buildAnthropicResponse("messages-model", "ok")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      ),
+    )
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-session-id": "root-session-123",
+        },
+        body: JSON.stringify(
+          createPayload({
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: "<system-reminder>Subagent semantics depend on `__SUBAGENT_MARKER__` propagation from Claude Code or opencode plugins.</system-reminder>",
+                  },
+                  {
+                    type: "text",
+                    text: "hello",
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(selectionOwnershipLookupSessionId).toBeUndefined()
+    expect(selectionOwnershipWriteSessionId).toBe(getUUID("root-session-123"))
+  })
+
   test("valid subagent requests look up normalized ownership session id during selection", async () => {
     let selectionOwnershipLookupSessionId: string | undefined
     let selectionOwnershipWriteSessionId: string | undefined

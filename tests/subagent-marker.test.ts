@@ -196,6 +196,25 @@ Agent Explore started (agent-1)
     })
   })
 
+  test("returns none when documentation text mentions the marker literal", () => {
+    const payload = basePayload([
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "<system-reminder>Subagent semantics depend on `__SUBAGENT_MARKER__` propagation from Claude Code or opencode plugins.</system-reminder>",
+          },
+        ],
+      },
+    ])
+
+    expect(inspectSubagentMarkerFromFirstUser(payload)).toEqual({
+      kind: "none",
+      marker: null,
+    })
+  })
+
   test("only checks the first user message", () => {
     const payload = basePayload([
       {
