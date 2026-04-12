@@ -69,30 +69,54 @@ export const setupCopilotToken = async () => {
     })
 }
 
+const REFRESH_POLL_INTERVAL_MS = 15_000
+const EARLY_REFRESH_BUFFER_MS = 60_000
+const RETRY_REFRESH_DELAY_MS = 15_000
+const MIN_REFRESH_DELAY_MS = 1_000
+
+export const getRefreshDeadlineMs = (
+  refreshIn: number,
+  nowMs: number = Date.now(),
+) =>
+  nowMs
+  + Math.max(refreshIn * 1000 - EARLY_REFRESH_BUFFER_MS, MIN_REFRESH_DELAY_MS)
+
+// Use short wall-clock chunks so the next wake after sleep notices elapsed time
+// quickly, without relying on the server's absolute expires_at matching local time.
+export const getRefreshPollDelayMs = (
+  refreshAtMs: number,
+  nowMs: number = Date.now(),
+) => Math.min(Math.max(refreshAtMs - nowMs, 0), REFRESH_POLL_INTERVAL_MS)
+
 const runCopilotRefreshLoop = async (
   refreshIn: number,
   signal: AbortSignal,
 ) => {
-  let nextRefreshDelayMs = (refreshIn - 60) * 1000
+  let refreshAtMs = getRefreshDeadlineMs(refreshIn)
 
   while (!signal.aborted) {
-    await delay(nextRefreshDelayMs, undefined, { signal })
+    const nextDelayMs = getRefreshPollDelayMs(refreshAtMs)
+    if (nextDelayMs > 0) {
+      await delay(nextDelayMs, undefined, { signal })
+      continue
+    }
 
     consola.debug("Refreshing Copilot token")
 
     try {
       const { token, refresh_in } = await getCopilotToken()
       state.copilotToken = token
+      refreshAtMs = getRefreshDeadlineMs(refresh_in)
       consola.debug("Copilot token refreshed")
       if (state.showToken) {
         consola.info("Refreshed Copilot token:", token)
       }
-
-      nextRefreshDelayMs = (refresh_in - 60) * 1000
     } catch (error) {
       consola.error("Failed to refresh Copilot token:", error)
-      nextRefreshDelayMs = 15_000
-      consola.warn(`Retrying Copilot token refresh in ${nextRefreshDelayMs}ms`)
+      refreshAtMs = Date.now() + RETRY_REFRESH_DELAY_MS
+      consola.warn(
+        `Retrying Copilot token refresh in ${RETRY_REFRESH_DELAY_MS / 1000}s`,
+      )
     }
   }
 }

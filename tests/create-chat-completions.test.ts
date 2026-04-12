@@ -1,4 +1,4 @@
-import { test, expect, mock } from "bun:test"
+import { afterEach, beforeEach, expect, mock, test } from "bun:test"
 
 import { getReasoningEffortForModel } from "../src/lib/config"
 import { state } from "../src/lib/state"
@@ -12,11 +12,13 @@ type FetchOpts = {
   body?: string
 }
 
-// Mock state
-state.githubToken = "test-github-token"
-state.copilotToken = "test-token"
-state.vsCodeVersion = "1.0.0"
-state.accountType = "individual"
+const originalFetch = globalThis.fetch
+const originalState = {
+  accountType: state.accountType,
+  copilotToken: state.copilotToken,
+  githubToken: state.githubToken,
+  vsCodeVersion: state.vsCodeVersion,
+}
 
 // Helper to mock fetch
 const fetchMock = mock((_url: string, opts: FetchOpts) => {
@@ -26,8 +28,24 @@ const fetchMock = mock((_url: string, opts: FetchOpts) => {
     headers: opts.headers,
   }
 })
-// @ts-expect-error - Mock fetch doesn't implement all fetch properties
-;(globalThis as unknown as { fetch: typeof fetch }).fetch = fetchMock
+
+beforeEach(() => {
+  state.githubToken = "test-github-token"
+  state.copilotToken = "test-token"
+  state.vsCodeVersion = "1.0.0"
+  state.accountType = "individual"
+  fetchMock.mockClear()
+  ;(globalThis as unknown as { fetch: typeof fetch }).fetch =
+    fetchMock as unknown as typeof fetch
+})
+
+afterEach(() => {
+  state.githubToken = originalState.githubToken
+  state.copilotToken = originalState.copilotToken
+  state.vsCodeVersion = originalState.vsCodeVersion
+  state.accountType = originalState.accountType
+  ;(globalThis as unknown as { fetch: typeof fetch }).fetch = originalFetch
+})
 
 function getLastFetchCall(): FetchOpts {
   const last = fetchMock.mock.calls.at(-1)?.[1]
