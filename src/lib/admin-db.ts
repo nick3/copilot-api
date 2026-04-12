@@ -148,13 +148,33 @@ function migrateV1(db: Database): void {
   `)
 }
 
+function migrateV8(db: Database): void {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS session_affinity (
+      cache_key TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      created_at_ms INTEGER NOT NULL,
+      last_confirmed_at_ms INTEGER NOT NULL,
+      last_used_at_ms INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_session_affinity_last_used
+      ON session_affinity(last_used_at_ms);
+
+    CREATE INDEX IF NOT EXISTS idx_session_affinity_account
+      ON session_affinity(account_id);
+
+    PRAGMA user_version = 8;
+  `)
+}
+
 function migrateAdminDb(db: Database): void {
   const row = db.query("PRAGMA user_version;").get() as {
     user_version?: number
   } | null
   const current = row?.user_version ?? 0
 
-  if (current >= 7) {
+  if (current >= 8) {
     return
   }
 
@@ -249,4 +269,6 @@ function migrateAdminDb(db: Database): void {
 
     db.run("PRAGMA user_version = 7;")
   }
+
+  migrateV8(db)
 }

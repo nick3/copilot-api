@@ -343,6 +343,63 @@ test("POST /api/admin/config rejects invalid provider authType", async () => {
   })
 })
 
+test("POST /api/admin/config round-trips sessionAffinityRetentionDays", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const postRes = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ sessionAffinityRetentionDays: 14 }),
+      }),
+    )
+
+    expect(postRes.status).toBe(200)
+
+    const postBody = (await postRes.json()) as {
+      sessionAffinityRetentionDays?: number
+    }
+    expect(postBody.sessionAffinityRetentionDays).toBe(14)
+
+    const getRes = await server.fetch(
+      new Request("http://localhost/api/admin/config"),
+    )
+
+    expect(getRes.status).toBe(200)
+
+    const getBody = (await getRes.json()) as {
+      sessionAffinityRetentionDays?: number
+    }
+    expect(getBody.sessionAffinityRetentionDays).toBe(14)
+  })
+})
+
+test("POST /api/admin/config rejects negative sessionAffinityRetentionDays", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ sessionAffinityRetentionDays: -1 }),
+      }),
+    )
+
+    expect(res.status).toBe(400)
+
+    const body = (await res.json()) as { error?: { message?: string } }
+    expect(body.error?.message).toBe(
+      "sessionAffinityRetentionDays must be a non-negative number",
+    )
+  })
+})
+
 test("POST /api/admin/config rejects unknown top-level config keys", async () => {
   await withConfig({}, async () => {
     const { server } = await import("../src/server")

@@ -1,9 +1,15 @@
+import type { AffinityPersistenceStore } from "../src/lib/account-affinity"
 import type { AccountRuntime } from "../src/lib/types/account"
 import type { Model, ModelsResponse } from "../src/services/copilot/get-models"
 
 import { AccountsManager } from "../src/lib/accounts-manager"
 
-export const makeModel = (overrides: Partial<Model> = {}): Model => {
+type SetupManagerOptions = {
+  temporaryAccount?: AccountRuntime
+  persistentAffinityStore?: AffinityPersistenceStore
+}
+
+export function makeModel(overrides: Partial<Model> = {}): Model {
   const base: Model = {
     billing: {
       is_premium: false,
@@ -33,16 +39,19 @@ export const makeModel = (overrides: Partial<Model> = {}): Model => {
   }
 }
 
-export const makeModelsResponse = (models: Array<Model>): ModelsResponse => ({
-  object: "list",
-  data: models,
-})
+export function makeModelsResponse(models: Array<Model>): ModelsResponse {
+  return {
+    object: "list",
+    data: models,
+  }
+}
 
-export const setupManager = (
+export function setupManager(
   accounts: Array<AccountRuntime>,
-  options?: { temporaryAccount?: AccountRuntime },
-): AccountsManager => {
-  const manager = new AccountsManager()
+  options?: SetupManagerOptions,
+): AccountsManager {
+  const { temporaryAccount, persistentAffinityStore } = options ?? {}
+  const manager = new AccountsManager({ persistentAffinityStore })
   const internals = manager as unknown as {
     accounts: Map<string, AccountRuntime>
     accountOrder: Array<string>
@@ -54,8 +63,8 @@ export const setupManager = (
     internals.accountOrder.push(account.id)
   }
 
-  if (options?.temporaryAccount) {
-    internals.temporaryAccount = options.temporaryAccount
+  if (temporaryAccount) {
+    internals.temporaryAccount = temporaryAccount
   }
 
   return manager

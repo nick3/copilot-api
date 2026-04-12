@@ -143,6 +143,7 @@ export type AdminConfig = {
   compactUseSmallModel?: boolean
   messageStartInputTokensFallback?: boolean
   modelRefreshIntervalHours?: number
+  sessionAffinityRetentionDays?: number
   useMessagesApi?: boolean
   useResponsesApiWebSearch?: boolean
 }

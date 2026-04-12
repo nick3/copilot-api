@@ -1,5 +1,7 @@
+import { Database } from "bun:sqlite"
 import { expect, test } from "bun:test"
 
+import type { AffinityPersistenceStore } from "../src/lib/account-affinity"
 import type { AccountRuntime } from "../src/lib/types/account"
 
 import {
@@ -8,6 +10,9 @@ import {
   extractAffinityKey,
   isAffinityAccountUsable,
 } from "../src/lib/account-affinity"
+import { initAdminDb } from "../src/lib/admin-db"
+import { SessionAffinityStore } from "../src/lib/session-affinity-store"
+import { sleep } from "../src/lib/utils"
 
 // ---------------------------------------------------------------------------
 // AccountAffinityCache
@@ -54,20 +59,13 @@ test("clear removes all entries", () => {
   expect(cache.get("a")).toBeUndefined()
 })
 
-test("expired entry is not returned by get", () => {
-  // TTL = 1ms
+test("expired entry is not returned by get", async () => {
   const cache = new AccountAffinityCache(100, 1)
   cache.set("k", "v")
 
-  // Force expiration by manipulating time internally is tricky with bun:test,
-  // so we use a very short TTL and a synchronous busy-wait.
-  const start = Date.now()
-  while (Date.now() - start < 5) {
-    // busy-wait 5ms to ensure 1ms TTL expires
-  }
+  await sleep(5)
 
   expect(cache.get("k")).toBeUndefined()
-  // Entry should have been cleaned up on access
   expect(cache.size).toBe(0)
 })
 
@@ -115,6 +113,110 @@ test("size reflects current entry count", () => {
   expect(cache.size).toBe(2)
   cache.delete("a")
   expect(cache.size).toBe(1)
+})
+
+test("get hydrates memory from persistent store on L1 miss", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+  const store = new SessionAffinityStore(db)
+  const cache = new AccountAffinityCache(100, 60_000, store)
+
+  store.set("session:model-a", "account-1")
+
+  expect(cache.size).toBe(0)
+  expect(cache.get("session:model-a")).toBe("account-1")
+  expect(cache.size).toBe(1)
+
+  store.delete("session:model-a")
+
+  expect(cache.get("session:model-a")).toBe("account-1")
+})
+
+test("set writes through to persistent store", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+  const store = new SessionAffinityStore(db)
+  const cache = new AccountAffinityCache(100, 60_000, store)
+
+  cache.set("session:model-a", "account-1")
+
+  expect(store.get("session:model-a")).toBe("account-1")
+})
+
+test("delete removes entry from both memory and persistent store", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+  const store = new SessionAffinityStore(db)
+  const cache = new AccountAffinityCache(100, 60_000, store)
+
+  cache.set("session:model-a", "account-1")
+  expect(cache.delete("session:model-a")).toBe(true)
+
+  expect(cache.get("session:model-a")).toBeUndefined()
+  expect(store.get("session:model-a")).toBeUndefined()
+})
+
+test("persistent store provider resolves lazily", () => {
+  let resolveCount = 0
+  const store: AffinityPersistenceStore = {
+    get: () => undefined,
+    set: () => {},
+    delete: () => {},
+    clear: () => {},
+  }
+  const cache = new AccountAffinityCache(100, 60_000, () => {
+    resolveCount++
+    return store
+  })
+
+  expect(resolveCount).toBe(0)
+  expect(cache.get("session:model-a")).toBeUndefined()
+  expect(resolveCount).toBe(1)
+
+  cache.set("session:model-a", "account-1")
+  expect(resolveCount).toBe(1)
+})
+
+test("persistent store failures do not escape cache operations", () => {
+  const cache = new AccountAffinityCache(100, 60_000, {
+    get: () => {
+      throw new Error("read failed")
+    },
+    set: () => {
+      throw new Error("write failed")
+    },
+    delete: () => {
+      throw new Error("delete failed")
+    },
+    clear: () => {
+      throw new Error("clear failed")
+    },
+  })
+
+  expect(cache.get("session:model-a")).toBeUndefined()
+  expect(() => cache.set("session:model-a", "account-1")).not.toThrow()
+  expect(() => cache.delete("session:model-a")).not.toThrow()
+  expect(() => cache.clear()).not.toThrow()
+})
+
+test("clearMemory preserves L2 while clear removes both layers", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+  const store = new SessionAffinityStore(db)
+  const cache = new AccountAffinityCache(100, 60_000, store)
+
+  cache.set("session:model-a", "account-1")
+  cache.clearMemory()
+
+  expect(cache.size).toBe(0)
+  expect(store.get("session:model-a")).toBe("account-1")
+  expect(cache.get("session:model-a")).toBe("account-1")
+  expect(cache.size).toBe(1)
+
+  cache.clear()
+
+  expect(cache.size).toBe(0)
+  expect(store.get("session:model-a")).toBeUndefined()
 })
 
 // ---------------------------------------------------------------------------

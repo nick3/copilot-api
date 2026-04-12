@@ -1,9 +1,22 @@
+import consola from "consola"
+
 import type { AccountRuntime } from "~/lib/types/account"
 
 export interface AffinityContext {
   requestId?: string
   affinityModelId?: string
 }
+
+export interface AffinityPersistenceStore {
+  get(key: string): string | undefined
+  set(key: string, accountId: string): void
+  delete(key: string): void
+  clear(): void
+}
+
+export type AffinityPersistenceStoreProvider =
+  | AffinityPersistenceStore
+  | (() => AffinityPersistenceStore | undefined)
 
 interface AffinityCacheEntry {
   accountId: string
@@ -16,36 +29,158 @@ const DEFAULT_TTL_MS = 60 * 60 * 1000 // 1 hour
 /**
  * In-memory LRU cache with TTL for account affinity mappings.
  *
- * Uses Map insertion order for LRU eviction: accessed/updated entries are
+ * Uses Map insertion order for LRU eviction: updated or rehydrated entries are
  * deleted and re-inserted so they move to the "newest" end.
  */
 export class AccountAffinityCache {
   private readonly cache = new Map<string, AffinityCacheEntry>()
   private readonly maxEntries: number
   private readonly ttlMs: number
+  private persistentStore?: AffinityPersistenceStore
+  private persistentStoreProvider?: () => AffinityPersistenceStore | undefined
 
-  constructor(maxEntries = DEFAULT_MAX_ENTRIES, ttlMs = DEFAULT_TTL_MS) {
+  constructor(
+    maxEntries = DEFAULT_MAX_ENTRIES,
+    ttlMs = DEFAULT_TTL_MS,
+    persistentStore?: AffinityPersistenceStoreProvider,
+  ) {
     this.maxEntries = maxEntries
     this.ttlMs = ttlMs
+
+    if (typeof persistentStore === "function") {
+      this.persistentStoreProvider = persistentStore
+    } else {
+      this.persistentStore = persistentStore
+    }
   }
 
   /** Look up the preferred account ID for a cache key. Returns undefined if not found or expired. */
   get(key: string): string | undefined {
     const entry = this.cache.get(key)
-    if (!entry) {
+    if (entry) {
+      if (Date.now() >= entry.expiresAt) {
+        this.cache.delete(key)
+      } else {
+        return entry.accountId
+      }
+    }
+
+    const accountId = this.readPersistentEntry(key)
+    if (!accountId) {
       return undefined
     }
 
-    if (Date.now() >= entry.expiresAt) {
-      this.cache.delete(key)
-      return undefined
-    }
-
-    return entry.accountId
+    this.setMemory(key, accountId)
+    return accountId
   }
 
   /** Record a successful account mapping. Refreshes TTL and moves the entry to the newest position. */
   set(key: string, accountId: string): void {
+    this.setMemory(key, accountId)
+    this.writePersistentEntry(key, accountId)
+  }
+
+  /** Remove a specific entry. */
+  delete(key: string): boolean {
+    const deleted = this.cache.delete(key)
+    this.deletePersistentEntry(key)
+    return deleted
+  }
+
+  /** Remove all in-memory entries. */
+  clearMemory(): void {
+    this.cache.clear()
+  }
+
+  /** Remove all entries. */
+  clear(): void {
+    this.clearMemory()
+    this.clearPersistentEntries()
+  }
+
+  /** Current number of entries (including potentially expired ones). */
+  get size(): number {
+    return this.cache.size
+  }
+
+  private getPersistentStore(): AffinityPersistenceStore | undefined {
+    if (this.persistentStore) {
+      return this.persistentStore
+    }
+    if (!this.persistentStoreProvider) {
+      return undefined
+    }
+
+    try {
+      const store = this.persistentStoreProvider()
+      if (store) {
+        this.persistentStore = store
+      }
+      return store
+    } catch (error) {
+      this.persistentStoreProvider = undefined
+      consola.warn("Failed to resolve affinity persistence store:", error)
+      return undefined
+    }
+  }
+
+  private readPersistentEntry(key: string): string | undefined {
+    const store = this.getPersistentStore()
+    if (!store) {
+      return undefined
+    }
+
+    try {
+      return store.get(key)
+    } catch (error) {
+      consola.warn(
+        "Failed to read affinity mapping from persistent store:",
+        error,
+      )
+      return undefined
+    }
+  }
+
+  private writePersistentEntry(key: string, accountId: string): void {
+    const store = this.getPersistentStore()
+    if (!store) {
+      return
+    }
+
+    try {
+      store.set(key, accountId)
+    } catch (error) {
+      consola.warn("Failed to persist affinity mapping:", error)
+    }
+  }
+
+  private deletePersistentEntry(key: string): void {
+    const store = this.getPersistentStore()
+    if (!store) {
+      return
+    }
+
+    try {
+      store.delete(key)
+    } catch (error) {
+      consola.warn("Failed to delete affinity mapping:", error)
+    }
+  }
+
+  private clearPersistentEntries(): void {
+    const store = this.getPersistentStore()
+    if (!store) {
+      return
+    }
+
+    try {
+      store.clear()
+    } catch (error) {
+      consola.warn("Failed to clear persistent affinity mappings:", error)
+    }
+  }
+
+  private setMemory(key: string, accountId: string): void {
     // Delete first so re-insertion moves it to the newest position (LRU).
     this.cache.delete(key)
 
@@ -60,21 +195,6 @@ export class AccountAffinityCache {
       accountId,
       expiresAt: Date.now() + this.ttlMs,
     })
-  }
-
-  /** Remove a specific entry. */
-  delete(key: string): boolean {
-    return this.cache.delete(key)
-  }
-
-  /** Remove all entries. */
-  clear(): void {
-    this.cache.clear()
-  }
-
-  /** Current number of entries (including potentially expired ones). */
-  get size(): number {
-    return this.cache.size
   }
 }
 

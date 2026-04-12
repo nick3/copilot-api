@@ -15,6 +15,7 @@ import {
   extractAffinityKey,
   isAffinityAccountUsable,
   type AffinityContext,
+  type AffinityPersistenceStoreProvider,
 } from "~/lib/account-affinity"
 import { resolveModelAlias } from "~/lib/config"
 import { HTTPError } from "~/lib/error"
@@ -61,6 +62,7 @@ import {
   addAccountToRegistry,
 } from "./accounts-registry"
 import { PATHS } from "./paths"
+import { getSharedSessionAffinityStore } from "./session-affinity-store"
 import { SessionOwnershipCache } from "./session-ownership"
 
 /** Quota cache TTL in milliseconds (45 seconds) for pre-request selection. */
@@ -177,6 +179,10 @@ type ScoredAccountRuntime = {
   effectiveRemaining: number
 }
 
+export interface AccountsManagerOptions {
+  persistentAffinityStore?: AffinityPersistenceStoreProvider
+}
+
 /** Manages multiple GitHub Copilot accounts at runtime. */
 export class AccountsManager {
   private accounts: Map<string, AccountRuntime> = new Map()
@@ -184,10 +190,20 @@ export class AccountsManager {
   private temporaryAccount?: AccountRuntime
   private vsCodeVersion?: string
   private accountAffinityEnabled = true
-  private affinityCache = new AccountAffinityCache()
+  private affinityCache: AccountAffinityCache
   private sessionOwnership = new SessionOwnershipCache()
   private sessionOwnershipGeneration = 0
   private loadBalanceCursor = 0
+
+  constructor(options: AccountsManagerOptions = {}) {
+    const { persistentAffinityStore } = options
+
+    this.affinityCache = new AccountAffinityCache(
+      undefined,
+      undefined,
+      persistentAffinityStore,
+    )
+  }
 
   private quotaRefreshSnapshotByAccount = new WeakMap<
     AccountRuntime,
@@ -276,7 +292,7 @@ export class AccountsManager {
   setAccountAffinityEnabled(enabled: boolean): void {
     this.accountAffinityEnabled = enabled
     if (!enabled) {
-      this.affinityCache.clear()
+      this.affinityCache.clearMemory()
     }
   }
 
@@ -1265,6 +1281,7 @@ export class AccountsManager {
       candidates,
     )
     if (!affinityResult) {
+      this.affinityCache.delete(cacheKey)
       return {
         selectionReason: preserveSubagentSelectionReason(
           initialSelectionReason,
@@ -1930,7 +1947,7 @@ export class AccountsManager {
     this.stopAllTokenRefresh()
     this.stopAllSessionRefresh()
     this.stopModelsRefresh()
-    this.affinityCache.clear()
+    this.affinityCache.clearMemory()
     this.sessionOwnership.clear()
     this.loadBalanceCursor = 0
     this.accounts.clear()
@@ -1940,4 +1957,6 @@ export class AccountsManager {
 }
 
 /** Singleton instance of AccountsManager */
-export const accountsManager = new AccountsManager()
+export const accountsManager = new AccountsManager({
+  persistentAffinityStore: getSharedSessionAffinityStore,
+})
