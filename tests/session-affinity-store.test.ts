@@ -81,10 +81,14 @@ test("SessionAffinityStore set/get round-trips the persisted account", () => {
 
 test("SessionAffinityStore get returns account when last_used_at_ms update fails", () => {
   let updateAttempts = 0
+  const selectSql =
+    "SELECT account_id FROM session_affinity WHERE cache_key = ? LIMIT 1;"
+  const updateSql =
+    "UPDATE session_affinity SET last_used_at_ms = ? WHERE cache_key = ?;"
 
   const db = {
     query(sql: string) {
-      if (sql === "SELECT account_id FROM session_affinity WHERE cache_key = ? LIMIT 1;") {
+      if (sql === selectSql) {
         return {
           get() {
             return { account_id: "acct-a" }
@@ -92,7 +96,7 @@ test("SessionAffinityStore get returns account when last_used_at_ms update fails
         }
       }
 
-      if (sql === "UPDATE session_affinity SET last_used_at_ms = ? WHERE cache_key = ?;") {
+      if (sql === updateSql) {
         return {
           run() {
             updateAttempts += 1

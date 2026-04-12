@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite"
+
 import consola from "consola"
 
 import { getAdminDb } from "./admin-db"
@@ -20,7 +21,7 @@ export class SessionAffinityStore {
   }
 
   get(cacheKey: string): string | undefined {
-    let row: { account_id?: string } | null = null
+    let row: { account_id?: string } | null
 
     try {
       row = this.db
