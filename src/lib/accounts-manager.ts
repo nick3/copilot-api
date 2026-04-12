@@ -1082,10 +1082,7 @@ export class AccountsManager {
       accountsForSelection,
       candidates,
     )
-    if (
-      result.ok
-      && premiumRemainingOrderedAccountIds.has(result.account.id)
-    ) {
+    if (result.ok && premiumRemainingOrderedAccountIds.has(result.account.id)) {
       selectionReason = "affinity_miss"
     }
 
@@ -1364,7 +1361,10 @@ export class AccountsManager {
       (account) => !account.unlimited,
     )
     return {
-      accounts: [...this.shuffleArray(unlimitedAccounts), ...unknownQuotaAccounts],
+      accounts: [
+        ...this.shuffleArray(unlimitedAccounts),
+        ...unknownQuotaAccounts,
+      ],
       premiumRemainingOrderedAccountIds,
     }
   }

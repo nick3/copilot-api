@@ -78,9 +78,7 @@ export const parseSubagentMarkerFromFirstUser = (
   return inspection.kind === "valid" ? inspection.marker : null
 }
 
-const extractMarkerPayloadFromReminderLine = (
-  line: string,
-): string | null => {
+const extractMarkerPayloadFromReminderLine = (line: string): string | null => {
   const trimmedLine = line.trim()
   if (!trimmedLine) {
     return null

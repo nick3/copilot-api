@@ -134,7 +134,9 @@ Agent Explore started (agent-1)
       marker: null,
     })
   })
+})
 
+describe("inspectSubagentMarkerFromFirstUser", () => {
   test("returns invalid when required fields are missing", () => {
     const payload = basePayload([
       {

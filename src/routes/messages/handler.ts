@@ -175,7 +175,9 @@ export async function handleCompletion(c: Context) {
   const subagentMarker =
     markerInspection.kind === "valid" ? markerInspection.marker : null
   const isSubagentRequest = subagentMarker !== null
-  const invalidSubagentMarkerSelectionReason: AccountSelectionReason | undefined =
+  const invalidSubagentMarkerSelectionReason:
+    | AccountSelectionReason
+    | undefined =
     markerInspection.kind === "invalid" ?
       "subagent_marker_invalid_fallback"
     : undefined

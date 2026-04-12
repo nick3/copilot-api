@@ -1,14 +1,16 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
-import fs from "node:fs/promises"
-import path from "node:path"
 
 import "./shared-admin-db-test-home"
 
-import { mergeConfigWithDefaults } from "~/lib/config"
-import { PATHS } from "~/lib/paths"
+import fs from "node:fs/promises"
+import path from "node:path"
+
 import type { AccountRuntime } from "~/lib/types/account"
 import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
 import type { Model } from "~/services/copilot/get-models"
+
+import { mergeConfigWithDefaults } from "~/lib/config"
+import { PATHS } from "~/lib/paths"
 
 const [{ accountsManager }, { getAdminDb }, { state }, { messageRoutes }] =
   await Promise.all([
@@ -106,10 +108,13 @@ function buildAnthropicResponse(model: string, text: string) {
 function mockSuccessfulMessagesFetch(): void {
   const fetchMock = mock(() =>
     Promise.resolve(
-      new Response(JSON.stringify(buildAnthropicResponse("messages-model", "ok")), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
+      new Response(
+        JSON.stringify(buildAnthropicResponse("messages-model", "ok")),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
     ),
   )
 
@@ -125,7 +130,9 @@ async function withConfig(
   },
   run: () => Promise<void>,
 ): Promise<void> {
-  const original = await fs.readFile(PATHS.CONFIG_PATH, "utf8").catch(() => null)
+  const original = await fs
+    .readFile(PATHS.CONFIG_PATH, "utf8")
+    .catch(() => null)
   await fs.mkdir(path.dirname(PATHS.CONFIG_PATH), { recursive: true })
   await fs.writeFile(
     PATHS.CONFIG_PATH,
@@ -137,11 +144,9 @@ async function withConfig(
   try {
     await run()
   } finally {
-    if (original === null) {
-      await fs.rm(PATHS.CONFIG_PATH, { force: true })
-    } else {
-      await fs.writeFile(PATHS.CONFIG_PATH, original, "utf8")
-    }
+    await (original === null ?
+      fs.rm(PATHS.CONFIG_PATH, { force: true })
+    : fs.writeFile(PATHS.CONFIG_PATH, original, "utf8"))
     mergeConfigWithDefaults()
   }
 }
