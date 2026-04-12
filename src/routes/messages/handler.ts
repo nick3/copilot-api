@@ -37,6 +37,7 @@ import {
   normalizeMessagesUsage,
   type NormalizedUsage,
 } from "~/lib/request-history"
+import { resolveEffectiveInitiator } from "~/lib/request-initiator"
 import { state } from "~/lib/state"
 import {
   type AffinityKeySource,
@@ -181,7 +182,6 @@ export async function handleCompletion(c: Context) {
     markerInspection.kind === "invalid" ?
       "subagent_marker_invalid_fallback"
     : undefined
-  const initiatorOverride = isSubagentRequest ? "agent" : undefined
   if (subagentMarker) {
     debugJson(logger, "Detected Subagent marker:", subagentMarker)
   }
@@ -234,6 +234,15 @@ export async function handleCompletion(c: Context) {
     parseUserIdMetadata(userId)
   const normalizedSafetyIdentifier = safetyIdentifier ?? undefined
   const normalizedPromptCacheKey = promptCacheKey ?? undefined
+  const openAIPayload = translateToOpenAI(anthropicPayload)
+  const fallbackInitiator = resolveEffectiveInitiator(
+    getChatInitiator(openAIPayload.messages),
+    {
+      isCompact,
+      isSubagent: isSubagentRequest,
+    },
+  )
+
   const blockedResponse = maybeBlockOriginalModelName({
     c,
     store,
@@ -249,15 +258,11 @@ export async function handleCompletion(c: Context) {
     userId,
     safetyIdentifier: normalizedSafetyIdentifier,
     promptCacheKey: normalizedPromptCacheKey,
-    initiator: initiatorOverride,
+    initiator: fallbackInitiator,
     isSubagent: isSubagentRequest,
     selectionReason: invalidSubagentMarkerSelectionReason,
   })
   if (blockedResponse) return blockedResponse
-
-  const openAIPayload = translateToOpenAI(anthropicPayload)
-  const fallbackInitiator =
-    initiatorOverride ?? getChatInitiator(openAIPayload.messages)
 
   const endpointModel = findEndpointModel(clientModel)
   const resolvedClientModel = endpointModel?.id ?? clientModel
@@ -367,7 +372,6 @@ export async function handleCompletion(c: Context) {
       c,
       anthropicPayload,
       anthropicBetaHeader: anthropicBeta ?? undefined,
-      initiatorOverride,
       subagentMarker,
       sessionId,
       instr,
@@ -380,7 +384,6 @@ export async function handleCompletion(c: Context) {
       c,
       anthropicPayload,
       openAIPayload,
-      initiatorOverride,
       subagentMarker,
       sessionId,
       selectedModel,
@@ -392,7 +395,6 @@ export async function handleCompletion(c: Context) {
   return await handleWithChatCompletions({
     c,
     openAIPayload,
-    initiatorOverride,
     subagentMarker,
     sessionId,
     selectedModel,
@@ -404,7 +406,6 @@ export async function handleCompletion(c: Context) {
 const handleWithChatCompletions = async (params: {
   c: Context
   openAIPayload: ChatCompletionsPayload
-  initiatorOverride?: "agent" | "user"
   subagentMarker?: SubagentMarker | null
   sessionId?: string
   selectedModel: Model
@@ -414,7 +415,6 @@ const handleWithChatCompletions = async (params: {
   const {
     c,
     openAIPayload,
-    initiatorOverride,
     subagentMarker,
     sessionId,
     selectedModel,
@@ -424,17 +424,20 @@ const handleWithChatCompletions = async (params: {
   debugJson(logger, "Translated OpenAI request payload:", openAIPayload)
 
   const ctx = toAccountContext(instr.account)
-  const initiator =
-    initiatorOverride ?? getChatInitiator(openAIPayload.messages)
+  const initiator = getChatInitiator(openAIPayload.messages)
+  const effectiveInitiator = resolveEffectiveInitiator(initiator, {
+    isCompact,
+    isSubagent: Boolean(subagentMarker),
+  })
 
-  instr.initiator = initiator
+  instr.initiator = effectiveInitiator
 
   let response: ChatCompletionsResult
 
   try {
     response = await createChatCompletions(openAIPayload, ctx, {
       upstreamRequestId: instr.upstreamRequestId,
-      initiator,
+      initiator: effectiveInitiator,
       subagentMarker,
       sessionId,
       isCompact,
@@ -490,7 +493,6 @@ const handleWithResponsesApi = async (params: {
   c: Context
   anthropicPayload: AnthropicMessagesPayload
   openAIPayload: ChatCompletionsPayload
-  initiatorOverride?: "agent" | "user"
   subagentMarker?: SubagentMarker | null
   sessionId?: string
   selectedModel: Model
@@ -501,7 +503,6 @@ const handleWithResponsesApi = async (params: {
     c,
     anthropicPayload,
     openAIPayload,
-    initiatorOverride,
     subagentMarker,
     sessionId,
     selectedModel,
@@ -522,10 +523,13 @@ const handleWithResponsesApi = async (params: {
   debugJson(logger, "Translated Responses payload:", responsesPayload)
 
   const { vision, initiator } = getResponsesRequestOptions(responsesPayload)
-  const resolvedInitiator = initiatorOverride ?? initiator
+  const effectiveInitiator = resolveEffectiveInitiator(initiator, {
+    isCompact,
+    isSubagent: Boolean(subagentMarker),
+  })
   const ctx = toAccountContext(instr.account)
 
-  instr.initiator = resolvedInitiator
+  instr.initiator = effectiveInitiator
 
   let response: Awaited<ReturnType<typeof createResponses>>
 
@@ -534,7 +538,7 @@ const handleWithResponsesApi = async (params: {
       responsesPayload,
       {
         vision,
-        initiator: resolvedInitiator,
+        initiator: effectiveInitiator,
         upstreamRequestId: instr.upstreamRequestId,
         subagentMarker,
         sessionId,
@@ -1359,7 +1363,6 @@ const handleWithMessagesApi = async (params: {
   c: Context
   anthropicPayload: AnthropicMessagesPayload
   anthropicBetaHeader?: string
-  initiatorOverride?: "agent" | "user"
   subagentMarker?: SubagentMarker | null
   sessionId?: string
   instr: InstrumentationContext
@@ -1370,7 +1373,6 @@ const handleWithMessagesApi = async (params: {
     c,
     anthropicPayload,
     anthropicBetaHeader,
-    initiatorOverride,
     subagentMarker,
     sessionId,
     instr,
@@ -1383,9 +1385,13 @@ const handleWithMessagesApi = async (params: {
   debugJson(logger, "Translated Messages payload:", anthropicPayload)
 
   const ctx = toAccountContext(instr.account)
-  const initiator = initiatorOverride ?? getMessagesInitiator(anthropicPayload)
+  const initiator = getMessagesInitiator(anthropicPayload)
+  const effectiveInitiator = resolveEffectiveInitiator(initiator, {
+    isCompact,
+    isSubagent: Boolean(subagentMarker),
+  })
 
-  instr.initiator = initiator
+  instr.initiator = effectiveInitiator
 
   let response: MessagesResult
 
@@ -1393,7 +1399,7 @@ const handleWithMessagesApi = async (params: {
     response = await createMessages(anthropicPayload, ctx, {
       anthropicBetaHeader,
       upstreamRequestId: instr.upstreamRequestId,
-      initiator,
+      initiator: effectiveInitiator,
       subagentMarker,
       sessionId,
       isCompact,

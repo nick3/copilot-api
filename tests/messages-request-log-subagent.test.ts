@@ -105,6 +105,8 @@ function buildAnthropicResponse(model: string, text: string) {
   }
 }
 
+const COMPACT_PROMPT = `CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.\n\nYour task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.\n\n7. Pending Tasks:\n   - [Task 1]\n\n8. Current Work:\n   [Current work]`
+
 function mockSuccessfulMessagesFetch(): void {
   const fetchMock = mock(() =>
     Promise.resolve(
@@ -351,6 +353,43 @@ describe("messages request log subagent persistence", () => {
       },
     )
   })
+})
+
+describe("messages request log initiator alignment", () => {
+  test("records user initiator for ordinary requests", async () => {
+    mockSuccessfulMessagesFetch()
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          createPayload({
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: "hello",
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      }),
+    )
+
+    const latest = getLatestRequestLog()
+
+    expect(response.status).toBe(200)
+    expect(latest?.initiator).toBe("user")
+    expect(latest?.is_subagent).toBe(0)
+    expect(typeof latest?.affinity_key_used).toBe("string")
+    expect(typeof latest?.affinity_key_source).toBe("string")
+    expect(latest?.selection_reason).toBe("affinity_miss")
+  })
 
   test("keeps tool_result continuations out of is_subagent without marker", async () => {
     mockSuccessfulMessagesFetch()
@@ -386,5 +425,75 @@ describe("messages request log subagent persistence", () => {
     expect(typeof latest?.affinity_key_used).toBe("string")
     expect(typeof latest?.affinity_key_source).toBe("string")
     expect(latest?.selection_reason).toBe("affinity_miss")
+  })
+
+  test("records agent initiator for compact requests", async () => {
+    mockSuccessfulMessagesFetch()
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          createPayload({
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: COMPACT_PROMPT,
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      }),
+    )
+
+    const latest = getLatestRequestLog()
+
+    expect(response.status).toBe(200)
+    expect(latest?.initiator).toBe("agent")
+    expect(latest?.is_subagent).toBe(0)
+    expect(typeof latest?.affinity_key_used).toBe("string")
+    expect(typeof latest?.affinity_key_source).toBe("string")
+    expect(latest?.selection_reason).toBe("affinity_miss")
+  })
+
+  test("records agent initiator for compact requests when selection fails", async () => {
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve({
+        ok: false,
+        reason: "NO_QUOTA",
+      })
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          createPayload({
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: COMPACT_PROMPT,
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      }),
+    )
+
+    const latest = getLatestRequestLog()
+
+    expect(response.status).toBe(429)
+    expect(latest?.initiator).toBe("agent")
   })
 })

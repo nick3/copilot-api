@@ -114,6 +114,16 @@ test("sets interaction headers for subagent session", async () => {
   expect(headers["x-initiator"]).toBe("agent")
 })
 
+test("forces agent initiator for compact requests", async () => {
+  const payload = basePayload([{ type: "text", text: "hello" }])
+
+  await createMessages(payload, accountContext, {
+    isCompact: true,
+  })
+
+  expect(getLastHeaders()["x-initiator"]).toBe("agent")
+})
+
 test("enables vision headers for images nested inside tool results", async () => {
   const payload = basePayload([
     {

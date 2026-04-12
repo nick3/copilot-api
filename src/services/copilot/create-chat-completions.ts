@@ -12,6 +12,7 @@ import {
 } from "~/lib/api-config"
 import { getReasoningEffortForModel, isForceAgentEnabled } from "~/lib/config"
 import { HTTPError } from "~/lib/error"
+import { resolveEffectiveInitiator } from "~/lib/request-initiator"
 import { accountFromState } from "~/lib/state"
 
 function isGpt5MiniFamily(modelId: string): boolean {
@@ -74,10 +75,15 @@ export const createChatCompletions = async (
 
   const initiator = options?.initiator ?? getChatInitiator(payload.messages)
 
+  const effectiveInitiator = resolveEffectiveInitiator(initiator, {
+    isCompact: options?.isCompact,
+    isSubagent: Boolean(options?.subagentMarker),
+  })
+
   // Build headers and add x-initiator
   const headers: Record<string, string> = {
     ...copilotHeaders(ctx, enableVision, options?.upstreamRequestId),
-    "x-initiator": options?.subagentMarker ? "agent" : initiator,
+    "x-initiator": effectiveInitiator,
   }
 
   prepareInteractionHeaders(

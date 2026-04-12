@@ -119,6 +119,20 @@ test("sets interaction headers for explicit session and subagent", async () => {
   expect(headers["x-initiator"]).toBe("agent")
 })
 
+test("forces agent initiator for compact chat requests", async () => {
+  const payload: ChatCompletionsPayload = {
+    messages: [{ role: "user", content: "hi" }],
+    model: "gpt-test",
+  }
+
+  await createChatCompletions(payload, undefined, {
+    isCompact: true,
+  })
+
+  const { headers } = getLastFetchCall()
+  expect(headers["x-initiator"]).toBe("agent")
+})
+
 test("injects reasoning_effort from config for gpt-5-mini when omitted", async () => {
   const callCountBefore = fetchMock.mock.calls.length
 

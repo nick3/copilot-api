@@ -11,6 +11,7 @@ import {
   prepareInteractionHeaders,
 } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
+import { resolveEffectiveInitiator } from "~/lib/request-initiator"
 import { accountFromState } from "~/lib/state"
 
 export interface ResponsesPayload {
@@ -377,9 +378,14 @@ export const createResponses = async (
   const ctx = account ?? accountFromState()
   if (!ctx.copilotToken) throw new Error("Copilot token not found")
 
+  const effectiveInitiator = resolveEffectiveInitiator(initiator, {
+    isCompact,
+    isSubagent: Boolean(subagentMarker),
+  })
+
   const headers: Record<string, string> = {
     ...copilotHeaders(ctx, vision, upstreamRequestId),
-    "x-initiator": initiator,
+    "x-initiator": effectiveInitiator,
   }
 
   prepareInteractionHeaders(sessionId, Boolean(subagentMarker), headers)

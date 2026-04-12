@@ -17,6 +17,7 @@ import {
 } from "~/lib/api-config"
 import { isForceAgentEnabled } from "~/lib/config"
 import { HTTPError } from "~/lib/error"
+import { resolveEffectiveInitiator } from "~/lib/request-initiator"
 import { accountFromState } from "~/lib/state"
 import { parseUserIdMetadata } from "~/lib/utils"
 
@@ -148,9 +149,14 @@ const buildMessagesHeaders = ({
     | undefined
   payload: AnthropicMessagesPayload
 }): Record<string, string> => {
+  const effectiveInitiator = resolveEffectiveInitiator(initiator, {
+    isCompact: options?.isCompact,
+    isSubagent: Boolean(options?.subagentMarker),
+  })
+
   const headers: Record<string, string> = {
     ...copilotHeaders(ctx, enableVision, options?.upstreamRequestId),
-    "x-initiator": options?.subagentMarker ? "agent" : initiator,
+    "x-initiator": effectiveInitiator,
   }
 
   prepareInteractionHeaders(
