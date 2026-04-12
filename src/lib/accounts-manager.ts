@@ -172,6 +172,11 @@ function preserveSubagentSelectionReason(
     : nextSelectionReason
 }
 
+type ScoredAccountRuntime = {
+  account: AccountRuntime
+  effectiveRemaining: number
+}
+
 /** Manages multiple GitHub Copilot accounts at runtime. */
 export class AccountsManager {
   private accounts: Map<string, AccountRuntime> = new Map()
@@ -1058,8 +1063,17 @@ export class AccountsManager {
       return preferredSelection.result
     }
 
+    let accountsForSelection = affinityPlan.defaultAccountsForSelection
+    if (
+      affinityPlan.canReorderOnAffinityCacheMiss
+      && preferredSelection.affinityCacheMiss
+    ) {
+      accountsForSelection =
+        this.orderAccountsForAffinityCacheMiss(orderedAccounts)
+    }
+
     const result = await this.selectWithAliasFallback(
-      affinityPlan.accountsForSelection,
+      accountsForSelection,
       candidates,
     )
 
@@ -1087,8 +1101,9 @@ export class AccountsManager {
     ownerSelectionReason?: AccountSelectionReason
   }): {
     cacheKey: string | undefined
-    accountsForSelection: Array<AccountRuntime>
+    defaultAccountsForSelection: Array<AccountRuntime>
     initialSelectionReason: AccountSelectionReason
+    canReorderOnAffinityCacheMiss: boolean
   } {
     const { orderedAccounts, candidates, context, ownerSelectionReason } =
       params
@@ -1106,11 +1121,13 @@ export class AccountsManager {
 
     return {
       cacheKey,
-      accountsForSelection:
+      defaultAccountsForSelection:
         shouldRotate ? this.rotateAccounts(orderedAccounts) : orderedAccounts,
       initialSelectionReason:
         ownerSelectionReason
         ?? getInitialSelectionReason(cacheKey, rotationStart),
+      canReorderOnAffinityCacheMiss:
+        ownerSelectionReason === undefined && cacheKey !== undefined,
     }
   }
 
@@ -1213,17 +1230,24 @@ export class AccountsManager {
   }): Promise<{
     result?: SelectAccountForRequestSuccess
     selectionReason: AccountSelectionReason
+    affinityCacheMiss: boolean
   }> {
     const { cacheKey, orderedAccounts, candidates, initialSelectionReason } =
       params
 
     if (!cacheKey) {
-      return { selectionReason: initialSelectionReason }
+      return {
+        selectionReason: initialSelectionReason,
+        affinityCacheMiss: false,
+      }
     }
 
     const preferredId = this.affinityCache.get(cacheKey)
     if (!preferredId) {
-      return { selectionReason: initialSelectionReason }
+      return {
+        selectionReason: initialSelectionReason,
+        affinityCacheMiss: true,
+      }
     }
 
     const affinityResult = await this.tryAffinityAccount(
@@ -1237,6 +1261,7 @@ export class AccountsManager {
           initialSelectionReason,
           "preferred_account_unavailable",
         ),
+        affinityCacheMiss: false,
       }
     }
 
@@ -1255,6 +1280,7 @@ export class AccountsManager {
     return {
       result: affinityResult,
       selectionReason,
+      affinityCacheMiss: false,
     }
   }
 
@@ -1268,6 +1294,94 @@ export class AccountsManager {
     const start = this.loadBalanceCursor % accounts.length
     if (start === 0) return accounts
     return [...accounts.slice(start), ...accounts.slice(0, start)]
+  }
+
+  private orderAccountsForAffinityCacheMiss(
+    orderedAccounts: Array<AccountRuntime>,
+  ): Array<AccountRuntime> {
+    const scoredAccounts = orderedAccounts
+      .map((account) => ({
+        account,
+        effectiveRemaining: getEffectivePremiumRemaining(account),
+      }))
+      .filter(
+        (entry): entry is ScoredAccountRuntime =>
+          entry.effectiveRemaining !== undefined,
+      )
+      .sort((left, right) => right.effectiveRemaining - left.effectiveRemaining)
+
+    if (scoredAccounts.length > 0) {
+      const scoredAccountsInSelectionOrder =
+        this.shuffleWithinEqualRemainingBuckets(scoredAccounts).map(
+          ({ account }) => account,
+        )
+      const scoredAccountSet = new Set(scoredAccountsInSelectionOrder)
+      const unknownQuotaAccounts = orderedAccounts.filter(
+        (account) => !scoredAccountSet.has(account) && !account.unlimited,
+      )
+      const unlimitedAccounts = orderedAccounts.filter(
+        (account) => !scoredAccountSet.has(account) && account.unlimited,
+      )
+      return [
+        ...scoredAccountsInSelectionOrder,
+        ...unknownQuotaAccounts,
+        ...unlimitedAccounts,
+      ]
+    }
+
+    const unlimitedAccounts = orderedAccounts.filter(
+      (account) => account.unlimited,
+    )
+    if (unlimitedAccounts.length === 0) {
+      return orderedAccounts
+    }
+
+    const unknownQuotaAccounts = orderedAccounts.filter(
+      (account) => !account.unlimited,
+    )
+    return [...this.shuffleArray(unlimitedAccounts), ...unknownQuotaAccounts]
+  }
+
+  private shuffleWithinEqualRemainingBuckets(
+    scoredAccounts: Array<ScoredAccountRuntime>,
+  ): Array<ScoredAccountRuntime> {
+    const shuffled: Array<ScoredAccountRuntime> = []
+
+    let index = 0
+    while (index < scoredAccounts.length) {
+      const currentRemaining = scoredAccounts[index].effectiveRemaining
+      let bucketEnd = index + 1
+      while (
+        bucketEnd < scoredAccounts.length
+        && scoredAccounts[bucketEnd].effectiveRemaining === currentRemaining
+      ) {
+        bucketEnd++
+      }
+
+      shuffled.push(
+        ...this.shuffleArray(scoredAccounts.slice(index, bucketEnd)),
+      )
+      index = bucketEnd
+    }
+
+    return shuffled
+  }
+
+  private shuffleArray<T>(items: Array<T>): Array<T> {
+    if (items.length <= 1) {
+      return items
+    }
+
+    const shuffled = [...items]
+    for (let index = shuffled.length - 1; index > 0; index--) {
+      const randomIndex = Math.floor(Math.random() * (index + 1))
+      ;[shuffled[index], shuffled[randomIndex]] = [
+        shuffled[randomIndex],
+        shuffled[index],
+      ]
+    }
+
+    return shuffled
   }
 
   /**

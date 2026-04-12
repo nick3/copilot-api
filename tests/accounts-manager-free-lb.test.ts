@@ -1,122 +1,16 @@
 import { expect, test } from "bun:test"
 
 import type { AccountRuntime } from "../src/lib/types/account"
-import type { Model, ModelsResponse } from "../src/services/copilot/get-models"
 
-import { AccountsManager } from "../src/lib/accounts-manager"
-
-const makeModel = (overrides: Partial<Model> = {}): Model => {
-  const base: Model = {
-    billing: {
-      is_premium: false,
-      multiplier: 0,
-    },
-    capabilities: {
-      family: "test",
-      limits: {},
-      object: "model_capabilities",
-      supports: {},
-      tokenizer: "test",
-      type: "test",
-    },
-    id: "test-model",
-    model_picker_enabled: true,
-    name: "Test model",
-    object: "model",
-    preview: false,
-    supported_endpoints: ["/chat/completions"],
-    vendor: "test",
-    version: "0",
-  }
-
-  return {
-    ...base,
-    ...overrides,
-  }
-}
-
-const makeModelsResponse = (models: Array<Model>): ModelsResponse => ({
-  object: "list",
-  data: models,
-})
-
-const setupManager = (
-  accounts: Array<AccountRuntime>,
-  options?: { temporaryAccount?: AccountRuntime },
-): AccountsManager => {
-  const manager = new AccountsManager()
-  const internals = manager as unknown as {
-    accounts: Map<string, AccountRuntime>
-    accountOrder: Array<string>
-    temporaryAccount?: AccountRuntime
-  }
-
-  for (const account of accounts) {
-    internals.accounts.set(account.id, account)
-    internals.accountOrder.push(account.id)
-  }
-
-  if (options?.temporaryAccount) {
-    internals.temporaryAccount = options.temporaryAccount
-  }
-
-  return manager
-}
+import {
+  makeModel,
+  makeModelsResponse,
+  setupManager,
+} from "./accounts-manager-test-helpers"
 
 // ---------------------------------------------------------------------------
-// Load-balanced selection (affinity enabled, cache miss → round-robin)
+// Load-balanced selection outside affinity-miss preselection
 // ---------------------------------------------------------------------------
-
-test("selectAccountForRequest round-robins free models on cache miss", async () => {
-  const model = makeModel({
-    id: "free-model",
-    billing: {
-      is_premium: false,
-      multiplier: 0,
-    },
-  })
-
-  const a: AccountRuntime = {
-    id: "a",
-    accountType: "individual",
-    addedAt: Date.now(),
-    githubToken: "ghp_a",
-    models: makeModelsResponse([model]),
-  }
-  const b: AccountRuntime = {
-    id: "b",
-    accountType: "individual",
-    addedAt: Date.now(),
-    githubToken: "ghp_b",
-    models: makeModelsResponse([model]),
-  }
-  const c: AccountRuntime = {
-    id: "c",
-    accountType: "individual",
-    addedAt: Date.now(),
-    githubToken: "ghp_c",
-    models: makeModelsResponse([model]),
-  }
-
-  const manager = setupManager([a, b, c])
-
-  const seen: Array<string> = []
-  for (let i = 0; i < 6; i++) {
-    const selection = await manager.selectAccountForRequest([
-      { modelId: "free-model", endpoint: "/chat/completions" },
-    ])
-
-    expect(selection.ok).toBe(true)
-    if (!selection.ok) return
-
-    seen.push(selection.account.id)
-    expect(selection.costUnits).toBe(0)
-    expect(selection.reservation).toBeUndefined()
-  }
-
-  // Round-robin across accounts on cache miss.
-  expect(seen).toEqual(["a", "b", "c", "a", "b", "c"])
-})
 
 test("selectAccountForRequest starts with temporaryAccount then round-robins", async () => {
   const model = makeModel({ id: "free-model" })
@@ -404,7 +298,7 @@ test("affinity: confirmAffinity routes subsequent requests to the same account",
   expect(second.account.id).toBe("a")
 })
 
-test("affinity: without confirmAffinity, cache is not populated", async () => {
+test("affinity: without confirmAffinity, subsequent requests remain cache misses", async () => {
   const model = makeModel({ id: "free-model" })
 
   const a: AccountRuntime = {
@@ -413,6 +307,9 @@ test("affinity: without confirmAffinity, cache is not populated", async () => {
     addedAt: Date.now(),
     githubToken: "ghp_a",
     models: makeModelsResponse([model]),
+    premiumRemaining: 12,
+    premiumReserved: 1,
+    lastQuotaFetch: Date.now(),
   }
   const b: AccountRuntime = {
     id: "b",
@@ -420,6 +317,9 @@ test("affinity: without confirmAffinity, cache is not populated", async () => {
     addedAt: Date.now(),
     githubToken: "ghp_b",
     models: makeModelsResponse([model]),
+    premiumRemaining: 5,
+    premiumReserved: 0,
+    lastQuotaFetch: Date.now(),
   }
 
   const manager = setupManager([a, b])
@@ -431,18 +331,19 @@ test("affinity: without confirmAffinity, cache is not populated", async () => {
   )
   expect(first.ok).toBe(true)
   if (!first.ok) return
+  expect(first.account.id).toBe("a")
   expect(first.confirmAffinity).toBeDefined()
   // intentionally not calling confirmAffinity
 
-  // Second request: cache miss → round-robin advances cursor → "b".
+  // Second request: cache is still empty, so the miss path runs again.
   const second = await manager.selectAccountForRequest(
     [{ modelId: "free-model", endpoint: "/chat/completions" }],
     { requestId: "session-2" },
   )
   expect(second.ok).toBe(true)
   if (!second.ok) return
-  // Without confirmAffinity, no cache entry; round-robin picks next account.
-  expect(second.account.id).toBe("b")
+  expect(second.affinityHit).toBeUndefined()
+  expect(second.account.id).toBe("a")
 })
 
 test("affinity: different models with same key can route to different accounts", async () => {
@@ -541,7 +442,7 @@ test("affinity: affinityModelId shares stickiness across different candidate mod
   expect(second.affinityCacheKey).toBe("shared-key:big-model")
 })
 
-test("affinity: skips failed preferred account and falls back to sequential", async () => {
+test("affinity: preferred_account_unavailable keeps the existing fallback behavior", async () => {
   const model = makeModel({ id: "free-model" })
 
   const a: AccountRuntime = {
@@ -550,6 +451,9 @@ test("affinity: skips failed preferred account and falls back to sequential", as
     addedAt: Date.now(),
     githubToken: "ghp_a",
     models: makeModelsResponse([model]),
+    premiumRemaining: 30,
+    premiumReserved: 0,
+    lastQuotaFetch: Date.now(),
   }
   const b: AccountRuntime = {
     id: "b",
@@ -557,9 +461,22 @@ test("affinity: skips failed preferred account and falls back to sequential", as
     addedAt: Date.now(),
     githubToken: "ghp_b",
     models: makeModelsResponse([model]),
+    premiumRemaining: 1,
+    premiumReserved: 0,
+    lastQuotaFetch: Date.now(),
+  }
+  const c: AccountRuntime = {
+    id: "c",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_c",
+    models: makeModelsResponse([model]),
+    premiumRemaining: 2,
+    premiumReserved: 0,
+    lastQuotaFetch: Date.now(),
   }
 
-  const manager = setupManager([a, b])
+  const manager = setupManager([a, b, c])
 
   // Establish affinity to account "a".
   const first = await manager.selectAccountForRequest(
@@ -571,11 +488,12 @@ test("affinity: skips failed preferred account and falls back to sequential", as
   first.confirmAffinity?.()
   expect(first.account.id).toBe("a")
 
-  // Mark "a" as failed.
+  // Mark "a" as failed and make "c" the strongest cache-miss candidate.
   a.failed = true
   a.failureReason = "test"
+  c.premiumRemaining = 25
 
-  // Next request: affinity points to "a" but it's failed → fallback to "b".
+  // Next request: affinity points to "a" but it's failed, so fallback stays on the old path.
   const second = await manager.selectAccountForRequest(
     [{ modelId: "free-model", endpoint: "/chat/completions" }],
     { requestId: "session-3" },
@@ -583,6 +501,7 @@ test("affinity: skips failed preferred account and falls back to sequential", as
   expect(second.ok).toBe(true)
   if (!second.ok) return
   expect(second.account.id).toBe("b")
+  expect(second.selectionReason).toBe("preferred_account_unavailable")
 })
 
 test("affinity: no affinity context uses round-robin", async () => {
@@ -841,6 +760,9 @@ test("ownership: unusable owner keeps fallback reason when affinity cache hits",
     addedAt: Date.now(),
     githubToken: "ghp_a",
     models: makeModelsResponse([model]),
+    premiumRemaining: 1,
+    premiumReserved: 0,
+    lastQuotaFetch: Date.now(),
   }
   const b: AccountRuntime = {
     id: "b",
@@ -848,6 +770,9 @@ test("ownership: unusable owner keeps fallback reason when affinity cache hits",
     addedAt: Date.now(),
     githubToken: "ghp_b",
     models: makeModelsResponse([model]),
+    premiumRemaining: 10,
+    premiumReserved: 0,
+    lastQuotaFetch: Date.now(),
   }
 
   const manager = setupManager([a, b])
