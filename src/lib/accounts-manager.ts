@@ -1064,23 +1064,35 @@ export class AccountsManager {
     }
 
     let accountsForSelection = affinityPlan.defaultAccountsForSelection
+    let premiumRemainingOrderedAccountIds = new Set<string>()
+    let selectionReason = preferredSelection.selectionReason
+
     if (
       affinityPlan.canReorderOnAffinityCacheMiss
       && preferredSelection.affinityCacheMiss
     ) {
-      accountsForSelection =
+      const affinityMissOrder =
         this.orderAccountsForAffinityCacheMiss(orderedAccounts)
+      accountsForSelection = affinityMissOrder.accounts
+      premiumRemainingOrderedAccountIds =
+        affinityMissOrder.premiumRemainingOrderedAccountIds
     }
 
     const result = await this.selectWithAliasFallback(
       accountsForSelection,
       candidates,
     )
+    if (
+      result.ok
+      && premiumRemainingOrderedAccountIds.has(result.account.id)
+    ) {
+      selectionReason = "affinity_miss"
+    }
 
     return this.finalizeSelectedAccount({
       result,
       cacheKey: affinityPlan.cacheKey,
-      selectionReason: preferredSelection.selectionReason,
+      selectionReason,
       ownershipWriteSessionId: context?.ownershipWriteSessionId,
     })
   }
@@ -1298,7 +1310,10 @@ export class AccountsManager {
 
   private orderAccountsForAffinityCacheMiss(
     orderedAccounts: Array<AccountRuntime>,
-  ): Array<AccountRuntime> {
+  ): {
+    accounts: Array<AccountRuntime>
+    premiumRemainingOrderedAccountIds: Set<string>
+  } {
     const scoredAccounts = orderedAccounts
       .map((account) => ({
         account,
@@ -1322,24 +1337,36 @@ export class AccountsManager {
       const unlimitedAccounts = orderedAccounts.filter(
         (account) => !scoredAccountSet.has(account) && account.unlimited,
       )
-      return [
-        ...scoredAccountsInSelectionOrder,
-        ...unknownQuotaAccounts,
-        ...unlimitedAccounts,
-      ]
+      return {
+        accounts: [
+          ...scoredAccountsInSelectionOrder,
+          ...unknownQuotaAccounts,
+          ...unlimitedAccounts,
+        ],
+        premiumRemainingOrderedAccountIds: new Set(
+          scoredAccountsInSelectionOrder.map((account) => account.id),
+        ),
+      }
     }
 
+    const premiumRemainingOrderedAccountIds = new Set<string>()
     const unlimitedAccounts = orderedAccounts.filter(
       (account) => account.unlimited,
     )
     if (unlimitedAccounts.length === 0) {
-      return orderedAccounts
+      return {
+        accounts: orderedAccounts,
+        premiumRemainingOrderedAccountIds,
+      }
     }
 
     const unknownQuotaAccounts = orderedAccounts.filter(
       (account) => !account.unlimited,
     )
-    return [...this.shuffleArray(unlimitedAccounts), ...unknownQuotaAccounts]
+    return {
+      accounts: [...this.shuffleArray(unlimitedAccounts), ...unknownQuotaAccounts],
+      premiumRemainingOrderedAccountIds,
+    }
   }
 
   private shuffleWithinEqualRemainingBuckets(

@@ -69,6 +69,109 @@ test("affinity miss selects the free-model account with the highest effective pr
   expect(selection.reservation).toBeUndefined()
 })
 
+test("affinity miss after round-robin rotation still reports affinity_miss when premium-remaining ordering wins", async () => {
+  const model = makeModel({ id: "free-model" })
+
+  const a: AccountRuntime = {
+    id: "a",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_a",
+    models: makeModelsResponse([model]),
+    premiumRemaining: 10,
+    premiumReserved: 0,
+    lastQuotaFetch: Date.now(),
+  }
+  const b: AccountRuntime = {
+    id: "b",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_b",
+    models: makeModelsResponse([model]),
+    premiumRemaining: 2,
+    premiumReserved: 0,
+    lastQuotaFetch: Date.now(),
+  }
+
+  const manager = setupManager([a, b])
+
+  const warmup = await manager.selectAccountForRequest([
+    { modelId: "free-model", endpoint: "/chat/completions" },
+  ])
+  expect(warmup.ok).toBe(true)
+  if (!warmup.ok) return
+  expect(warmup.account.id).toBe("a")
+
+  const selection = await manager.selectAccountForRequest(
+    [{ modelId: "free-model", endpoint: "/chat/completions" }],
+    { requestId: "session-affinity-miss-rotated-highest" },
+  )
+
+  expect(selection.ok).toBe(true)
+  if (!selection.ok) return
+
+  expect(selection.account.id).toBe("a")
+  expect(selection.selectionReason).toBe("affinity_miss")
+  expect(selection.costUnits).toBe(0)
+  expect(selection.reservation).toBeUndefined()
+})
+
+test("premium request cache miss selects the account with the highest effective premium remaining and reserves quota", async () => {
+  const freeModel = makeModel({ id: "free-model" })
+  const premiumModel = makeModel({
+    id: "gpt-5",
+    billing: {
+      is_premium: true,
+      multiplier: 1,
+    },
+  })
+
+  const a: AccountRuntime = {
+    id: "a",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_a",
+    models: makeModelsResponse([freeModel, premiumModel]),
+    premiumRemaining: 10,
+    premiumReserved: 0,
+    lastQuotaFetch: Date.now(),
+  }
+  const b: AccountRuntime = {
+    id: "b",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_b",
+    models: makeModelsResponse([freeModel, premiumModel]),
+    premiumRemaining: 2,
+    premiumReserved: 0,
+    lastQuotaFetch: Date.now(),
+  }
+
+  const manager = setupManager([a, b])
+
+  const warmup = await manager.selectAccountForRequest([
+    { modelId: "free-model", endpoint: "/chat/completions" },
+  ])
+  expect(warmup.ok).toBe(true)
+  if (!warmup.ok) return
+  expect(warmup.account.id).toBe("a")
+
+  const selection = await manager.selectAccountForRequest(
+    [{ modelId: "gpt-5", endpoint: "/chat/completions" }],
+    { requestId: "session-premium-affinity-miss-rotated" },
+  )
+
+  expect(selection.ok).toBe(true)
+  if (!selection.ok) return
+
+  expect(selection.account.id).toBe("a")
+  expect(selection.selectionReason).toBe("affinity_miss")
+  expect(selection.costUnits).toBe(1)
+  expect(selection.reservation).toBeDefined()
+  expect(a.premiumReserved).toBe(1)
+  expect(b.premiumReserved).toBe(0)
+})
+
 test("affinity miss randomly breaks ties between accounts with the same effective premium remaining", async () => {
   const model = makeModel({ id: "free-model" })
 
