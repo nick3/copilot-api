@@ -1,6 +1,7 @@
 import type { AnthropicMessagesPayload } from "./anthropic-types"
 
 const subagentMarkerPrefix = "__SUBAGENT_MARKER__"
+const subagentStartContextPrefix = "SubagentStart hook additional context:"
 const REMINDER_RE = /<system-reminder>([\s\S]*?)<\/system-reminder>/g
 
 export interface SubagentMarker {
@@ -9,57 +10,135 @@ export interface SubagentMarker {
   agent_type: string
 }
 
-export const parseSubagentMarkerFromFirstUser = (
+export type SubagentMarkerInspection =
+  | { kind: "none"; marker: null }
+  | { kind: "invalid"; marker: null }
+  | { kind: "valid"; marker: SubagentMarker }
+
+const NONE_INSPECTION: SubagentMarkerInspection = {
+  kind: "none",
+  marker: null,
+}
+
+const INVALID_INSPECTION: SubagentMarkerInspection = {
+  kind: "invalid",
+  marker: null,
+}
+
+const isSubagentMarker = (value: unknown): value is SubagentMarker => {
+  if (!value || typeof value !== "object") {
+    return false
+  }
+
+  const candidate = value as Record<string, unknown>
+  return (
+    typeof candidate.session_id === "string"
+    && typeof candidate.agent_id === "string"
+    && typeof candidate.agent_type === "string"
+    && candidate.session_id.trim().length > 0
+    && candidate.agent_id.trim().length > 0
+    && candidate.agent_type.trim().length > 0
+  )
+}
+
+export const inspectSubagentMarkerFromFirstUser = (
   payload: AnthropicMessagesPayload,
-): SubagentMarker | null => {
+): SubagentMarkerInspection => {
   const firstUserMessage = payload.messages.find(
     (msg) => msg.role === "user" && Array.isArray(msg.content),
   )
   if (!firstUserMessage || !Array.isArray(firstUserMessage.content)) {
-    return null
+    return NONE_INSPECTION
   }
+
+  let sawInvalidMarker = false
 
   for (const block of firstUserMessage.content) {
     if (block.type !== "text") {
       continue
     }
 
-    const marker = parseSubagentMarkerFromSystemReminder(block.text)
-    if (marker) {
-      return marker
+    const inspection = inspectSubagentMarkerFromSystemReminder(block.text)
+    if (inspection.kind === "valid") {
+      return inspection
+    }
+
+    if (inspection.kind === "invalid") {
+      sawInvalidMarker = true
     }
   }
 
-  return null
+  return sawInvalidMarker ? INVALID_INSPECTION : NONE_INSPECTION
 }
 
-const parseSubagentMarkerFromSystemReminder = (
-  text: string,
+export const parseSubagentMarkerFromFirstUser = (
+  payload: AnthropicMessagesPayload,
 ): SubagentMarker | null => {
+  const inspection = inspectSubagentMarkerFromFirstUser(payload)
+  return inspection.kind === "valid" ? inspection.marker : null
+}
+
+const extractMarkerPayloadFromReminderLine = (line: string): string | null => {
+  const trimmedLine = line.trim()
+  if (!trimmedLine) {
+    return null
+  }
+
+  let markerLine = trimmedLine
+
+  if (markerLine.startsWith(subagentStartContextPrefix)) {
+    markerLine = markerLine.slice(subagentStartContextPrefix.length).trimStart()
+  }
+
+  if (!markerLine.startsWith(subagentMarkerPrefix)) {
+    return null
+  }
+
+  return markerLine.slice(subagentMarkerPrefix.length).trimStart()
+}
+
+const inspectSubagentMarkerFromSystemReminder = (
+  text: string,
+): SubagentMarkerInspection => {
+  let sawInvalidMarker = false
+
   for (const [, content] of text.matchAll(REMINDER_RE)) {
-    const markerIndex = content.indexOf(subagentMarkerPrefix)
-    if (markerIndex === -1) continue
+    const lines = content.split(/\r?\n/)
 
-    const afterPrefix = content
-      .slice(markerIndex + subagentMarkerPrefix.length)
-      .trimStart()
-    if (!afterPrefix.startsWith("{")) continue
-
-    const json = extractBalancedJson(afterPrefix)
-    if (!json) continue
-
-    try {
-      const parsed = JSON.parse(json) as SubagentMarker
-      if (!parsed.session_id || !parsed.agent_id || !parsed.agent_type) {
+    for (const line of lines) {
+      const markerPayload = extractMarkerPayloadFromReminderLine(line)
+      if (markerPayload === null) {
         continue
       }
-      return parsed
-    } catch {
-      continue
+
+      if (!markerPayload.startsWith("{")) {
+        sawInvalidMarker = true
+        continue
+      }
+
+      const json = extractBalancedJson(markerPayload)
+      if (!json) {
+        sawInvalidMarker = true
+        continue
+      }
+
+      try {
+        const parsed: unknown = JSON.parse(json)
+        if (!isSubagentMarker(parsed)) {
+          sawInvalidMarker = true
+          continue
+        }
+        return {
+          kind: "valid",
+          marker: parsed,
+        }
+      } catch {
+        sawInvalidMarker = true
+      }
     }
   }
 
-  return null
+  return sawInvalidMarker ? INVALID_INSPECTION : NONE_INSPECTION
 }
 
 /** Extract the first balanced `{...}` object from text that starts with `{`. */

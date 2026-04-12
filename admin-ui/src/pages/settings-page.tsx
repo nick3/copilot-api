@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react"
 import { EyeIcon, EyeOffIcon } from "lucide-react"
 import { toast } from "sonner"
 import { useTranslation } from "react-i18next"
@@ -1821,6 +1828,8 @@ type AdvancedSettingsCardProps = {
   accountAffinityEnabled: boolean
   modelRefreshIntervalInput: string
   modelRefreshIntervalIssue: string | null
+  sessionAffinityRetentionInput: string
+  sessionAffinityRetentionIssue: string | null
   allowOriginalModelNamesForAliases: boolean
   useFunctionApplyPatch: boolean
   forceAgent: boolean
@@ -1831,6 +1840,7 @@ type AdvancedSettingsCardProps = {
   responsesApiContextManagementModelsValue: string
   onToggleAccountAffinity: (value: boolean) => void
   onModelRefreshIntervalChange: (value: string) => void
+  onSessionAffinityRetentionChange: (value: string) => void
   onToggleAllowOriginalModelNamesForAliases: (value: boolean) => void
   onToggleUseFunctionApplyPatch: (value: boolean) => void
   onToggleForceAgent: (value: boolean) => void
@@ -1845,6 +1855,8 @@ function AdvancedSettingsCard({
   accountAffinityEnabled,
   modelRefreshIntervalInput,
   modelRefreshIntervalIssue,
+  sessionAffinityRetentionInput,
+  sessionAffinityRetentionIssue,
   allowOriginalModelNamesForAliases,
   useFunctionApplyPatch,
   forceAgent,
@@ -1855,6 +1867,7 @@ function AdvancedSettingsCard({
   responsesApiContextManagementModelsValue,
   onToggleAccountAffinity,
   onModelRefreshIntervalChange,
+  onSessionAffinityRetentionChange,
   onToggleAllowOriginalModelNamesForAliases,
   onToggleUseFunctionApplyPatch,
   onToggleForceAgent,
@@ -2013,6 +2026,27 @@ function AdvancedSettingsCard({
           {modelRefreshIntervalIssue ? (
             <div className="text-destructive text-xs">
               {modelRefreshIntervalIssue}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="grid gap-2">
+          <Label className="text-muted-foreground text-xs">
+            {t("settingsPage.advanced.sessionAffinityRetentionLabel")}
+          </Label>
+          <Input
+            type="number"
+            min="0"
+            step="1"
+            value={sessionAffinityRetentionInput}
+            onChange={(e) => onSessionAffinityRetentionChange(e.target.value)}
+          />
+          <div className="text-muted-foreground text-xs">
+            {t("settingsPage.advanced.sessionAffinityRetentionHint")}
+          </div>
+          {sessionAffinityRetentionIssue ? (
+            <div className="text-destructive text-xs">
+              {sessionAffinityRetentionIssue}
             </div>
           ) : null}
         </div>
@@ -2344,6 +2378,62 @@ function ProvidersSettingsCard({
   )
 }
 
+type DraftNonNegativeNumberKey =
+  | "modelRefreshIntervalHours"
+  | "sessionAffinityRetentionDays"
+
+function toNumberInputValue(value: number | undefined): string {
+  return typeof value === "number" ? String(value) : ""
+}
+
+function setDraftNonNegativeNumberValue(
+  draft: AdminConfig,
+  key: DraftNonNegativeNumberKey,
+  value: number | undefined,
+): AdminConfig {
+  switch (key) {
+    case "modelRefreshIntervalHours":
+      return {
+        ...draft,
+        modelRefreshIntervalHours: value,
+      }
+    case "sessionAffinityRetentionDays":
+      return {
+        ...draft,
+        sessionAffinityRetentionDays: value,
+      }
+  }
+}
+
+function applyNonNegativeNumberInputChange(params: {
+  value: string
+  key: DraftNonNegativeNumberKey
+  issueMessage: string
+  setInput: Dispatch<SetStateAction<string>>
+  setIssue: Dispatch<SetStateAction<string | null>>
+  setDraft: Dispatch<SetStateAction<AdminConfig>>
+}): void {
+  const { value, key, issueMessage, setInput, setIssue, setDraft } = params
+
+  setInput(value)
+
+  const trimmed = value.trim()
+  if (!trimmed) {
+    setIssue(null)
+    setDraft((prev) => setDraftNonNegativeNumberValue(prev, key, undefined))
+    return
+  }
+
+  const parsed = Number(trimmed)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    setIssue(issueMessage)
+    return
+  }
+
+  setIssue(null)
+  setDraft((prev) => setDraftNonNegativeNumberValue(prev, key, parsed))
+}
+
 type SettingsPageViewProps = {
   loading: boolean
   saving: boolean
@@ -2371,6 +2461,9 @@ type SettingsPageViewProps = {
   modelRefreshIntervalInput: string
   modelRefreshIntervalIssue: string | null
   onModelRefreshIntervalChange: (value: string) => void
+  sessionAffinityRetentionInput: string
+  sessionAffinityRetentionIssue: string | null
+  onSessionAffinityRetentionChange: (value: string) => void
   reasoningMode: JsonMode
   reasoningJson: string
   reasoningJsonIssue: string | null
@@ -2444,6 +2537,10 @@ function useSettingsPageState(): SettingsPageViewProps {
   const [modelRefreshIntervalIssue, setModelRefreshIntervalIssue] = useState<
     string | null
   >(null)
+  const [sessionAffinityRetentionInput, setSessionAffinityRetentionInput] =
+    useState<string>("")
+  const [sessionAffinityRetentionIssue, setSessionAffinityRetentionIssue] =
+    useState<string | null>(null)
   const [
     responsesApiContextManagementModelsValue,
     setResponsesApiContextManagementModelsValue,
@@ -2521,7 +2618,6 @@ function useSettingsPageState(): SettingsPageViewProps {
       const aliasItems = aliasItemsFromRecord(configData.modelAliases)
       const normalizedAliases = aliasRecordFromItems(aliasItems)
       const normalizedAuthApiKeys = getAuthApiKeysFromConfig(configData)
-      const intervalValue = configData.modelRefreshIntervalHours
 
       setConfigPath(_configPath ?? null)
       const normalizedDraft = {
@@ -2536,9 +2632,13 @@ function useSettingsPageState(): SettingsPageViewProps {
       setAliasFromRecord(normalizedAliases)
       setProvidersFromRecord(configData.providers)
       setModelRefreshIntervalInput(
-        typeof intervalValue === "number" ? String(intervalValue) : "",
+        toNumberInputValue(configData.modelRefreshIntervalHours),
       )
       setModelRefreshIntervalIssue(null)
+      setSessionAffinityRetentionInput(
+        toNumberInputValue(configData.sessionAffinityRetentionDays),
+      )
+      setSessionAffinityRetentionIssue(null)
       setResponsesApiContextManagementModelsValue(
         configData.responsesApiContextManagementModels?.join("\n") ?? "",
       )
@@ -2550,6 +2650,8 @@ function useSettingsPageState(): SettingsPageViewProps {
       setProvidersFromRecord,
       setModelRefreshIntervalInput,
       setModelRefreshIntervalIssue,
+      setSessionAffinityRetentionInput,
+      setSessionAffinityRetentionIssue,
       setResponsesApiContextManagementModelsValue,
     ],
   )
@@ -2664,33 +2766,35 @@ function useSettingsPageState(): SettingsPageViewProps {
 
   const handleModelRefreshIntervalChange = useCallback(
     (value: string) => {
-      setModelRefreshIntervalInput(value)
-
-      const trimmed = value.trim()
-      if (!trimmed) {
-        setModelRefreshIntervalIssue(null)
-        setDraft((prev) => ({
-          ...prev,
-          modelRefreshIntervalHours: undefined,
-        }))
-        return
-      }
-
-      const parsed = Number(trimmed)
-      if (!Number.isFinite(parsed) || parsed < 0) {
-        setModelRefreshIntervalIssue(
-          t("settingsPage.advanced.modelRefreshIntervalError"),
-        )
-        return
-      }
-
-      setModelRefreshIntervalIssue(null)
-      setDraft((prev) => ({
-        ...prev,
-        modelRefreshIntervalHours: parsed,
-      }))
+      applyNonNegativeNumberInputChange({
+        value,
+        key: "modelRefreshIntervalHours",
+        issueMessage: t("settingsPage.advanced.modelRefreshIntervalError"),
+        setInput: setModelRefreshIntervalInput,
+        setIssue: setModelRefreshIntervalIssue,
+        setDraft,
+      })
     },
     [setDraft, setModelRefreshIntervalInput, setModelRefreshIntervalIssue, t],
+  )
+
+  const handleSessionAffinityRetentionChange = useCallback(
+    (value: string) => {
+      applyNonNegativeNumberInputChange({
+        value,
+        key: "sessionAffinityRetentionDays",
+        issueMessage: t("settingsPage.advanced.sessionAffinityRetentionError"),
+        setInput: setSessionAffinityRetentionInput,
+        setIssue: setSessionAffinityRetentionIssue,
+        setDraft,
+      })
+    },
+    [
+      setDraft,
+      setSessionAffinityRetentionInput,
+      setSessionAffinityRetentionIssue,
+      t,
+    ],
   )
 
   const handleAllowOriginalModelNamesForAliasesToggle = useCallback(
@@ -2763,6 +2867,7 @@ function useSettingsPageState(): SettingsPageViewProps {
     && !(reasoningMode === "json" && reasoningJsonIssue)
     && !(aliasMode === "json" && aliasJsonIssue)
     && !modelRefreshIntervalIssue
+    && !sessionAffinityRetentionIssue
     && !providersIssue
 
   const isDirty = useMemo(
@@ -2822,6 +2927,9 @@ function useSettingsPageState(): SettingsPageViewProps {
     onAccountAffinityToggle: handleAccountAffinityToggle,
     modelRefreshIntervalInput,
     modelRefreshIntervalIssue,
+    sessionAffinityRetentionInput,
+    sessionAffinityRetentionIssue,
+    onSessionAffinityRetentionChange: handleSessionAffinityRetentionChange,
     onModelRefreshIntervalChange: handleModelRefreshIntervalChange,
     allowOriginalModelNamesForAliases,
     reasoningMode,
@@ -2906,6 +3014,9 @@ function SettingsPageView({
   onAccountAffinityToggle,
   modelRefreshIntervalInput,
   modelRefreshIntervalIssue,
+  sessionAffinityRetentionInput,
+  sessionAffinityRetentionIssue,
+  onSessionAffinityRetentionChange,
   onModelRefreshIntervalChange,
   reasoningMode,
   reasoningJson,
@@ -3171,6 +3282,8 @@ function SettingsPageView({
               accountAffinityEnabled={accountAffinityEnabled}
               modelRefreshIntervalInput={modelRefreshIntervalInput}
               modelRefreshIntervalIssue={modelRefreshIntervalIssue}
+              sessionAffinityRetentionInput={sessionAffinityRetentionInput}
+              sessionAffinityRetentionIssue={sessionAffinityRetentionIssue}
               allowOriginalModelNamesForAliases={
                 allowOriginalModelNamesForAliases
               }
@@ -3185,6 +3298,9 @@ function SettingsPageView({
               }
               onToggleAccountAffinity={onAccountAffinityToggle}
               onModelRefreshIntervalChange={onModelRefreshIntervalChange}
+              onSessionAffinityRetentionChange={
+                onSessionAffinityRetentionChange
+              }
               onToggleAllowOriginalModelNamesForAliases={
                 onAllowOriginalModelNamesForAliasesToggle
               }

@@ -1,6 +1,7 @@
 import type { ConsolaInstance } from "consola"
 import type { Context } from "hono"
 
+import type { AccountSelectionReason } from "~/lib/accounts-manager"
 import type { AffinityKeySource } from "~/lib/utils"
 import type { ChatCompletionsPayload } from "~/services/copilot/create-chat-completions"
 import type { Model } from "~/services/copilot/get-models"
@@ -53,6 +54,7 @@ type SelectionFailureReason = "MODEL_NOT_SUPPORTED" | "NO_QUOTA" | "NO_ACCOUNTS"
 type SelectionFailure = {
   ok: false
   reason: SelectionFailureReason
+  selectionReason?: AccountSelectionReason
 }
 
 type SelectionFailureContext = {
@@ -74,6 +76,7 @@ type SelectionFailureContext = {
   isSubagent?: boolean
   affinityKeyUsed?: string
   affinityKeySource?: AffinityKeySource
+  selectionReason?: AccountSelectionReason
   selection: SelectionFailure
 }
 
@@ -132,6 +135,7 @@ export const handleSelectionFailure = (
     isSubagent,
     affinityKeyUsed,
     affinityKeySource,
+    selectionReason,
     selection,
   } = context
   const finishedAtMs = Date.now()
@@ -156,6 +160,7 @@ export const handleSelectionFailure = (
     affinityKeyUsed,
     affinityKeySource,
     httpStatus: selection.reason === "MODEL_NOT_SUPPORTED" ? 400 : 429,
+    selectionReason: selectionReason ?? selection.selectionReason,
     selectionFailureReason: selection.reason,
   })
 

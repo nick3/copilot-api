@@ -25,6 +25,7 @@ export interface AppConfig {
   compactUseSmallModel?: boolean
   messageStartInputTokensFallback?: boolean
   modelRefreshIntervalHours?: number
+  sessionAffinityRetentionDays?: number
   useMessagesApi?: boolean
   anthropicApiKey?: string
   useResponsesApiWebSearch?: boolean
@@ -116,6 +117,7 @@ const defaultConfig: AppConfig = {
   compactUseSmallModel: true,
   messageStartInputTokensFallback: false,
   modelRefreshIntervalHours: 24,
+  sessionAffinityRetentionDays: 7,
   useMessagesApi: true,
   useResponsesApiWebSearch: true,
 }
@@ -139,9 +141,7 @@ function normalizeAuthApiKeys(value: unknown): Array<string> {
   ]
 }
 
-function normalizeModelRefreshIntervalHours(
-  value: unknown,
-): number | undefined {
+function normalizeNonNegativeNumber(value: unknown): number | undefined {
   if (typeof value !== "number") return undefined
   if (!Number.isFinite(value)) return undefined
   if (value < 0) return undefined
@@ -298,7 +298,7 @@ function mergeDefaultModelRefreshInterval(config: AppConfig): {
   mergedConfig: AppConfig
   changed: boolean
 } {
-  const normalized = normalizeModelRefreshIntervalHours(
+  const normalized = normalizeNonNegativeNumber(
     config.modelRefreshIntervalHours,
   )
 
@@ -310,6 +310,28 @@ function mergeDefaultModelRefreshInterval(config: AppConfig): {
     mergedConfig: {
       ...config,
       modelRefreshIntervalHours: defaultConfig.modelRefreshIntervalHours ?? 24,
+    },
+    changed: true,
+  }
+}
+
+function mergeDefaultSessionAffinityRetention(config: AppConfig): {
+  mergedConfig: AppConfig
+  changed: boolean
+} {
+  const normalized = normalizeNonNegativeNumber(
+    config.sessionAffinityRetentionDays,
+  )
+
+  if (normalized !== undefined) {
+    return { mergedConfig: config, changed: false }
+  }
+
+  return {
+    mergedConfig: {
+      ...config,
+      sessionAffinityRetentionDays:
+        defaultConfig.sessionAffinityRetentionDays ?? 7,
     },
     changed: true,
   }
@@ -346,6 +368,7 @@ export function mergeConfigWithDefaults(): AppConfig {
     mergeDefaultConfig,
     mergeDefaultAccountAffinity,
     mergeDefaultModelRefreshInterval,
+    mergeDefaultSessionAffinityRetention,
   ])
 
   if (changed) {
@@ -566,7 +589,7 @@ export function isAccountAffinityEnabled(): boolean {
 
 export function getModelRefreshIntervalHours(): number {
   const config = getConfig()
-  const normalized = normalizeModelRefreshIntervalHours(
+  const normalized = normalizeNonNegativeNumber(
     config.modelRefreshIntervalHours,
   )
   return normalized ?? defaultConfig.modelRefreshIntervalHours ?? 24
@@ -576,6 +599,20 @@ export function getModelRefreshIntervalMs(): number {
   const hours = getModelRefreshIntervalHours()
   if (!Number.isFinite(hours) || hours <= 0) return 0
   return hours * 60 * 60 * 1000
+}
+
+export function getSessionAffinityRetentionDays(): number {
+  const config = getConfig()
+  const normalized = normalizeNonNegativeNumber(
+    config.sessionAffinityRetentionDays,
+  )
+  return normalized ?? defaultConfig.sessionAffinityRetentionDays ?? 7
+}
+
+export function getSessionAffinityRetentionMs(): number {
+  const days = getSessionAffinityRetentionDays()
+  if (!Number.isFinite(days) || days <= 0) return 0
+  return days * 24 * 60 * 60 * 1000
 }
 
 export function isMessageStartInputTokensFallbackEnabled(): boolean {

@@ -15,6 +15,7 @@ import {
   extractAffinityKey,
   isAffinityAccountUsable,
   type AffinityContext,
+  type AffinityPersistenceStoreProvider,
 } from "~/lib/account-affinity"
 import { resolveModelAlias } from "~/lib/config"
 import { HTTPError } from "~/lib/error"
@@ -61,6 +62,8 @@ import {
   addAccountToRegistry,
 } from "./accounts-registry"
 import { PATHS } from "./paths"
+import { getSharedSessionAffinityStore } from "./session-affinity-store"
+import { SessionOwnershipCache } from "./session-ownership"
 
 /** Quota cache TTL in milliseconds (45 seconds) for pre-request selection. */
 const QUOTA_CACHE_TTL = 45 * 1000
@@ -92,6 +95,11 @@ export interface AccountRequestCandidate {
 export type { QuotaReservation } from "./accounts-manager-quota"
 export type { AffinityContext } from "~/lib/account-affinity"
 
+export type AccountSelectionContext = AffinityContext & {
+  ownershipLookupSessionId?: string
+  ownershipWriteSessionId?: string
+}
+
 export type SelectAccountForRequestFailureReason =
   | "NO_ACCOUNTS"
   | "MODEL_NOT_SUPPORTED"
@@ -103,6 +111,10 @@ export type AccountSelectionReason =
   | "preferred_account_unavailable"
   | "no_session_key"
   | "rotated_after_miss"
+  | "subagent_owner_hit"
+  | "subagent_owner_miss"
+  | "subagent_owner_unusable_fallback"
+  | "subagent_marker_invalid_fallback"
 
 type SelectAccountForRequestSuccess = {
   ok: true
@@ -113,6 +125,8 @@ type SelectAccountForRequestSuccess = {
   reservation?: QuotaReservation
   /** Call after a successful upstream response to persist the affinity mapping. */
   confirmAffinity?: () => void
+  /** Call after a successful upstream response to persist the ownership mapping. */
+  confirmOwnership?: () => void
   /** Whether this selection was served from the affinity cache. */
   affinityHit?: boolean
   /** The cache key used for affinity lookup (e.g. `"session-1:claude-sonnet-4"`). */
@@ -126,6 +140,7 @@ export type SelectAccountForRequestResult =
   | {
       ok: false
       reason: SelectAccountForRequestFailureReason
+      selectionReason?: AccountSelectionReason
     }
 
 export type AccountStatusEntry = {
@@ -150,6 +165,24 @@ function getInitialSelectionReason(
   return rotationStart > 0 ? "rotated_after_miss" : "affinity_miss"
 }
 
+function preserveSubagentSelectionReason(
+  initialSelectionReason: AccountSelectionReason,
+  nextSelectionReason: AccountSelectionReason,
+): AccountSelectionReason {
+  return initialSelectionReason.startsWith("subagent_") ?
+      initialSelectionReason
+    : nextSelectionReason
+}
+
+type ScoredAccountRuntime = {
+  account: AccountRuntime
+  effectiveRemaining: number
+}
+
+export interface AccountsManagerOptions {
+  persistentAffinityStore?: AffinityPersistenceStoreProvider
+}
+
 /** Manages multiple GitHub Copilot accounts at runtime. */
 export class AccountsManager {
   private accounts: Map<string, AccountRuntime> = new Map()
@@ -157,8 +190,20 @@ export class AccountsManager {
   private temporaryAccount?: AccountRuntime
   private vsCodeVersion?: string
   private accountAffinityEnabled = true
-  private affinityCache = new AccountAffinityCache()
+  private affinityCache: AccountAffinityCache
+  private sessionOwnership = new SessionOwnershipCache()
+  private sessionOwnershipGeneration = 0
   private loadBalanceCursor = 0
+
+  constructor(options: AccountsManagerOptions = {}) {
+    const { persistentAffinityStore } = options
+
+    this.affinityCache = new AccountAffinityCache(
+      undefined,
+      undefined,
+      persistentAffinityStore,
+    )
+  }
 
   private quotaRefreshSnapshotByAccount = new WeakMap<
     AccountRuntime,
@@ -247,7 +292,7 @@ export class AccountsManager {
   setAccountAffinityEnabled(enabled: boolean): void {
     this.accountAffinityEnabled = enabled
     if (!enabled) {
-      this.affinityCache.clear()
+      this.affinityCache.clearMemory()
     }
   }
 
@@ -994,26 +1039,104 @@ export class AccountsManager {
    */
   async selectAccountForRequest(
     candidates: Array<AccountRequestCandidate>,
-    affinityContext?: AffinityContext,
+    context?: AccountSelectionContext,
   ): Promise<SelectAccountForRequestResult> {
     if (candidates.length === 0) {
       throw new Error("selectAccountForRequest requires at least one candidate")
     }
 
-    const orderedAccounts = [
+    const orderedAccounts = this.getOrderedEnabledAccounts()
+    const ownerSelection = await this.selectPreferredSessionOwner({
+      lookupSessionId: context?.ownershipLookupSessionId,
+      orderedAccounts,
+      candidates,
+    })
+    if (ownerSelection.result) {
+      this.attachConfirmOwnership(
+        ownerSelection.result,
+        context?.ownershipWriteSessionId,
+      )
+      return ownerSelection.result
+    }
+
+    const affinityPlan = this.buildAffinitySelectionPlan({
+      orderedAccounts,
+      candidates,
+      context,
+      ownerSelectionReason: ownerSelection.selectionReason,
+    })
+    const preferredSelection = await this.selectPreferredAffinityAccount({
+      cacheKey: affinityPlan.cacheKey,
+      orderedAccounts,
+      candidates,
+      initialSelectionReason: affinityPlan.initialSelectionReason,
+    })
+    if (preferredSelection.result) {
+      this.attachConfirmOwnership(
+        preferredSelection.result,
+        context?.ownershipWriteSessionId,
+      )
+      return preferredSelection.result
+    }
+
+    let accountsForSelection = affinityPlan.defaultAccountsForSelection
+    let premiumRemainingOrderedAccountIds = new Set<string>()
+    let selectionReason = preferredSelection.selectionReason
+
+    if (
+      affinityPlan.canReorderOnAffinityCacheMiss
+      && preferredSelection.affinityCacheMiss
+    ) {
+      const affinityMissOrder =
+        this.orderAccountsForAffinityCacheMiss(orderedAccounts)
+      accountsForSelection = affinityMissOrder.accounts
+      premiumRemainingOrderedAccountIds =
+        affinityMissOrder.premiumRemainingOrderedAccountIds
+    }
+
+    const result = await this.selectWithAliasFallback(
+      accountsForSelection,
+      candidates,
+    )
+    if (result.ok && premiumRemainingOrderedAccountIds.has(result.account.id)) {
+      selectionReason = "affinity_miss"
+    }
+
+    return this.finalizeSelectedAccount({
+      result,
+      cacheKey: affinityPlan.cacheKey,
+      selectionReason,
+      ownershipWriteSessionId: context?.ownershipWriteSessionId,
+    })
+  }
+
+  private getOrderedEnabledAccounts(): Array<AccountRuntime> {
+    return [
       ...(this.temporaryAccount ? [this.temporaryAccount] : []),
       ...this.accountOrder
         .map((id) => this.accounts.get(id))
         .filter((account): account is AccountRuntime => account !== undefined),
     ].filter((account) => isAccountEnabled(account))
+  }
 
-    // Resolve the affinity key once — reused for both lookup and write-back.
+  private buildAffinitySelectionPlan(params: {
+    orderedAccounts: Array<AccountRuntime>
+    candidates: Array<AccountRequestCandidate>
+    context?: AccountSelectionContext
+    ownerSelectionReason?: AccountSelectionReason
+  }): {
+    cacheKey: string | undefined
+    defaultAccountsForSelection: Array<AccountRuntime>
+    initialSelectionReason: AccountSelectionReason
+    canReorderOnAffinityCacheMiss: boolean
+  } {
+    const { orderedAccounts, candidates, context, ownerSelectionReason } =
+      params
     const affinityKey =
-      this.accountAffinityEnabled && affinityContext ?
-        extractAffinityKey(affinityContext)
+      this.accountAffinityEnabled && context ?
+        extractAffinityKey(context)
       : undefined
-
-    const modelKey = affinityContext?.affinityModelId ?? candidates[0].modelId
+    const modelKey = context?.affinityModelId ?? candidates[0].modelId
     const cacheKey =
       affinityKey ? buildAffinityCacheKey(affinityKey, modelKey) : undefined
     const shouldRotate =
@@ -1021,47 +1144,104 @@ export class AccountsManager {
     const rotationStart =
       shouldRotate ? this.loadBalanceCursor % orderedAccounts.length : 0
 
-    const initialSelectionReason = getInitialSelectionReason(
+    return {
       cacheKey,
-      rotationStart,
-    )
-    const preferredSelection = await this.selectPreferredAffinityAccount({
-      cacheKey,
-      orderedAccounts,
-      candidates,
-      initialSelectionReason,
-    })
-    if (preferredSelection.result) {
-      return preferredSelection.result
+      defaultAccountsForSelection:
+        shouldRotate ? this.rotateAccounts(orderedAccounts) : orderedAccounts,
+      initialSelectionReason:
+        ownerSelectionReason
+        ?? getInitialSelectionReason(cacheKey, rotationStart),
+      canReorderOnAffinityCacheMiss:
+        ownerSelectionReason === undefined && cacheKey !== undefined,
     }
+  }
 
-    const { selectionReason } = preferredSelection
-
-    // Step 2: Cache miss — rotate accounts for load balancing when affinity is enabled.
-    const accountsForSelection =
-      shouldRotate ? this.rotateAccounts(orderedAccounts) : orderedAccounts
-
-    const result = await this.selectWithAliasFallback(
-      accountsForSelection,
-      candidates,
-    )
-
-    if (result.ok) {
-      this.loadBalanceCursor++
-      result.selectionReason = selectionReason
-      result.affinityCacheKey = cacheKey
-    }
-
-    // Attach confirmAffinity callback so the handler can persist the mapping on success.
-    if (result.ok && cacheKey) {
-      const successResult = result
-      successResult.confirmAffinity = () => {
-        if (!this.accountAffinityEnabled) return
-        this.affinityCache.set(cacheKey, successResult.account.id)
+  private finalizeSelectedAccount(params: {
+    result: SelectAccountForRequestResult
+    cacheKey: string | undefined
+    selectionReason: AccountSelectionReason
+    ownershipWriteSessionId: string | undefined
+  }): SelectAccountForRequestResult {
+    const { result, cacheKey, selectionReason, ownershipWriteSessionId } =
+      params
+    if (!result.ok) {
+      return {
+        ...result,
+        selectionReason,
       }
     }
 
+    this.loadBalanceCursor++
+    result.selectionReason = selectionReason
+    result.affinityCacheKey = cacheKey
+
+    if (cacheKey) {
+      result.confirmAffinity = () => {
+        if (!this.accountAffinityEnabled) return
+        this.affinityCache.set(cacheKey, result.account.id)
+      }
+    }
+
+    this.attachConfirmOwnership(result, ownershipWriteSessionId)
     return result
+  }
+
+  private attachConfirmOwnership(
+    result: SelectAccountForRequestSuccess,
+    ownershipWriteSessionId: string | undefined,
+  ): void {
+    const rootSessionId = ownershipWriteSessionId?.trim()
+    if (!rootSessionId) {
+      return
+    }
+
+    const generation = this.sessionOwnershipGeneration
+    result.confirmOwnership = () => {
+      if (generation !== this.sessionOwnershipGeneration) {
+        return
+      }
+      this.sessionOwnership.set(rootSessionId, result.account.id)
+    }
+  }
+
+  private async selectPreferredSessionOwner(params: {
+    lookupSessionId: string | undefined
+    orderedAccounts: Array<AccountRuntime>
+    candidates: Array<AccountRequestCandidate>
+  }): Promise<{
+    result?: SelectAccountForRequestSuccess
+    selectionReason?: AccountSelectionReason
+  }> {
+    const { lookupSessionId, orderedAccounts, candidates } = params
+
+    if (lookupSessionId === undefined) {
+      return {}
+    }
+
+    const rootSessionId = lookupSessionId.trim()
+    if (!rootSessionId) {
+      return { selectionReason: "subagent_marker_invalid_fallback" }
+    }
+
+    const preferredAccountId = this.sessionOwnership.get(rootSessionId)
+    if (!preferredAccountId) {
+      return { selectionReason: "subagent_owner_miss" }
+    }
+
+    const ownerResult = await this.tryAffinityAccount(
+      preferredAccountId,
+      orderedAccounts,
+      candidates,
+    )
+    if (!ownerResult) {
+      return { selectionReason: "subagent_owner_unusable_fallback" }
+    }
+
+    ownerResult.selectionReason = "subagent_owner_hit"
+
+    return {
+      result: ownerResult,
+    }
   }
 
   /**
@@ -1075,17 +1255,24 @@ export class AccountsManager {
   }): Promise<{
     result?: SelectAccountForRequestSuccess
     selectionReason: AccountSelectionReason
+    affinityCacheMiss: boolean
   }> {
     const { cacheKey, orderedAccounts, candidates, initialSelectionReason } =
       params
 
     if (!cacheKey) {
-      return { selectionReason: initialSelectionReason }
+      return {
+        selectionReason: initialSelectionReason,
+        affinityCacheMiss: false,
+      }
     }
 
     const preferredId = this.affinityCache.get(cacheKey)
     if (!preferredId) {
-      return { selectionReason: initialSelectionReason }
+      return {
+        selectionReason: initialSelectionReason,
+        affinityCacheMiss: true,
+      }
     }
 
     const affinityResult = await this.tryAffinityAccount(
@@ -1094,12 +1281,23 @@ export class AccountsManager {
       candidates,
     )
     if (!affinityResult) {
-      return { selectionReason: "preferred_account_unavailable" }
+      this.affinityCache.delete(cacheKey)
+      return {
+        selectionReason: preserveSubagentSelectionReason(
+          initialSelectionReason,
+          "preferred_account_unavailable",
+        ),
+        affinityCacheMiss: false,
+      }
     }
 
+    const selectionReason = preserveSubagentSelectionReason(
+      initialSelectionReason,
+      "affinity_hit",
+    )
     affinityResult.affinityHit = true
     affinityResult.affinityCacheKey = cacheKey
-    affinityResult.selectionReason = "affinity_hit"
+    affinityResult.selectionReason = selectionReason
     affinityResult.confirmAffinity = () => {
       if (!this.accountAffinityEnabled) return
       this.affinityCache.set(cacheKey, affinityResult.account.id)
@@ -1107,7 +1305,8 @@ export class AccountsManager {
 
     return {
       result: affinityResult,
-      selectionReason: "affinity_hit",
+      selectionReason,
+      affinityCacheMiss: false,
     }
   }
 
@@ -1121,6 +1320,112 @@ export class AccountsManager {
     const start = this.loadBalanceCursor % accounts.length
     if (start === 0) return accounts
     return [...accounts.slice(start), ...accounts.slice(0, start)]
+  }
+
+  private orderAccountsForAffinityCacheMiss(
+    orderedAccounts: Array<AccountRuntime>,
+  ): {
+    accounts: Array<AccountRuntime>
+    premiumRemainingOrderedAccountIds: Set<string>
+  } {
+    const scoredAccounts = orderedAccounts
+      .map((account) => ({
+        account,
+        effectiveRemaining: getEffectivePremiumRemaining(account),
+      }))
+      .filter(
+        (entry): entry is ScoredAccountRuntime =>
+          entry.effectiveRemaining !== undefined,
+      )
+      .sort((left, right) => right.effectiveRemaining - left.effectiveRemaining)
+
+    if (scoredAccounts.length > 0) {
+      const scoredAccountsInSelectionOrder =
+        this.shuffleWithinEqualRemainingBuckets(scoredAccounts).map(
+          ({ account }) => account,
+        )
+      const scoredAccountSet = new Set(scoredAccountsInSelectionOrder)
+      const unknownQuotaAccounts = orderedAccounts.filter(
+        (account) => !scoredAccountSet.has(account) && !account.unlimited,
+      )
+      const unlimitedAccounts = orderedAccounts.filter(
+        (account) => !scoredAccountSet.has(account) && account.unlimited,
+      )
+      return {
+        accounts: [
+          ...scoredAccountsInSelectionOrder,
+          ...unknownQuotaAccounts,
+          ...unlimitedAccounts,
+        ],
+        premiumRemainingOrderedAccountIds: new Set(
+          scoredAccountsInSelectionOrder.map((account) => account.id),
+        ),
+      }
+    }
+
+    const premiumRemainingOrderedAccountIds = new Set<string>()
+    const unlimitedAccounts = orderedAccounts.filter(
+      (account) => account.unlimited,
+    )
+    if (unlimitedAccounts.length === 0) {
+      return {
+        accounts: orderedAccounts,
+        premiumRemainingOrderedAccountIds,
+      }
+    }
+
+    const unknownQuotaAccounts = orderedAccounts.filter(
+      (account) => !account.unlimited,
+    )
+    return {
+      accounts: [
+        ...this.shuffleArray(unlimitedAccounts),
+        ...unknownQuotaAccounts,
+      ],
+      premiumRemainingOrderedAccountIds,
+    }
+  }
+
+  private shuffleWithinEqualRemainingBuckets(
+    scoredAccounts: Array<ScoredAccountRuntime>,
+  ): Array<ScoredAccountRuntime> {
+    const shuffled: Array<ScoredAccountRuntime> = []
+
+    let index = 0
+    while (index < scoredAccounts.length) {
+      const currentRemaining = scoredAccounts[index].effectiveRemaining
+      let bucketEnd = index + 1
+      while (
+        bucketEnd < scoredAccounts.length
+        && scoredAccounts[bucketEnd].effectiveRemaining === currentRemaining
+      ) {
+        bucketEnd++
+      }
+
+      shuffled.push(
+        ...this.shuffleArray(scoredAccounts.slice(index, bucketEnd)),
+      )
+      index = bucketEnd
+    }
+
+    return shuffled
+  }
+
+  private shuffleArray<T>(items: Array<T>): Array<T> {
+    if (items.length <= 1) {
+      return items
+    }
+
+    const shuffled = [...items]
+    for (let index = shuffled.length - 1; index > 0; index--) {
+      const randomIndex = Math.floor(Math.random() * (index + 1))
+      ;[shuffled[index], shuffled[randomIndex]] = [
+        shuffled[randomIndex],
+        shuffled[index],
+      ]
+    }
+
+    return shuffled
   }
 
   /**
@@ -1637,11 +1942,13 @@ export class AccountsManager {
    * Shutdown the manager and clean up resources.
    */
   shutdown(): void {
+    this.sessionOwnershipGeneration++
     this.stopRegistryWatcher()
     this.stopAllTokenRefresh()
     this.stopAllSessionRefresh()
     this.stopModelsRefresh()
-    this.affinityCache.clear()
+    this.affinityCache.clearMemory()
+    this.sessionOwnership.clear()
     this.loadBalanceCursor = 0
     this.accounts.clear()
     this.accountOrder = []
@@ -1650,4 +1957,6 @@ export class AccountsManager {
 }
 
 /** Singleton instance of AccountsManager */
-export const accountsManager = new AccountsManager()
+export const accountsManager = new AccountsManager({
+  persistentAffinityStore: getSharedSessionAffinityStore,
+})

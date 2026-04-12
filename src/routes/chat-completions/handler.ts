@@ -1,14 +1,10 @@
 import type { Context } from "hono"
 
 import { streamSSE, type SSEMessage } from "hono/streaming"
-import { randomUUID } from "node:crypto"
 
-import {
-  accountsManager,
-  type AccountSelectionReason,
-} from "~/lib/accounts-manager"
+import { accountsManager } from "~/lib/accounts-manager"
 import { awaitApproval } from "~/lib/approval"
-import { getAliasTargetSet } from "~/lib/config"
+import { getAliasTargetSet, resolveModelAlias } from "~/lib/config"
 import {
   computeDiff,
   extractErrorObservability,
@@ -19,7 +15,6 @@ import {
 import { createHandlerLogger, debugJson, debugJsonTail } from "~/lib/logger"
 import { checkRateLimit } from "~/lib/rate-limit"
 import {
-  getClientIpInfo,
   getRequestHistoryStore,
   normalizeChatCompletionsUsage,
   type NormalizedUsage,
@@ -32,7 +27,6 @@ import {
   isNullish,
   parseUserIdMetadata,
   resolveAffinityKey,
-  type AffinityKeySource,
 } from "~/lib/utils"
 import {
   createChatCompletions,
@@ -42,9 +36,20 @@ import {
   type ChatCompletionsPayload,
 } from "~/services/copilot/create-chat-completions"
 
-const logger = createHandlerLogger("chat-completions-handler")
+import {
+  buildRequestContext,
+  CHAT_COMPLETIONS_ENDPOINT,
+  GPT_5_4_MODEL_ID,
+  insertRequestLog,
+  recordSelectionFailure,
+  recordUnsupportedChatCompletionsModel,
+  selectionFailureResponse,
+  type ChatCompletionsHistoryStore,
+  type RequestContext,
+  unsupportedChatCompletionsModelResponse,
+} from "./support"
 
-const CHAT_COMPLETIONS_ENDPOINT = "/chat/completions"
+const logger = createHandlerLogger("chat-completions-handler")
 
 function buildChatCompletionCandidates(clientModel: string) {
   return [
@@ -53,6 +58,45 @@ function buildChatCompletionCandidates(clientModel: string) {
       endpoint: CHAT_COMPLETIONS_ENDPOINT,
     },
   ]
+}
+function isUnsupportedChatCompletionsModel(modelId: string): boolean {
+  return resolveModelAlias(modelId).toLowerCase() === GPT_5_4_MODEL_ID
+}
+
+function maybeRejectChatCompletionsClientModel(
+  c: Context,
+  store: Store,
+  params: {
+    request: RequestContext
+    clientModel: string
+    streamRequested: boolean
+  },
+): Response | null {
+  const { request, clientModel, streamRequested } = params
+
+  if (isUnsupportedChatCompletionsModel(clientModel)) {
+    recordUnsupportedChatCompletionsModel(store, {
+      request,
+      clientModel,
+      stream: streamRequested,
+    })
+    return unsupportedChatCompletionsModelResponse(c)
+  }
+
+  if (getAliasTargetSet().has(clientModel.toLowerCase())) {
+    recordSelectionFailure(store, {
+      request,
+      clientModel,
+      stream: streamRequested,
+      reason: "MODEL_NOT_SUPPORTED",
+    })
+    return selectionFailureResponse(c, {
+      clientModel,
+      reason: "MODEL_NOT_SUPPORTED",
+    })
+  }
+
+  return null
 }
 
 export async function handleCompletion(c: Context) {
@@ -68,58 +112,56 @@ export async function handleCompletion(c: Context) {
     payload,
     initiator,
   )
-  if (getAliasTargetSet().has(clientModel.toLowerCase())) {
-    recordSelectionFailure(store, {
-      request,
-      clientModel,
-      stream: streamRequested,
-      reason: "MODEL_NOT_SUPPORTED",
-    })
-    return selectionFailureResponse(c, {
-      clientModel,
-      reason: "MODEL_NOT_SUPPORTED",
-    })
-  }
-  debugJsonTail(logger, "Request payload:", { value: payload, tailLength: 400 })
-  const upstreamRequestId = generateRequestIdFromPayload(
-    payload,
-    normalizedPromptCacheKey,
-  )
-  const headerSessionId = c.req.header("x-session-id") ?? null
-  const affinityKey = resolveAffinityKey({
-    metadataSessionId: normalizedPromptCacheKey,
-    headerSessionId,
-    upstreamRequestId,
+
+  const blockedResponse = maybeRejectChatCompletionsClientModel(c, store, {
+    request,
+    clientModel,
+    streamRequested,
   })
-  request.affinityKeyUsed = affinityKey.affinityKeyUsed
-  request.affinityKeySource = affinityKey.affinityKeySource
-  const selection = await accountsManager.selectAccountForRequest(
-    buildChatCompletionCandidates(clientModel),
-    {
-      requestId: affinityKey.requestId,
-    },
-  )
-  if (!selection.ok) {
-    recordSelectionFailure(store, {
-      request,
-      clientModel,
-      stream: streamRequested,
-      reason: selection.reason,
-    })
-    return selectionFailureResponse(c, {
-      clientModel,
-      reason: selection.reason,
-    })
+  if (blockedResponse) {
+    return blockedResponse
   }
-  const { account, selectedModel } = selection
+
+  const selectionResult = await selectChatCompletionAccount({
+    c,
+    store,
+    request,
+    payload,
+    clientModel,
+    streamRequested,
+    normalizedPromptCacheKey,
+  })
+  if (selectionResult instanceof Response) {
+    return selectionResult
+  }
+
+  const { headerSessionId, selection, upstreamRequestId } = selectionResult
+  const { account, reservation, selectedModel } = selection
   request.affinityHit = selection.affinityHit
   request.affinityCacheKey = selection.affinityCacheKey
   request.selectionReason = selection.selectionReason
 
-  const upstreamPayload = { ...payload, model: selectedModel.id }
-
   const premiumRemainingBefore = account.premiumRemaining
   const premiumUnlimitedBefore = account.unlimited
+
+  if (selectedModel.id === GPT_5_4_MODEL_ID) {
+    await accountsManager.finalizeQuota(account, reservation)
+    recordUnsupportedChatCompletionsModel(store, {
+      request,
+      clientModel,
+      stream: streamRequested,
+      upstreamModel: selectedModel.id,
+      accountId: account.id,
+      accountType: account.accountType,
+      costUnits: selection.costUnits,
+      premiumRemainingBefore,
+      premiumRemainingAfter: account.premiumRemaining,
+      premiumUnlimitedBefore,
+      premiumUnlimitedAfter: account.unlimited,
+    })
+    return unsupportedChatCompletionsModelResponse(c)
+  }
+  const upstreamPayload = { ...payload, model: selectedModel.id }
 
   await logTokenCountForRequest({ payload: upstreamPayload, selectedModel })
 
@@ -170,36 +212,7 @@ type AccountSelection = Awaited<
 
 type AccountSelectionOk = Extract<AccountSelection, { ok: true }>
 
-type AccountSelectionErr = Extract<AccountSelection, { ok: false }>
-
-type RequestContext = {
-  requestId: string
-  startedAtMs: number
-
-  method: string
-  path: string
-
-  clientIp?: string
-  clientIpSource?: string
-  userAgent?: string
-
-  userId?: string
-  safetyIdentifier?: string
-  promptCacheKey?: string
-  initiator?: "agent" | "user"
-  upstreamRequestId?: string
-  upstreamSessionId?: string
-
-  affinityKeyUsed?: string
-  affinityKeySource?: AffinityKeySource
-  selectionReason?: AccountSelectionReason
-  affinityHit?: boolean
-  affinityCacheKey?: string
-}
-
-type Store = ReturnType<typeof getRequestHistoryStore>
-
-type RequestLogInsert = Parameters<Store["insert"]>[0]
+type Store = ChatCompletionsHistoryStore
 
 type ChatCompletionsResult = Awaited<ReturnType<typeof createChatCompletions>>
 
@@ -250,118 +263,71 @@ async function writeChatCompletionsStreamError(
   }
 }
 
-function buildRequestContext(c: Context): RequestContext {
-  const requestId = randomUUID()
-  const startedAtMs = Date.now()
+async function selectChatCompletionAccount(params: {
+  c: Context
+  store: Store
+  request: RequestContext
+  payload: ChatCompletionsPayload
+  clientModel: string
+  streamRequested: boolean
+  normalizedPromptCacheKey: string | undefined
+}): Promise<
+  | Response
+  | {
+      headerSessionId: string | null
+      selection: AccountSelectionOk
+      upstreamRequestId: string
+    }
+> {
+  const {
+    c,
+    store,
+    request,
+    payload,
+    clientModel,
+    streamRequested,
+    normalizedPromptCacheKey,
+  } = params
 
-  const method = c.req.raw.method
-  const path = new URL(c.req.url, "http://local").pathname
+  debugJsonTail(logger, "Request payload:", { value: payload, tailLength: 400 })
+  const upstreamRequestId = generateRequestIdFromPayload(
+    payload,
+    normalizedPromptCacheKey,
+  )
+  const headerSessionId = c.req.header("x-session-id") ?? null
+  const affinityKey = resolveAffinityKey({
+    metadataSessionId: normalizedPromptCacheKey,
+    headerSessionId,
+    upstreamRequestId,
+  })
 
-  const { ip: clientIp, source: clientIpSource } = getClientIpInfo(c)
-  const userAgent = c.req.header("user-agent") ?? undefined
+  request.affinityKeyUsed = affinityKey.affinityKeyUsed
+  request.affinityKeySource = affinityKey.affinityKeySource
+
+  const selection = await accountsManager.selectAccountForRequest(
+    buildChatCompletionCandidates(clientModel),
+    {
+      requestId: affinityKey.requestId,
+    },
+  )
+  if (!selection.ok) {
+    recordSelectionFailure(store, {
+      request,
+      clientModel,
+      stream: streamRequested,
+      reason: selection.reason,
+    })
+    return selectionFailureResponse(c, {
+      clientModel,
+      reason: selection.reason,
+    })
+  }
 
   return {
-    requestId,
-    startedAtMs,
-    method,
-    path,
-    clientIp,
-    clientIpSource,
-    userAgent,
+    headerSessionId,
+    selection,
+    upstreamRequestId,
   }
-}
-
-function insertRequestLog(
-  store: Store,
-  request: RequestContext,
-  record: Omit<
-    RequestLogInsert,
-    | "requestId"
-    | "startedAtMs"
-    | "method"
-    | "path"
-    | "clientIp"
-    | "clientIpSource"
-    | "userAgent"
-  >,
-): void {
-  store.insert({
-    requestId: request.requestId,
-    startedAtMs: request.startedAtMs,
-    method: request.method,
-    path: request.path,
-    clientIp: request.clientIp,
-    clientIpSource: request.clientIpSource,
-    userAgent: request.userAgent,
-    userId: request.userId,
-    safetyIdentifier: request.safetyIdentifier,
-    promptCacheKey: request.promptCacheKey,
-    initiator: request.initiator,
-    upstreamRequestId: request.upstreamRequestId,
-    affinityKeyUsed: request.affinityKeyUsed,
-    affinityKeySource: request.affinityKeySource,
-    selectionReason: request.selectionReason,
-    affinityHit: request.affinityHit,
-    affinityCacheKey: request.affinityCacheKey,
-    ...record,
-  })
-}
-
-function recordSelectionFailure(
-  store: Store,
-  params: {
-    request: RequestContext
-    stream: boolean
-    clientModel: string
-    reason: AccountSelectionErr["reason"]
-  },
-): void {
-  const { request, stream, clientModel, reason } = params
-
-  const finishedAtMs = Date.now()
-
-  insertRequestLog(store, request, {
-    finishedAtMs,
-    durationMs: finishedAtMs - request.startedAtMs,
-    upstreamEndpoint: CHAT_COMPLETIONS_ENDPOINT,
-    stream,
-    clientModel,
-    httpStatus: reason === "MODEL_NOT_SUPPORTED" ? 400 : 429,
-    selectionFailureReason: reason,
-  })
-}
-
-function selectionFailureResponse(
-  c: Context,
-  params: {
-    clientModel: string
-    reason: AccountSelectionErr["reason"]
-  },
-) {
-  const { clientModel, reason } = params
-
-  if (reason === "MODEL_NOT_SUPPORTED") {
-    return c.json(
-      {
-        error: {
-          message: `Model "${clientModel}" is not available for any configured account.`,
-          type: "invalid_request_error",
-        },
-      },
-      400,
-    )
-  }
-
-  return c.json(
-    {
-      error: {
-        message:
-          "All accounts have exhausted their quota. Please wait for quota refresh or add additional accounts.",
-        type: "rate_limit_error",
-      },
-    },
-    429,
-  )
 }
 
 async function logTokenCountForRequest(params: {
@@ -709,7 +675,14 @@ async function streamChatCompletionsAndLog(params: {
 async function extractUsageFromChunk(
   chunk: SSEMessage,
 ): Promise<NormalizedUsage | undefined> {
-  const data = typeof chunk.data === "string" ? chunk.data : await chunk.data
+  let data: string | undefined
+
+  try {
+    data = typeof chunk.data === "string" ? chunk.data : await chunk.data
+  } catch (error) {
+    logger.warn("Failed to read chat completions usage chunk:", error)
+    return undefined
+  }
 
   if (!data || data === "[DONE]") {
     return undefined
@@ -719,7 +692,11 @@ async function extractUsageFromChunk(
     const parsed = JSON.parse(data) as ChatCompletionChunk
     if (!parsed.usage) return undefined
     return normalizeChatCompletionsUsage(parsed.usage)
-  } catch {
+  } catch (error) {
+    logger.warn("Failed to parse chat completions usage chunk:", {
+      error,
+      data,
+    })
     return undefined
   }
 }

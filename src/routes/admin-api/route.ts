@@ -33,6 +33,7 @@ import {
   getRequestHistoryStore,
   type AccountStatsRow,
 } from "~/lib/request-history"
+import { applySharedSessionAffinityRetention } from "~/lib/session-affinity-store"
 import { isAccountType } from "~/lib/types/account"
 
 import { authSessionManager } from "./auth-sessions"
@@ -185,6 +186,7 @@ const CONFIG_KEYS = new Set<keyof AppConfig>([
   "compactUseSmallModel",
   "messageStartInputTokensFallback",
   "modelRefreshIntervalHours",
+  "sessionAffinityRetentionDays",
   "useMessagesApi",
   "useResponsesApiWebSearch",
 ])
@@ -872,7 +874,7 @@ function applyOptionalBoolean(
 
 function applyOptionalNumber(
   next: AppConfig,
-  key: "modelRefreshIntervalHours",
+  key: "modelRefreshIntervalHours" | "sessionAffinityRetentionDays",
   value: unknown,
 ): string | undefined {
   const parsed = parseOptionalNonNegativeNumber(value, key)
@@ -987,6 +989,8 @@ const CONFIG_PATCH_HANDLERS: Partial<Record<string, ConfigPatchHandler>> = {
     applyOptionalBoolean(next, "messageStartInputTokensFallback", value),
   modelRefreshIntervalHours: (next, value) =>
     applyOptionalNumber(next, "modelRefreshIntervalHours", value),
+  sessionAffinityRetentionDays: (next, value) =>
+    applyOptionalNumber(next, "sessionAffinityRetentionDays", value),
   useMessagesApi: (next, value) =>
     applyOptionalBoolean(next, "useMessagesApi", value),
   useResponsesApiWebSearch: (next, value) =>
@@ -1107,6 +1111,7 @@ adminApiRoutes.post("/config", async (c) => {
     const merged = mergeConfigWithDefaults()
     accountsManager.setAccountAffinityEnabled(isAccountAffinityEnabled())
     accountsManager.setModelsRefreshIntervalMs(getModelRefreshIntervalMs())
+    applySharedSessionAffinityRetention()
     return c.json({ ...merged, _configPath: PATHS.CONFIG_PATH })
   } catch {
     return jsonError(c, 500, {

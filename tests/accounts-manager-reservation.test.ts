@@ -45,15 +45,31 @@ const makeModelsResponse = (models: Array<Model>): ModelsResponse => ({
   data: models,
 })
 
-const setupManagerWithAccount = (account: AccountRuntime): AccountsManager => {
+type ManagerInternals = {
+  accounts: Map<string, AccountRuntime>
+  accountOrder: Array<string>
+}
+
+const setupManagerWithAccounts = (
+  ...accounts: Array<AccountRuntime>
+): AccountsManager => {
   const manager = new AccountsManager()
-  const internals = manager as unknown as {
-    accounts: Map<string, AccountRuntime>
-    accountOrder: Array<string>
+  const internals = manager as unknown as ManagerInternals
+
+  for (const account of accounts) {
+    internals.accounts.set(account.id, account)
+    internals.accountOrder.push(account.id)
   }
-  internals.accounts.set(account.id, account)
-  internals.accountOrder.push(account.id)
+
   return manager
+}
+
+const setupManagerWithAccount = (account: AccountRuntime): AccountsManager =>
+  setupManagerWithAccounts(account)
+
+const disableQuotaRefresh = (manager: AccountsManager): void => {
+  ;(manager as unknown as { refreshQuota: () => Promise<void> }).refreshQuota =
+    async () => {}
 }
 
 test("selectAccountForRequest reserves multiplier units and releases on finalizeQuota", async () => {
@@ -90,8 +106,7 @@ test("selectAccountForRequest reserves multiplier units and releases on finalize
   expect(account.premiumReserved).toBe(2.5)
 
   // Avoid network calls from finalizeQuota() in unit test.
-  ;(manager as unknown as { refreshQuota: () => Promise<void> }).refreshQuota =
-    async () => {}
+  disableQuotaRefresh(manager)
 
   await manager.finalizeQuota(account, selection.reservation)
 
@@ -374,15 +389,8 @@ test("selectAccountForRequest prefers account with quota over overage account", 
     lastQuotaFetch: Date.now(),
   }
 
-  const manager = new AccountsManager()
-  const internals = manager as unknown as {
-    accounts: Map<string, AccountRuntime>
-    accountOrder: Array<string>
-  }
   // Overage account is first in order, but quota account should be preferred
-  internals.accounts.set(overageAccount.id, overageAccount)
-  internals.accounts.set(quotaAccount.id, quotaAccount)
-  internals.accountOrder.push(overageAccount.id, quotaAccount.id)
+  const manager = setupManagerWithAccounts(overageAccount, quotaAccount)
 
   const selection = await manager.selectAccountForRequest([
     { modelId: "gpt-5", endpoint: "/chat/completions" },
@@ -430,14 +438,7 @@ test("selectAccountForRequest falls back to overage account when all quota exhau
     lastQuotaFetch: Date.now(),
   }
 
-  const manager = new AccountsManager()
-  const internals = manager as unknown as {
-    accounts: Map<string, AccountRuntime>
-    accountOrder: Array<string>
-  }
-  internals.accounts.set(overageAccount.id, overageAccount)
-  internals.accounts.set(exhaustedAccount.id, exhaustedAccount)
-  internals.accountOrder.push(overageAccount.id, exhaustedAccount.id)
+  const manager = setupManagerWithAccounts(overageAccount, exhaustedAccount)
 
   const selection = await manager.selectAccountForRequest([
     { modelId: "gpt-5", endpoint: "/chat/completions" },
@@ -483,14 +484,7 @@ test("selectAccountForRequest falls back to next account when first has no overa
     lastQuotaFetch: Date.now(),
   }
 
-  const manager = new AccountsManager()
-  const internals = manager as unknown as {
-    accounts: Map<string, AccountRuntime>
-    accountOrder: Array<string>
-  }
-  internals.accounts.set(exhaustedAccount.id, exhaustedAccount)
-  internals.accounts.set(availableAccount.id, availableAccount)
-  internals.accountOrder.push(exhaustedAccount.id, availableAccount.id)
+  const manager = setupManagerWithAccounts(exhaustedAccount, availableAccount)
 
   const selection = await manager.selectAccountForRequest([
     { modelId: "gpt-5", endpoint: "/chat/completions" },
@@ -500,6 +494,125 @@ test("selectAccountForRequest falls back to next account when first has no overa
   if (!selection.ok) return
 
   expect(selection.account.id).toBe("available")
+})
+
+test("ownership: unusable owner falls back safely for premium requests", async () => {
+  const model = makeModel({
+    id: "gpt-5",
+    billing: {
+      is_premium: true,
+      multiplier: 1,
+    },
+  })
+
+  const preferredAccount: AccountRuntime = {
+    id: "preferred",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_preferred",
+    vsCodeVersion: "1.0.0",
+    models: makeModelsResponse([model]),
+    premiumRemaining: 1,
+    lastQuotaFetch: Date.now(),
+  }
+  const fallbackAccount: AccountRuntime = {
+    id: "fallback",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_fallback",
+    vsCodeVersion: "1.0.0",
+    models: makeModelsResponse([model]),
+    premiumRemaining: 10,
+    lastQuotaFetch: Date.now(),
+  }
+
+  const manager = setupManagerWithAccounts(preferredAccount, fallbackAccount)
+
+  const mainRequest = await manager.selectAccountForRequest(
+    [{ modelId: "gpt-5", endpoint: "/chat/completions" }],
+    { ownershipWriteSessionId: "root-session-premium" },
+  )
+  expect(mainRequest.ok).toBe(true)
+  if (!mainRequest.ok) return
+
+  expect(mainRequest.account.id).toBe("preferred")
+  expect(mainRequest.confirmOwnership).toBeDefined()
+  mainRequest.confirmOwnership?.()
+  disableQuotaRefresh(manager)
+
+  await manager.finalizeQuota(preferredAccount, mainRequest.reservation)
+  preferredAccount.premiumRemaining = 0
+
+  const subagentRequest = await manager.selectAccountForRequest(
+    [{ modelId: "gpt-5", endpoint: "/chat/completions" }],
+    { ownershipLookupSessionId: "root-session-premium" },
+  )
+  expect(subagentRequest.ok).toBe(true)
+  if (!subagentRequest.ok) return
+
+  expect(subagentRequest.account.id).toBe("fallback")
+  expect(subagentRequest.selectionReason).toBe(
+    "subagent_owner_unusable_fallback",
+  )
+  expect(subagentRequest.confirmOwnership).toBeUndefined()
+})
+
+test("ownership: unusable owner keeps fallback reason when final selection fails", async () => {
+  const model = makeModel({
+    id: "gpt-5",
+    billing: {
+      is_premium: true,
+      multiplier: 1,
+    },
+  })
+
+  const preferredAccount: AccountRuntime = {
+    id: "preferred",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_preferred",
+    vsCodeVersion: "1.0.0",
+    models: makeModelsResponse([model]),
+    premiumRemaining: 1,
+    lastQuotaFetch: Date.now(),
+  }
+  const fallbackAccount: AccountRuntime = {
+    id: "fallback",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_fallback",
+    vsCodeVersion: "1.0.0",
+    models: makeModelsResponse([model]),
+    premiumRemaining: 0,
+    lastQuotaFetch: Date.now(),
+  }
+
+  const manager = setupManagerWithAccounts(preferredAccount, fallbackAccount)
+
+  const mainRequest = await manager.selectAccountForRequest(
+    [{ modelId: "gpt-5", endpoint: "/chat/completions" }],
+    { ownershipWriteSessionId: "root-session-premium" },
+  )
+  expect(mainRequest.ok).toBe(true)
+  if (!mainRequest.ok) return
+
+  mainRequest.confirmOwnership?.()
+  disableQuotaRefresh(manager)
+
+  await manager.finalizeQuota(preferredAccount, mainRequest.reservation)
+  preferredAccount.premiumRemaining = 0
+
+  const subagentRequest = await manager.selectAccountForRequest(
+    [{ modelId: "gpt-5", endpoint: "/chat/completions" }],
+    { ownershipLookupSessionId: "root-session-premium" },
+  )
+  expect(subagentRequest.ok).toBe(false)
+  if (subagentRequest.ok) return
+
+  expect(subagentRequest.reason).toBe("NO_QUOTA")
+  expect(subagentRequest.selectionReason).toBe(
+    "subagent_owner_unusable_fallback",
+  )
 })
 
 test("applyQuotaRefreshSuccessIfCurrent sets overagePermitted from quota response", () => {

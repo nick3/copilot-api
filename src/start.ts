@@ -15,6 +15,7 @@ import {
 import { initOpencodeVersion } from "./lib/opencode"
 import { ensurePaths } from "./lib/paths"
 import { initProxyFromEnv } from "./lib/proxy"
+import { applySharedSessionAffinityRetention } from "./lib/session-affinity-store"
 import { generateEnvScript } from "./lib/shell"
 import { state } from "./lib/state"
 import { parseAccountType, type AccountType } from "./lib/types/account"
@@ -168,6 +169,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   state.showToken = options.showToken
 
   await ensurePaths()
+  applySharedSessionAffinityRetention()
   await cacheVSCodeVersion()
   cacheMacMachineId()
   cacheVsCodeSessionId()
