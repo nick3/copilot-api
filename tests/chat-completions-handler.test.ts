@@ -10,7 +10,6 @@ const originalState = {
   copilotToken: state.copilotToken,
   lastRequestTimestamp: state.lastRequestTimestamp,
   manualApprove: state.manualApprove,
-  models: state.models,
   rateLimitSeconds: state.rateLimitSeconds,
   rateLimitWait: state.rateLimitWait,
   verbose: state.verbose,
@@ -37,29 +36,6 @@ const fetchMock = mock(() =>
   ),
 )
 
-const createModels = () => ({
-  object: "list" as const,
-  data: [
-    {
-      capabilities: {
-        family: "gpt",
-        limits: {},
-        object: "model_capabilities" as const,
-        supports: {},
-        tokenizer: "o200k_base",
-        type: "chat" as const,
-      },
-      id: "gpt-5.4",
-      model_picker_enabled: true,
-      name: "gpt-5.4",
-      object: "model" as const,
-      preview: false,
-      vendor: "openai",
-      version: "1",
-    },
-  ],
-})
-
 const createApp = () => {
   const app = new Hono()
   app.route("/v1/chat/completions", completionRoutes)
@@ -75,7 +51,6 @@ beforeEach(() => {
   state.rateLimitWait = false
   state.rateLimitSeconds = undefined
   state.lastRequestTimestamp = undefined
-  state.models = createModels()
 
   fetchMock.mockClear()
   ;(globalThis as unknown as { fetch: typeof fetch }).fetch =
@@ -91,7 +66,6 @@ afterEach(() => {
   state.rateLimitWait = originalState.rateLimitWait
   state.rateLimitSeconds = originalState.rateLimitSeconds
   state.lastRequestTimestamp = originalState.lastRequestTimestamp
-  state.models = originalState.models
   ;(globalThis as unknown as { fetch: typeof fetch }).fetch = originalFetch
 })
 

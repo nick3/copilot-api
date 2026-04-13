@@ -1,9 +1,12 @@
 import type { Model } from "~/services/copilot/get-models"
 
-import { state } from "~/lib/state"
+import { accountsManager } from "~/lib/accounts-manager"
+
+export const getAvailableModels = (): Array<Model> =>
+  accountsManager.getFirstAccountModels()?.data ?? []
 
 export const findEndpointModel = (sdkModelId: string): Model | undefined => {
-  const models = state.models?.data ?? []
+  const models = getAvailableModels()
   const exactMatch = models.find((m) => m.id === sdkModelId)
   if (exactMatch) {
     return exactMatch
@@ -15,12 +18,7 @@ export const findEndpointModel = (sdkModelId: string): Model | undefined => {
   }
 
   const modelName = `claude-${normalized.family}-${normalized.version}`
-  const model = models.find((m) => m.id === modelName)
-  if (model) {
-    return model
-  }
-
-  return undefined
+  return models.find((m) => m.id === modelName)
 }
 
 /**

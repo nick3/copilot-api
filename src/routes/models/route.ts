@@ -2,31 +2,24 @@ import { Hono } from "hono"
 
 import { getAliasTargetSet, getModelAliases } from "~/lib/config"
 import { forwardError } from "~/lib/error"
-import { state } from "~/lib/state"
-import { cacheModels } from "~/lib/utils"
+import { getAvailableModels } from "~/lib/models"
 
 export const modelRoutes = new Hono()
 
 modelRoutes.get("/", async (c) => {
   try {
-    if (!state.models) {
-      // This should be handled by startup logic, but as a fallback.
-      await cacheModels()
-    }
-
     const blockedTargets = getAliasTargetSet()
-    const models =
-      state.models?.data
-        .filter((model) => !blockedTargets.has(model.id.toLowerCase()))
-        .map((model) => ({
-          id: model.id,
-          object: "model",
-          type: "model",
-          created: 0, // No date available from source
-          created_at: new Date(0).toISOString(), // No date available from source
-          owned_by: model.vendor,
-          display_name: model.name,
-        })) ?? []
+    const models = getAvailableModels()
+      .filter((model) => !blockedTargets.has(model.id.toLowerCase()))
+      .map((model) => ({
+        id: model.id,
+        object: "model",
+        type: "model",
+        created: 0, // No date available from source
+        created_at: new Date(0).toISOString(), // No date available from source
+        owned_by: model.vendor,
+        display_name: model.name,
+      }))
 
     const aliasItems = Object.keys(getModelAliases())
     const aliasModels = aliasItems.map((alias) => ({
