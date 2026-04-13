@@ -357,11 +357,14 @@ The `<target>` can be either the account ID (GitHub username) or a 1-based index
     },
     "allowOriginalModelNamesForAliases": false,
     "useFunctionApplyPatch": true,
+    "forceAgent": false,
     "compactUseSmallModel": true,
     "messageStartInputTokensFallback": false,
     "modelRefreshIntervalHours": 24,
+    "sessionAffinityRetentionDays": 7,
     "useMessagesApi": true,
-    "useResponsesApiWebSearch": true
+    "useResponsesApiWebSearch": true,
+    "logLevel": "info"
   }
   ```
 - **auth.apiKeys:** API keys used for request authentication. Supports multiple keys for rotation. Requests can authenticate with either `x-api-key: <key>` or `Authorization: Bearer <key>`. If empty or omitted, authentication is disabled.
@@ -411,9 +414,13 @@ The `<target>` can be either the account ID (GitHub username) or a 1-based index
 - **compactUseSmallModel:** When `true`, detected "compact" requests (e.g., from Claude Code or opencode compact mode) will automatically use the configured `smallModel` to avoid consuming premium usage for short/background tasks. Defaults to `true`.
 - **messageStartInputTokensFallback:** When `true`, the Anthropic streaming translation layer estimates `message_start.input_tokens` when upstream stream events do not provide it. Defaults to `false`.
 - **modelRefreshIntervalHours:** Interval for refreshing account model lists in the background. Set to `0` to disable refresh. Defaults to `24`.
+- **sessionAffinityRetentionDays:** Number of days to retain session affinity bindings. Defaults to `7`.
 - **useMessagesApi:** When `true` (default), Claude-family models that support Copilot's native `/v1/messages` endpoint may use the Messages API path. Set to `false` to skip the Messages API candidate and fall back to `/responses` (if supported) or `/chat/completions`.
 - **useResponsesApiWebSearch:** When `true` (default), `/v1/responses` keeps tools with `type: "web_search"` and forwards them upstream. Set to `false` to strip them before the Copilot request is sent.
+- **logLevel:** Controls handler file-log verbosity under `logs/*.log`. Allowed values: `error`, `warn`, `info`, `debug`. Defaults to `info`. Set it to `debug` when you need payload- or stream-level diagnostics written into file logs.
 - **anthropicApiKey:** Optional Anthropic API key used for accurate Claude token counting (see [Accurate Claude Token Counting](#accurate-claude-token-counting) below). Can also be set via the `ANTHROPIC_API_KEY` environment variable. If not set, token counting falls back to GPT tokenizer estimation.
+
+`--verbose` no longer implicitly enables debug-level file logging. If you need detailed handler logs under `logs/*.log`, explicitly set `"logLevel": "debug"` in `config.json`.
 
 Edit this file to customize prompts or swap in your own fast model. If you edit it manually, restart the server (or call `GET /api/admin/config`) so the cached config is refreshed. Changes made through the Admin UI/API are validated, written to disk, and applied immediately; unknown keys are rejected.
 
