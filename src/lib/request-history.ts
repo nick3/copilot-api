@@ -18,6 +18,7 @@ import type { AccountSelectionReason } from "./accounts-manager"
 import type { AffinityKeySource } from "./utils"
 
 import { getAdminDb, getAdminDbPath, getAdminDbUserVersion } from "./admin-db"
+import { StatsStore } from "./stats-store"
 
 const DEFAULT_RETENTION_DAYS = 14
 const DEFAULT_MAX_ROWS = 200_000
@@ -460,6 +461,25 @@ export class RequestHistoryStore {
       ] as const
 
       this.insertStmt.run(...args)
+
+      // Write-time aggregation for premium stats
+      if (
+        record.costUnits != null &&
+        record.costUnits > 0 &&
+        record.accountId
+      ) {
+        try {
+          getStatsStoreInstance()?.upsertDailyStats({
+            startedAtMs: record.startedAtMs,
+            accountId: record.accountId,
+            costUnits: record.costUnits,
+            tokensTotal: record.tokensTotal ?? 0,
+            hasError: record.errorName != null,
+          })
+        } catch {
+          // Stats aggregation is best-effort; never break request logging
+        }
+      }
     } catch (error) {
       warnInsertFailure(error)
     }
@@ -750,6 +770,18 @@ const disabledStore: RequestHistoryStoreApi = {
 let sharedStore: RequestHistoryStoreApi | null = null
 let maintenanceStarted = false
 
+let sharedStatsStore: StatsStore | null = null
+
+function getStatsStoreInstance(): StatsStore | null {
+  if (sharedStatsStore) return sharedStatsStore
+  try {
+    sharedStatsStore = new StatsStore(getAdminDb())
+    return sharedStatsStore
+  } catch {
+    return null
+  }
+}
+
 export function getRequestHistoryStore(): RequestHistoryStoreApi {
   if (sharedStore) {
     return sharedStore
@@ -768,11 +800,17 @@ export function getRequestHistoryStore(): RequestHistoryStoreApi {
 
       // Run once at startup.
       sharedStore.cleanupRetention()
+      getStatsStoreInstance()?.cleanupStatsRetention()
 
       // Then daily.
       setInterval(
         () => {
           sharedStore?.cleanupRetention()
+          try {
+            getStatsStoreInstance()?.cleanupStatsRetention()
+          } catch {
+            // Stats cleanup is best-effort
+          }
         },
         24 * 60 * 60 * 1000,
       )
@@ -807,4 +845,8 @@ export function extractResponsesUsageFromResult(
   result: ResponsesResult,
 ): NormalizedUsage {
   return normalizeResponsesUsage(result.usage)
+}
+
+export function getStatsStore(): StatsStore | null {
+  return getStatsStoreInstance()
 }
