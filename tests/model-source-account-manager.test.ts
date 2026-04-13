@@ -6,7 +6,7 @@ import type { ChatCompletionsPayload } from "~/services/copilot/create-chat-comp
 import type { Model } from "~/services/copilot/get-models"
 
 import { accountsManager } from "~/lib/accounts-manager"
-import { findEndpointModel } from "~/lib/models"
+import { findEndpointModel, getAvailableModels } from "~/lib/models"
 import { state } from "~/lib/state"
 import { getTokenCount } from "~/lib/tokenizer"
 import { translateToOpenAI } from "~/routes/messages/non-stream-translation"
@@ -80,6 +80,40 @@ describe("account-managed model sources", () => {
         expect(body.data.map((model) => model.id)).toContain(
           "copilot-test-route-model",
         )
+      },
+    )
+  })
+
+  test("getAvailableModels excludes hidden chat models while keeping embeddings", async () => {
+    const visibleChat = buildModel("visible-chat")
+    const hiddenChat = buildModel("hidden-chat", {
+      model_picker_enabled: false,
+    })
+    const hiddenEmbeddings = buildModel("hidden-embeddings", {
+      model_picker_enabled: false,
+      capabilities: {
+        family: "test",
+        limits: {},
+        object: "capabilities",
+        supports: {},
+        tokenizer: "o200k_base",
+        type: "embeddings",
+      },
+    })
+
+    await withMockedModels([visibleChat, hiddenChat, hiddenEmbeddings], () => {
+      expect(getAvailableModels().map((model) => model.id)).toEqual([
+        "visible-chat",
+        "hidden-embeddings",
+      ])
+    })
+  })
+
+  test("findEndpointModel ignores hidden chat models in compatibility lookups", async () => {
+    await withMockedModels(
+      [buildModel("hidden-chat", { model_picker_enabled: false })],
+      () => {
+        expect(findEndpointModel("hidden-chat")).toBeUndefined()
       },
     )
   })

@@ -3,7 +3,10 @@ import type { Model } from "~/services/copilot/get-models"
 import { accountsManager } from "~/lib/accounts-manager"
 
 export const getAvailableModels = (): Array<Model> =>
-  accountsManager.getFirstAccountModels()?.data ?? []
+  (accountsManager.getFirstAccountModels()?.data ?? []).filter(
+    (model) =>
+      model.model_picker_enabled || model.capabilities.type === "embeddings",
+  )
 
 export const findEndpointModel = (sdkModelId: string): Model | undefined => {
   const models = getAvailableModels()
