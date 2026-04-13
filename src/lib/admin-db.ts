@@ -148,6 +148,60 @@ function migrateV1(db: Database): void {
   `)
 }
 
+function migrateV9(db: Database): void {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS daily_premium_stats (
+      date            TEXT    NOT NULL,
+      account_id      TEXT    NOT NULL,
+      request_count   INTEGER NOT NULL DEFAULT 0,
+      cost_units_sum  REAL    NOT NULL DEFAULT 0,
+      tokens_total    INTEGER NOT NULL DEFAULT 0,
+      error_count     INTEGER NOT NULL DEFAULT 0,
+      updated_at_ms   INTEGER NOT NULL,
+      PRIMARY KEY (date, account_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_daily_premium_stats_date
+      ON daily_premium_stats(date);
+  `)
+
+  // Backfill from existing request_log (guard: table may not exist in edge cases)
+  const hasRequestLog = db
+    .query(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'request_log' LIMIT 1;",
+    )
+    .get()
+
+  if (hasRequestLog) {
+    const nowMs = Date.now()
+    db.run(
+      `INSERT INTO daily_premium_stats
+         (date, account_id, request_count, cost_units_sum, tokens_total, error_count, updated_at_ms)
+       SELECT
+         date(started_at_ms / 1000, 'unixepoch', 'localtime') AS date,
+         account_id,
+         COUNT(*)                                              AS request_count,
+         SUM(cost_units)                                       AS cost_units_sum,
+         COALESCE(SUM(tokens_total), 0)                        AS tokens_total,
+         SUM(CASE WHEN error_name IS NOT NULL THEN 1 ELSE 0 END) AS error_count,
+         ?                                                     AS updated_at_ms
+       FROM request_log
+       WHERE cost_units > 0
+         AND account_id IS NOT NULL
+       GROUP BY 1, 2
+       ON CONFLICT(date, account_id) DO UPDATE SET
+         request_count   = excluded.request_count,
+         cost_units_sum  = excluded.cost_units_sum,
+         tokens_total    = excluded.tokens_total,
+         error_count     = excluded.error_count,
+         updated_at_ms   = excluded.updated_at_ms;`,
+      [nowMs],
+    )
+  }
+
+  db.run("PRAGMA user_version = 9;")
+}
+
 function migrateV8(db: Database): void {
   db.run(`
     CREATE TABLE IF NOT EXISTS session_affinity (
@@ -174,7 +228,7 @@ function migrateAdminDb(db: Database): void {
   } | null
   const current = row?.user_version ?? 0
 
-  if (current >= 8) {
+  if (current >= 9) {
     return
   }
 
@@ -271,4 +325,5 @@ function migrateAdminDb(db: Database): void {
   }
 
   migrateV8(db)
+  migrateV9(db)
 }
