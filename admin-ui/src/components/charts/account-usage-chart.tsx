@@ -28,7 +28,7 @@ const CHART_COLORS = [
 
 function formatXLabel(dateStr: string, isHourly: boolean): string {
   if (isHourly) {
-    const match = /T(\d{2})/.exec(dateStr)
+    const match = /(\d{2}):00/.exec(dateStr) ?? /T(\d{2})/.exec(dateStr)
     return match ? `${match[1]}:00` : dateStr
   }
   const match = /(\d{2})-(\d{2})$/.exec(dateStr)

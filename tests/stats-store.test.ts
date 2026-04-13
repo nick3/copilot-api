@@ -2,10 +2,7 @@ import { Database } from "bun:sqlite"
 import { expect, test } from "bun:test"
 
 import { getAdminDbUserVersion, initAdminDb } from "../src/lib/admin-db"
-import {
-  StatsStore,
-  toLocalDateString,
-} from "../src/lib/stats-store"
+import { StatsStore, toLocalDateString } from "../src/lib/stats-store"
 
 test("initAdminDb migrates admin DB to user_version 9", () => {
   const db = new Database(":memory:")
@@ -73,17 +70,19 @@ test("v9 migration backfills from existing request_log data", () => {
 
   expect(rows.length).toBe(2)
 
-  const acctA = rows.find((r) => r.account_id === "acct-a")!
-  expect(acctA.request_count).toBe(2)
-  expect(acctA.cost_units_sum).toBe(15.0)
-  expect(acctA.tokens_total).toBe(1500)
-  expect(acctA.error_count).toBe(1)
+  const acctA = rows.find((r) => r.account_id === "acct-a")
+  expect(acctA).toBeDefined()
+  expect(acctA?.request_count).toBe(2)
+  expect(acctA?.cost_units_sum).toBe(15.0)
+  expect(acctA?.tokens_total).toBe(1500)
+  expect(acctA?.error_count).toBe(1)
 
-  const acctB = rows.find((r) => r.account_id === "acct-b")!
-  expect(acctB.request_count).toBe(1)
-  expect(acctB.cost_units_sum).toBe(8.0)
-  expect(acctB.tokens_total).toBe(800)
-  expect(acctB.error_count).toBe(0)
+  const acctB = rows.find((r) => r.account_id === "acct-b")
+  expect(acctB).toBeDefined()
+  expect(acctB?.request_count).toBe(1)
+  expect(acctB?.cost_units_sum).toBe(8.0)
+  expect(acctB?.tokens_total).toBe(800)
+  expect(acctB?.error_count).toBe(0)
 })
 
 test("upsertDailyStats creates new rows", () => {
@@ -100,9 +99,7 @@ test("upsertDailyStats creates new rows", () => {
     hasError: false,
   })
 
-  const rows = db
-    .query("SELECT * FROM daily_premium_stats")
-    .all() as Array<{
+  const rows = db.query("SELECT * FROM daily_premium_stats").all() as Array<{
     date: string
     account_id: string
     request_count: number
@@ -143,9 +140,7 @@ test("upsertDailyStats accumulates on same date+account", () => {
     hasError: true,
   })
 
-  const rows = db
-    .query("SELECT * FROM daily_premium_stats")
-    .all() as Array<{
+  const rows = db.query("SELECT * FROM daily_premium_stats").all() as Array<{
     request_count: number
     cost_units_sum: number
     tokens_total: number
@@ -183,9 +178,7 @@ test("upsertDailyStats creates separate rows for different accounts", () => {
   })
 
   const rows = db
-    .query(
-      "SELECT account_id FROM daily_premium_stats ORDER BY account_id",
-    )
+    .query("SELECT account_id FROM daily_premium_stats ORDER BY account_id")
     .all() as Array<{ account_id: string }>
 
   expect(rows.length).toBe(2)
@@ -368,9 +361,9 @@ test("cleanupStatsRetention removes old stats", () => {
   expect(afterCount).toBe(1)
 
   // Verify the remaining row is the recent one
-  const remaining = db
-    .query("SELECT date FROM daily_premium_stats")
-    .get() as { date: string }
+  const remaining = db.query("SELECT date FROM daily_premium_stats").get() as {
+    date: string
+  }
   expect(remaining.date).toBe(toLocalDateString(recentDate))
 })
 

@@ -464,9 +464,9 @@ export class RequestHistoryStore {
 
       // Write-time aggregation for premium stats
       if (
-        record.costUnits != null &&
-        record.costUnits > 0 &&
-        record.accountId
+        record.costUnits !== undefined
+        && record.costUnits > 0
+        && record.accountId
       ) {
         try {
           getStatsStoreInstance()?.upsertDailyStats({
@@ -474,7 +474,7 @@ export class RequestHistoryStore {
             accountId: record.accountId,
             costUnits: record.costUnits,
             tokensTotal: record.tokensTotal ?? 0,
-            hasError: record.errorName != null,
+            hasError: record.errorName !== undefined,
           })
         } catch {
           // Stats aggregation is best-effort; never break request logging

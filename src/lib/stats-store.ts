@@ -15,8 +15,8 @@ export interface DailyAccountStats extends DailyStats {
 }
 
 export interface PremiumStatsResponse {
-  daily: DailyStats[]
-  by_account: DailyAccountStats[]
+  daily: Array<DailyStats>
+  by_account: Array<DailyAccountStats>
   range: { from: string; to: string; granularity: "day" | "hour" }
 }
 
@@ -58,7 +58,7 @@ export class StatsStore {
       date,
       record.accountId,
       record.costUnits,
-      record.tokensTotal ?? 0,
+      record.tokensTotal,
       record.hasError ? 1 : 0,
       Date.now(),
     )
@@ -68,9 +68,9 @@ export class StatsStore {
     from: string
     to: string
     accountId?: string
-  }): { daily: DailyStats[]; byAccount: DailyAccountStats[] } {
+  }): { daily: Array<DailyStats>; byAccount: Array<DailyAccountStats> } {
     const accountFilter = params.accountId ? " AND account_id = ?" : ""
-    const args: (string | number)[] = [params.from, params.to]
+    const args: Array<string | number> = [params.from, params.to]
     if (params.accountId) args.push(params.accountId)
 
     const daily = this.db
@@ -85,7 +85,7 @@ export class StatsStore {
          GROUP BY date
          ORDER BY date`,
       )
-      .all(...args) as DailyStats[]
+      .all(...args) as Array<DailyStats>
 
     const byAccount = this.db
       .query(
@@ -94,7 +94,7 @@ export class StatsStore {
          WHERE date >= ? AND date <= ?${accountFilter}
          ORDER BY date, account_id`,
       )
-      .all(...args) as DailyAccountStats[]
+      .all(...args) as Array<DailyAccountStats>
 
     return { daily, byAccount }
   }
@@ -103,9 +103,9 @@ export class StatsStore {
     fromMs: number
     toMs: number
     accountId?: string
-  }): { daily: DailyStats[]; byAccount: DailyAccountStats[] } {
+  }): { daily: Array<DailyStats>; byAccount: Array<DailyAccountStats> } {
     const accountFilter = params.accountId ? " AND account_id = ?" : ""
-    const dailyArgs: (string | number)[] = [params.fromMs, params.toMs]
+    const dailyArgs: Array<string | number> = [params.fromMs, params.toMs]
     if (params.accountId) dailyArgs.push(params.accountId)
 
     const daily = this.db
@@ -121,12 +121,11 @@ export class StatsStore {
          GROUP BY 1
          ORDER BY 1`,
       )
-      .all(...dailyArgs) as DailyStats[]
+      .all(...dailyArgs) as Array<DailyStats>
 
-    const byAccountFilter = params.accountId
-      ? " AND account_id = ?"
-      : " AND account_id IS NOT NULL"
-    const byAccountArgs: (string | number)[] = [params.fromMs, params.toMs]
+    const byAccountFilter =
+      params.accountId ? " AND account_id = ?" : " AND account_id IS NOT NULL"
+    const byAccountArgs: Array<string | number> = [params.fromMs, params.toMs]
     if (params.accountId) byAccountArgs.push(params.accountId)
 
     const byAccount = this.db
@@ -138,12 +137,12 @@ export class StatsStore {
                 COALESCE(SUM(tokens_total), 0)                             AS tokens_total,
                 SUM(CASE WHEN error_name IS NOT NULL THEN 1 ELSE 0 END)    AS error_count
          FROM request_log
-         WHERE cost_units > 0${byAccountFilter}
-           AND started_at_ms >= ? AND started_at_ms <= ?
+         WHERE cost_units > 0
+           AND started_at_ms >= ? AND started_at_ms <= ?${byAccountFilter}
          GROUP BY 1, 2
          ORDER BY 1, 2`,
       )
-      .all(...byAccountArgs) as DailyAccountStats[]
+      .all(...byAccountArgs) as Array<DailyAccountStats>
 
     return { daily, byAccount }
   }
