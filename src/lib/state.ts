@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto"
 
-import type { ModelsResponse } from "~/services/copilot/get-models"
-
 import type { AccountContext, AccountType } from "./types/account"
 
 export interface State {
@@ -9,7 +7,6 @@ export interface State {
   copilotToken?: string
 
   accountType: AccountType
-  models?: ModelsResponse
   vsCodeVersion?: string
 
   macMachineId?: string

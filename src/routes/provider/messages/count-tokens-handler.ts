@@ -3,7 +3,7 @@ import type { Context } from "hono"
 import type { Model } from "~/services/copilot/get-models"
 
 import { createHandlerLogger } from "~/lib/logger"
-import { state } from "~/lib/state"
+import { getAvailableModels } from "~/lib/models"
 import { getTokenCount } from "~/lib/tokenizer"
 import { type AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
 import { translateToOpenAI } from "~/routes/messages/non-stream-translation"
@@ -36,7 +36,9 @@ export async function handleProviderCountTokens(c: Context): Promise<Response> {
     const openAIPayload = translateToOpenAI(anthropicPayload)
     const modelId = anthropicPayload.model.trim()
 
-    let selectedModel = state.models?.data.find((model) => model.id === modelId)
+    let selectedModel = getAvailableModels().find(
+      (model) => model.id === modelId,
+    )
 
     if (!selectedModel && modelId) {
       selectedModel = createFallbackModel(modelId)

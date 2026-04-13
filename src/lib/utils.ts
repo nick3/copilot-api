@@ -6,7 +6,6 @@ import { networkInterfaces } from "node:os"
 
 import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
 
-import { getModels } from "~/services/copilot/get-models"
 import { getVSCodeVersion } from "~/services/get-vscode-version"
 
 import { getVSCodeDeviceId } from "./deviceid"
@@ -19,17 +18,6 @@ export const sleep = (ms: number) =>
 
 export const isNullish = (value: unknown): value is null | undefined =>
   value === null || value === undefined
-
-export async function cacheModels(): Promise<void> {
-  const models = await getModels()
-  state.models = {
-    ...models,
-    data: models.data.filter(
-      (model) =>
-        model.model_picker_enabled || model.capabilities.type === "embeddings",
-    ),
-  }
-}
 
 export const cacheVSCodeVersion = async () => {
   const response = await getVSCodeVersion()
