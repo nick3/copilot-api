@@ -20,29 +20,26 @@ import {
 
 function formatXLabel(dateStr: string, isHourly: boolean): string {
   if (isHourly) {
-    // dateStr is like "2026-04-13T14:00:00" or similar -- extract HH:00
-    const match = /T(\d{2})/.exec(dateStr)
+    const match = /(\d{2}):00/.exec(dateStr) ?? /T(\d{2})/.exec(dateStr)
     return match ? `${match[1]}:00` : dateStr
   }
-  // dateStr is like "2026-04-13" -- extract MM-DD
   const match = /(\d{2})-(\d{2})$/.exec(dateStr)
   return match ? `${match[1]}-${match[2]}` : dateStr
 }
 
-function CustomTooltipContent({
-  active,
-  payload,
-  label,
-  t,
-}: {
-  active: boolean
-  payload: ReadonlyArray<{ payload?: unknown }>
-  label?: string | number
-  t: (key: string) => string
-}): React.JSX.Element | null {
-  if (!active || payload.length === 0) return null
+function renderTooltip(
+  t: (key: string) => string,
+  // Recharts v3 Tooltip content props are loosely typed
+  props: Record<string, unknown>,
+): React.JSX.Element | null {
+  const active = props.active as boolean | undefined
+  const payload = props.payload as
+    | ReadonlyArray<{ payload?: DailyStatsItem }>
+    | undefined
+  const label = props.label as string | number | undefined
 
-  const item = payload[0]?.payload as DailyStatsItem | undefined
+  if (!active || !payload?.length) return null
+  const item = payload[0]?.payload
   if (!item) return null
 
   return (
@@ -50,20 +47,36 @@ function CustomTooltipContent({
       <div className="mb-1 font-medium">{String(label ?? "")}</div>
       <div className="space-y-0.5">
         <div className="flex justify-between gap-4">
-          <span className="text-muted-foreground">{t("statistics.costUnits")}</span>
-          <span className="tabular-nums font-medium">{item.cost_units_sum}</span>
+          <span className="text-muted-foreground">
+            {t("statistics.costUnits")}
+          </span>
+          <span className="tabular-nums font-medium">
+            {item.cost_units_sum}
+          </span>
         </div>
         <div className="flex justify-between gap-4">
-          <span className="text-muted-foreground">{t("statistics.requestCount")}</span>
-          <span className="tabular-nums font-medium">{item.request_count}</span>
+          <span className="text-muted-foreground">
+            {t("statistics.requestCount")}
+          </span>
+          <span className="tabular-nums font-medium">
+            {item.request_count}
+          </span>
         </div>
         <div className="flex justify-between gap-4">
-          <span className="text-muted-foreground">{t("statistics.tokensTotal")}</span>
-          <span className="tabular-nums font-medium">{item.tokens_total}</span>
+          <span className="text-muted-foreground">
+            {t("statistics.tokensTotal")}
+          </span>
+          <span className="tabular-nums font-medium">
+            {item.tokens_total}
+          </span>
         </div>
         <div className="flex justify-between gap-4">
-          <span className="text-muted-foreground">{t("statistics.errorCount")}</span>
-          <span className="tabular-nums font-medium">{item.error_count}</span>
+          <span className="text-muted-foreground">
+            {t("statistics.errorCount")}
+          </span>
+          <span className="tabular-nums font-medium">
+            {item.error_count}
+          </span>
         </div>
       </div>
     </div>
@@ -123,14 +136,9 @@ export function PremiumUsageChart({
                 width={50}
               />
               <Tooltip
-                content={({ active, payload, label }) => (
-                  <CustomTooltipContent
-                    active={active}
-                    payload={payload}
-                    label={label}
-                    t={t}
-                  />
-                )}
+                content={(props: Record<string, unknown>) =>
+                  renderTooltip(t, props)
+                }
               />
               <Area
                 yAxisId="cost"
