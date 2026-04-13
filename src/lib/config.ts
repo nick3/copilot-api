@@ -3,6 +3,8 @@ import fs from "node:fs"
 
 import { PATHS } from "./paths"
 
+export type LogLevel = "error" | "warn" | "info" | "debug"
+
 export interface AppConfig {
   auth?: {
     apiKeys?: Array<string>
@@ -30,6 +32,7 @@ export interface AppConfig {
   anthropicApiKey?: string
   useResponsesApiWebSearch?: boolean
   claudeTokenMultiplier?: number
+  logLevel?: LogLevel
 }
 
 export interface ModelConfig {
@@ -120,6 +123,7 @@ const defaultConfig: AppConfig = {
   sessionAffinityRetentionDays: 7,
   useMessagesApi: true,
   useResponsesApiWebSearch: true,
+  logLevel: "info",
 }
 
 let cachedConfig: AppConfig | null = null
@@ -146,6 +150,13 @@ function normalizeNonNegativeNumber(value: unknown): number | undefined {
   if (!Number.isFinite(value)) return undefined
   if (value < 0) return undefined
   return value
+}
+
+const LOG_LEVELS = new Set<LogLevel>(["error", "warn", "info", "debug"])
+
+function normalizeLogLevel(value: unknown): LogLevel | undefined {
+  if (typeof value !== "string") return undefined
+  return LOG_LEVELS.has(value as LogLevel) ? (value as LogLevel) : undefined
 }
 
 function ensureConfigFile(): void {
@@ -337,6 +348,27 @@ function mergeDefaultSessionAffinityRetention(config: AppConfig): {
   }
 }
 
+function mergeDefaultLogLevel(config: AppConfig): {
+  mergedConfig: AppConfig
+  changed: boolean
+} {
+  const normalized = normalizeLogLevel(
+    (config as Record<string, unknown>).logLevel,
+  )
+
+  if (normalized !== undefined) {
+    return { mergedConfig: config, changed: false }
+  }
+
+  return {
+    mergedConfig: {
+      ...config,
+      logLevel: defaultConfig.logLevel ?? "info",
+    },
+    changed: true,
+  }
+}
+
 type ConfigMergeResult = {
   mergedConfig: AppConfig
   changed: boolean
@@ -369,6 +401,7 @@ export function mergeConfigWithDefaults(): AppConfig {
     mergeDefaultAccountAffinity,
     mergeDefaultModelRefreshInterval,
     mergeDefaultSessionAffinityRetention,
+    mergeDefaultLogLevel,
   ])
 
   if (changed) {
@@ -580,6 +613,14 @@ export function getSmallModel(): string {
   }
 
   return getPreferredAliasForTarget(model) ?? model
+}
+
+export function getLogLevel(): LogLevel {
+  const config = getConfig()
+  const normalized = normalizeLogLevel(
+    (config as Record<string, unknown>).logLevel,
+  )
+  return normalized ?? defaultConfig.logLevel ?? "info"
 }
 
 export function isAccountAffinityEnabled(): boolean {

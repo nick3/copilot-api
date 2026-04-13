@@ -339,11 +339,14 @@ Admin API 规则独立于业务 API：
   },
   "allowOriginalModelNamesForAliases": false,
   "useFunctionApplyPatch": true,
+  "forceAgent": false,
   "compactUseSmallModel": true,
   "messageStartInputTokensFallback": false,
   "modelRefreshIntervalHours": 24,
+  "sessionAffinityRetentionDays": 7,
   "useMessagesApi": true,
-  "useResponsesApiWebSearch": true
+  "useResponsesApiWebSearch": true,
+  "logLevel": "info"
 }
 ```
 
@@ -366,9 +369,13 @@ Admin API 规则独立于业务 API：
 | `compactUseSmallModel` | compact 请求自动使用 smallModel |
 | `useMessagesApi` | 是否允许 `/v1/messages` 优先尝试 Copilot 原生 Messages API；关闭时将跳过该候选并从 `/responses`（如支持）或 `/chat/completions` 回退。 |
 | `useResponsesApiWebSearch` | 是否在 `/v1/responses` 中保留并转发 `type: "web_search"` 的工具；关闭时会在代理层剥离。 |
+| `logLevel` | 控制 `logs/*.log` 下 handler 文件日志的详细级别；可选 `error`、`warn`、`info`、`debug`，默认 `info`；如需把请求/响应 payload、stream event 等详细调试内容写入文件，请显式配置 `"logLevel": "debug"`。 |
 | `anthropicApiKey` | 可选 Anthropic API key；用于 Claude 模型 `count_tokens` 精确计数，也可通过环境变量 `ANTHROPIC_API_KEY` 提供 |
 | `messageStartInputTokensFallback` | Anthropic 流式首包 token 估算回退 |
 | `modelRefreshIntervalHours` | 模型刷新周期（小时，`0` 关闭） |
+| `sessionAffinityRetentionDays` | session affinity 绑定的保留天数，默认 `7` 天 |
+
+`--verbose` 不再隐式开启 debug 级别文件日志。
 
 ### providers 示例（Anthropic 上游代理）
 

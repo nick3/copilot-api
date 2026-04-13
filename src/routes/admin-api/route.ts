@@ -25,6 +25,7 @@ import {
   mergeConfigWithDefaults,
   PROVIDER_TYPE_ANTHROPIC,
   type AppConfig,
+  type LogLevel,
   type ModelConfig,
   type ProviderConfig,
 } from "~/lib/config"
@@ -173,6 +174,7 @@ const CONFIG_KEYS = new Set<keyof AppConfig>([
   "auth",
   "extraPrompts",
   "smallModel",
+  "logLevel",
   "accountAffinity",
   "apiKey",
   "anthropicApiKey",
@@ -199,6 +201,8 @@ const REASONING_EFFORTS = new Set<ReasoningEffort>([
   "high",
   "xhigh",
 ])
+
+const LOG_LEVELS = new Set<LogLevel>(["error", "warn", "info", "debug"])
 
 const BLOCKED_KEYS = new Set(["__proto__", "constructor", "prototype"])
 
@@ -234,6 +238,20 @@ function parseOptionalString(
   if (!trimmed) return { clear: true }
 
   return { value: trimmed }
+}
+
+function parseOptionalLogLevel(value: unknown): ParseFieldResult<LogLevel> {
+  const parsed = parseOptionalString(value, "logLevel")
+  if ("error" in parsed) return parsed
+  if ("clear" in parsed) return parsed
+
+  if (!LOG_LEVELS.has(parsed.value as LogLevel)) {
+    return {
+      error: `logLevel must be one of: ${[...LOG_LEVELS].join(", ")}`,
+    }
+  }
+
+  return { value: parsed.value as LogLevel }
 }
 
 function parseOptionalBoolean(
@@ -849,6 +867,18 @@ function applyAuthConfig(next: AppConfig, value: unknown): string | undefined {
   return undefined
 }
 
+function applyLogLevel(next: AppConfig, value: unknown): string | undefined {
+  const parsed = parseOptionalLogLevel(value)
+  if ("error" in parsed) return parsed.error
+  if ("clear" in parsed) {
+    next.logLevel = undefined
+    return undefined
+  }
+
+  next.logLevel = parsed.value
+  return undefined
+}
+
 function applyOptionalBoolean(
   next: AppConfig,
   key:
@@ -969,6 +999,7 @@ const CONFIG_PATCH_HANDLERS: Partial<Record<string, ConfigPatchHandler>> = {
   auth: applyAuthConfig,
   extraPrompts: applyExtraPrompts,
   smallModel: (next, value) => applyOptionalString(next, "smallModel", value),
+  logLevel: applyLogLevel,
   accountAffinity: (next, value) =>
     applyOptionalBoolean(next, "accountAffinity", value),
   apiKey: (next, value) => applyOptionalString(next, "apiKey", value),

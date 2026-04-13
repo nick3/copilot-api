@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import fs from "node:fs/promises"
 import path from "node:path"
 
-import { mergeConfigWithDefaults } from "~/lib/config"
+import { getLogLevel, mergeConfigWithDefaults } from "~/lib/config"
 import { PATHS } from "~/lib/paths"
 
 type TestConfig = Record<string, unknown>
@@ -32,6 +32,125 @@ const withConfig = async (config: TestConfig, run: () => Promise<void>) => {
     mergeConfigWithDefaults()
   }
 }
+
+test("GET /api/admin/config returns default logLevel", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config"),
+    )
+
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as { logLevel?: string }
+    expect(body.logLevel).toBe("info")
+  })
+})
+
+test("POST /api/admin/config updates logLevel", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const postRes = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ logLevel: "debug" }),
+      }),
+    )
+
+    expect(postRes.status).toBe(200)
+
+    const postBody = (await postRes.json()) as { logLevel?: string }
+    expect(postBody.logLevel).toBe("debug")
+
+    const getRes = await server.fetch(
+      new Request("http://localhost/api/admin/config"),
+    )
+
+    expect(getRes.status).toBe(200)
+
+    const getBody = (await getRes.json()) as { logLevel?: string }
+    expect(getBody.logLevel).toBe("debug")
+    expect(getLogLevel()).toBe("debug")
+  })
+})
+
+test("POST /api/admin/config clears logLevel to default", async () => {
+  await withConfig({ logLevel: "debug" }, async () => {
+    const { server } = await import("../src/server")
+
+    const postRes = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ logLevel: null }),
+      }),
+    )
+
+    expect(postRes.status).toBe(200)
+
+    const postBody = (await postRes.json()) as { logLevel?: string }
+    expect(postBody.logLevel).toBe("info")
+
+    const getRes = await server.fetch(
+      new Request("http://localhost/api/admin/config"),
+    )
+
+    expect(getRes.status).toBe(200)
+
+    const getBody = (await getRes.json()) as { logLevel?: string }
+    expect(getBody.logLevel).toBe("info")
+    expect(getLogLevel()).toBe("info")
+  })
+})
+
+test("POST /api/admin/config rejects invalid logLevel strings", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ logLevel: "verbose" }),
+      }),
+    )
+
+    expect(res.status).toBe(400)
+
+    const body = (await res.json()) as { error?: { message?: string } }
+    expect(body.error?.message).toContain("logLevel must be one of")
+  })
+})
+
+test("POST /api/admin/config rejects non-string logLevel", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ logLevel: false }),
+      }),
+    )
+
+    expect(res.status).toBe(400)
+
+    const body = (await res.json()) as { error?: { message?: string } }
+    expect(body.error?.message).toBe("logLevel must be a string")
+  })
+})
 
 test("POST /api/admin/config updates useMessagesApi", async () => {
   await withConfig({}, async () => {
