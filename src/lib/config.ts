@@ -352,9 +352,7 @@ function mergeDefaultLogLevel(config: AppConfig): {
   mergedConfig: AppConfig
   changed: boolean
 } {
-  const normalized = normalizeLogLevel(
-    (config as Record<string, unknown>).logLevel,
-  )
+  const normalized = normalizeLogLevel(config.logLevel)
 
   if (normalized !== undefined) {
     return { mergedConfig: config, changed: false }
@@ -617,9 +615,7 @@ export function getSmallModel(): string {
 
 export function getLogLevel(): LogLevel {
   const config = getConfig()
-  const normalized = normalizeLogLevel(
-    (config as Record<string, unknown>).logLevel,
-  )
+  const normalized = normalizeLogLevel(config.logLevel)
   return normalized ?? defaultConfig.logLevel ?? "info"
 }
 

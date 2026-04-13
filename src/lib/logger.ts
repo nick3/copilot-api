@@ -93,7 +93,11 @@ const sanitizeName = (name: string) => {
 }
 
 const getHandlerLogFilePath = (name: string, date: Date): string => {
-  const dateKey = date.toLocaleDateString("sv-SE")
+  const dateKey = [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-")
   return path.join(logDir, `${sanitizeName(name)}-${dateKey}.log`)
 }
 
@@ -319,9 +323,30 @@ export const debugJsonTail = (
 }
 
 // Consola level mapping: 0=error, 1=warn, 2=info/log/success, 3=verbose, 4=debug, 5=trace
-// We set level dynamically so consola short-circuits debug events before reaching the reporter
-// when logLevel != "debug", avoiding unnecessary reporter dispatch overhead.
-const getConsolaLevel = (): number => (resolveLogLevel() === "debug" ? 4 : 3)
+// Match the configured file log level so consola short-circuits irrelevant events before
+// they reach the reporter. "info" intentionally maps to 2 so info/log/success still pass.
+const getConsolaLevel = (): number => {
+  const logLevel = resolveLogLevel()
+
+  switch (logLevel) {
+    case "error": {
+      return 0
+    }
+    case "warn": {
+      return 1
+    }
+    case "info": {
+      return 2
+    }
+    case "debug": {
+      return 4
+    }
+    default: {
+      const exhaustiveCheck: never = logLevel
+      return exhaustiveCheck
+    }
+  }
+}
 
 export const createHandlerLogger = (name: string): ConsolaInstance => {
   const instance = consola.withTag(name)
