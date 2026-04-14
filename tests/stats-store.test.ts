@@ -4,11 +4,11 @@ import { expect, test } from "bun:test"
 import { getAdminDbUserVersion, initAdminDb } from "../src/lib/admin-db"
 import { StatsStore, toLocalDateString } from "../src/lib/stats-store"
 
-test("initAdminDb migrates admin DB to user_version 9", () => {
+test("initAdminDb migrates admin DB to user_version 10", () => {
   const db = new Database(":memory:")
   initAdminDb(db)
 
-  expect(getAdminDbUserVersion(db)).toBe(9)
+  expect(getAdminDbUserVersion(db)).toBe(10)
 })
 
 test("daily_premium_stats table has the expected columns", () => {
@@ -27,6 +27,25 @@ test("daily_premium_stats table has the expected columns", () => {
     "tokens_total",
     "error_count",
     "updated_at_ms",
+  ])
+})
+
+test("quota_snapshots table has the expected columns", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+
+  const columns = db
+    .query("PRAGMA table_info(quota_snapshots);")
+    .all() as Array<{ name: string }>
+
+  expect(columns.map((c) => c.name)).toEqual([
+    "id",
+    "account_id",
+    "snapshot_at_ms",
+    "remaining",
+    "entitlement",
+    "unlimited",
+    "source",
   ])
 })
 
@@ -53,7 +72,7 @@ test("v9 migration backfills from existing request_log data", () => {
   // Re-run migration (should trigger v9 since user_version is 8)
   initAdminDb(db)
 
-  expect(getAdminDbUserVersion(db)).toBe(9)
+  expect(getAdminDbUserVersion(db)).toBe(10)
 
   const rows = db
     .query(
@@ -83,6 +102,77 @@ test("v9 migration backfills from existing request_log data", () => {
   expect(acctB?.cost_units_sum).toBe(8.0)
   expect(acctB?.tokens_total).toBe(800)
   expect(acctB?.error_count).toBe(0)
+})
+
+test("v10 migration backfills quota_snapshots from request_log", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+
+  db.run("PRAGMA user_version = 9;")
+  db.run("DROP TABLE IF EXISTS quota_snapshots;")
+
+  const baseMs = new Date("2026-04-10T12:00:00").getTime()
+  db.run(
+    `INSERT INTO request_log
+       (request_id, started_at_ms, finished_at_ms, method, path, account_id,
+        cost_units, premium_remaining_after, premium_unlimited_after)
+     VALUES
+       ('qs-1', ?, ?, 'POST', '/v1/messages', 'acct-a', 10.0, 290, 0),
+       ('qs-2', ?, ?, 'POST', '/v1/messages', 'acct-a', 5.0, 285, NULL),
+       ('qs-3', ?, ?, 'POST', '/v1/messages', 'acct-b', 8.0, 192, 1)`,
+    [
+      baseMs,
+      baseMs + 100,
+      baseMs + 1000,
+      baseMs + 1100,
+      baseMs + 2000,
+      baseMs + 2100,
+    ],
+  )
+
+  initAdminDb(db)
+
+  expect(getAdminDbUserVersion(db)).toBe(10)
+
+  const rows = db
+    .query(
+      "SELECT account_id, snapshot_at_ms, remaining, entitlement, unlimited, source FROM quota_snapshots ORDER BY snapshot_at_ms",
+    )
+    .all() as Array<{
+    account_id: string
+    snapshot_at_ms: number
+    remaining: number
+    entitlement: number
+    unlimited: number
+    source: string
+  }>
+
+  expect(rows).toEqual([
+    {
+      account_id: "acct-a",
+      snapshot_at_ms: baseMs + 100,
+      remaining: 290,
+      entitlement: 0,
+      unlimited: 0,
+      source: "backfill",
+    },
+    {
+      account_id: "acct-a",
+      snapshot_at_ms: baseMs + 1100,
+      remaining: 285,
+      entitlement: 0,
+      unlimited: 0,
+      source: "backfill",
+    },
+    {
+      account_id: "acct-b",
+      snapshot_at_ms: baseMs + 2100,
+      remaining: 192,
+      entitlement: 0,
+      unlimited: 1,
+      source: "backfill",
+    },
+  ])
 })
 
 test("upsertDailyStats creates new rows", () => {
