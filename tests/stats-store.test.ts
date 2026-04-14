@@ -689,6 +689,70 @@ test("cleanupStatsRetention removes old stats", () => {
   expect(remaining.date).toBe(toLocalDateString(recentDate))
 })
 
+test("cleanupStatsRetention preserves baseline snapshot per account", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+  const store = new StatsStore(db)
+
+  // Very old snapshot (should be deleted)
+  const veryOld = new Date("2024-01-01T10:00:00").getTime()
+  // Old snapshot but latest before cutoff (should be PRESERVED as baseline)
+  const oldLatest = new Date("2025-01-01T10:00:00").getTime()
+  // Recent snapshot (should be preserved)
+  const recent = new Date("2026-04-10T10:00:00").getTime()
+
+  store.insertQuotaSnapshot({
+    accountId: "acct-a",
+    snapshotAtMs: veryOld,
+    remaining: 300,
+    entitlement: 300,
+    unlimited: false,
+    source: "refresh",
+  })
+  store.insertQuotaSnapshot({
+    accountId: "acct-a",
+    snapshotAtMs: oldLatest,
+    remaining: 250,
+    entitlement: 300,
+    unlimited: false,
+    source: "refresh",
+  })
+  store.insertQuotaSnapshot({
+    accountId: "acct-a",
+    snapshotAtMs: recent,
+    remaining: 200,
+    entitlement: 300,
+    unlimited: false,
+    source: "refresh",
+  })
+
+  const beforeCount = (
+    db.query("SELECT COUNT(*) as cnt FROM quota_snapshots").get() as {
+      cnt: number
+    }
+  ).cnt
+  expect(beforeCount).toBe(3)
+
+  // 30 days retention — veryOld and oldLatest are both before cutoff
+  store.cleanupStatsRetention(30)
+
+  const afterRows = db
+    .query(
+      "SELECT account_id, snapshot_at_ms, remaining FROM quota_snapshots ORDER BY snapshot_at_ms",
+    )
+    .all() as Array<{
+    account_id: string
+    snapshot_at_ms: number
+    remaining: number
+  }>
+
+  // veryOld deleted, oldLatest preserved as baseline, recent preserved
+  expect(afterRows.length).toBe(2)
+  expect(afterRows[0].snapshot_at_ms).toBe(oldLatest)
+  expect(afterRows[0].remaining).toBe(250)
+  expect(afterRows[1].snapshot_at_ms).toBe(recent)
+})
+
 test("toLocalDateString formats correctly", () => {
   // Use a known date in local time
   const ms = new Date(2026, 3, 10).getTime() // April 10, 2026 (month is 0-indexed)

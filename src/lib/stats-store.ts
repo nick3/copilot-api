@@ -212,7 +212,7 @@ export class StatsStore {
     }>
 
     const fromMs = this.localDateToMs(params.from)
-    const toMs = this.localDateToMs(params.to) + 86_399_999
+    const toMs = this.localDateEndMs(params.to)
 
     const consumption = this.getConsumptionFromSnapshots({
       fromMs,
@@ -307,9 +307,25 @@ export class StatsStore {
         .query("DELETE FROM daily_premium_stats WHERE date < ?;")
         .run(cutoffDate)
 
+      // Keep the latest snapshot per account before the cutoff as baseline
+      // for getConsumptionFromSnapshots() which needs a pre-range reference.
       this.db
-        .query("DELETE FROM quota_snapshots WHERE snapshot_at_ms < ?;")
-        .run(cutoffMs)
+        .query(
+          `DELETE FROM quota_snapshots
+           WHERE snapshot_at_ms < ?
+             AND id NOT IN (
+               SELECT qs.id
+               FROM quota_snapshots qs
+               INNER JOIN (
+                 SELECT account_id, MAX(snapshot_at_ms) AS max_ts
+                 FROM quota_snapshots
+                 WHERE snapshot_at_ms < ?
+                 GROUP BY account_id
+               ) latest ON qs.account_id = latest.account_id
+                        AND qs.snapshot_at_ms = latest.max_ts
+             );`,
+        )
+        .run(cutoffMs, cutoffMs)
     } catch (error) {
       consola.debug("Failed to cleanup stats retention", error)
     }
@@ -318,6 +334,12 @@ export class StatsStore {
   private localDateToMs(dateStr: string): number {
     const [y, m, d] = dateStr.split("-").map(Number)
     return new Date(y, m - 1, d).getTime()
+  }
+
+  /** End-of-day ms (next local midnight - 1ms), DST-safe. */
+  private localDateEndMs(dateStr: string): number {
+    const [y, m, d] = dateStr.split("-").map(Number)
+    return new Date(y, m - 1, d + 1).getTime() - 1
   }
 
   private mergeMetricsAndConsumption(
