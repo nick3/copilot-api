@@ -4,11 +4,11 @@ import { expect, test } from "bun:test"
 import { getAdminDbUserVersion, initAdminDb } from "../src/lib/admin-db"
 import { SessionAffinityStore } from "../src/lib/session-affinity-store"
 
-test("initAdminDb migrates admin DB to user_version 8", () => {
+test("initAdminDb migrates admin DB to user_version 9", () => {
   const db = new Database(":memory:")
   initAdminDb(db)
 
-  expect(getAdminDbUserVersion(db)).toBe(8)
+  expect(getAdminDbUserVersion(db)).toBe(9)
 })
 
 test("initAdminDb upgrades an existing v7 DB to v8 and creates session_affinity", () => {
@@ -32,7 +32,7 @@ test("initAdminDb upgrades an existing v7 DB to v8 and creates session_affinity"
     )
     .get() as { name?: string } | null
 
-  expect(getAdminDbUserVersion(db)).toBe(8)
+  expect(getAdminDbUserVersion(db)).toBe(9)
   expect(after?.name).toBe("session_affinity")
 })
 

@@ -186,6 +186,24 @@ export type AdminModelsDetailsResponse = {
   items: Array<AdminModelDetailsItem>
 }
 
+export type DailyStatsItem = {
+  date: string
+  request_count: number
+  cost_units_sum: number
+  tokens_total: number
+  error_count: number
+}
+
+export type DailyAccountStatsItem = DailyStatsItem & {
+  account_id: string
+}
+
+export type PremiumStatsResponse = {
+  daily: Array<DailyStatsItem>
+  by_account: Array<DailyAccountStatsItem>
+  range: { from: string; to: string; granularity: "day" | "hour" }
+}
+
 export class AdminApiError extends Error {
   readonly status: number
   readonly responseText: string
@@ -330,6 +348,22 @@ export async function getAdminModels(): Promise<AdminModelsResponse> {
 
 export async function getAdminModelDetails(): Promise<AdminModelsDetailsResponse> {
   return fetchAdminJson<AdminModelsDetailsResponse>("/api/admin/models/details")
+}
+
+export async function getAdminPremiumStats(params: {
+  from?: string
+  to?: string
+  accountId?: string
+  granularity?: "day" | "hour"
+}): Promise<PremiumStatsResponse> {
+  const q = new URLSearchParams()
+  if (params.from) q.set("from", params.from)
+  if (params.to) q.set("to", params.to)
+  if (params.accountId) q.set("account_id", params.accountId)
+  if (params.granularity) q.set("granularity", params.granularity)
+  return fetchAdminJson<PremiumStatsResponse>(
+    `/api/admin/stats/premium-daily?${q.toString()}`,
+  )
 }
 
 // --- Account Management Types ---

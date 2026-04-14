@@ -10,6 +10,7 @@
   "nav": {
     "accounts": "Accounts",
     "requests": "Requests",
+    "statistics": "Statistics",
     "models": "Models",
     "settings": "Settings",
     "openNavigation": "Open navigation"
@@ -552,5 +553,28 @@
   "notFound": {
     "title": "Not found",
     "description": "The page you are looking for does not exist."
+  },
+  "statistics": {
+    "title": "Statistics",
+    "premiumUsage": "Premium Usage Trend",
+    "accountUsage": "Per-Account Premium Usage",
+    "costUnits": "Cost Units",
+    "requestCount": "Request Count",
+    "tokensTotal": "Total Tokens",
+    "errorCount": "Errors",
+    "timeRange": {
+      "24h": "24h",
+      "7d": "7 Days",
+      "month": "This Month",
+      "custom": "Custom"
+    },
+    "autoRefresh": {
+      "off": "Auto-refresh: Off",
+      "30s": "Every 30s",
+      "60s": "Every 60s",
+      "5m": "Every 5m"
+    },
+    "noData": "No premium request data for this period",
+    "loadFailed": "Failed to load statistics"
   }
 }

@@ -32,9 +32,11 @@ import {
 import { PATHS } from "~/lib/paths"
 import {
   getRequestHistoryStore,
+  getStatsStore,
   type AccountStatsRow,
 } from "~/lib/request-history"
 import { applySharedSessionAffinityRetention } from "~/lib/session-affinity-store"
+import { toLocalDateString } from "~/lib/stats-store"
 import { isAccountType } from "~/lib/types/account"
 
 import { authSessionManager } from "./auth-sessions"
@@ -1651,4 +1653,76 @@ adminApiRoutes.post("/accounts/:id/reauth", async (c) => {
       type: "internal_error",
     })
   }
+})
+
+adminApiRoutes.get("/stats/premium-daily", (c) => {
+  const url = new URL(c.req.url, "http://local")
+  const p = url.searchParams
+
+  const from = p.get("from") || undefined
+  const to = p.get("to") || undefined
+  const accountId = p.get("account_id") || undefined
+  const granularity = p.get("granularity") === "hour" ? "hour" : "day"
+
+  const now = new Date()
+  const todayStr = toLocalDateString(now.getTime())
+
+  const resolvedFrom =
+    from || toLocalDateString(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+  const resolvedTo = to || todayStr
+
+  // Parse YYYY-MM-DD as local time (not UTC)
+  function parseLocalDate(dateStr: string): Date {
+    const [y, m, d] = dateStr.split("-").map(Number)
+    return new Date(y, m - 1, d)
+  }
+
+  // Validate granularity=hour range <= 48h
+  if (granularity === "hour") {
+    const fromDate = parseLocalDate(resolvedFrom)
+    const toDate = parseLocalDate(resolvedTo)
+    const diffMs = toDate.getTime() - fromDate.getTime() + 24 * 60 * 60 * 1000
+    if (diffMs > 48 * 60 * 60 * 1000) {
+      return jsonError(c, 400, {
+        message:
+          "Hourly granularity is only supported for ranges up to 48 hours.",
+        type: "bad_request",
+      })
+    }
+  }
+
+  const statsStore = getStatsStore()
+  if (!statsStore) {
+    return c.json({
+      daily: [],
+      by_account: [],
+      range: { from: resolvedFrom, to: resolvedTo, granularity },
+    })
+  }
+
+  if (granularity === "hour") {
+    const fromMs = parseLocalDate(resolvedFrom).getTime()
+    const toMs = parseLocalDate(resolvedTo).getTime() + 86_399_999
+    const result = statsStore.getHourlyPremiumStats({
+      fromMs,
+      toMs,
+      accountId,
+    })
+    return c.json({
+      daily: result.daily,
+      by_account: result.byAccount,
+      range: { from: resolvedFrom, to: resolvedTo, granularity },
+    })
+  }
+
+  const result = statsStore.getDailyPremiumStats({
+    from: resolvedFrom,
+    to: resolvedTo,
+    accountId,
+  })
+  return c.json({
+    daily: result.daily,
+    by_account: result.byAccount,
+    range: { from: resolvedFrom, to: resolvedTo, granularity },
+  })
 })
