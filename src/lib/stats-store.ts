@@ -102,18 +102,23 @@ export class StatsStore {
     const accountFilter = params.accountId ? " AND account_id = ?" : ""
     const args: Array<string | number> = []
 
+    // baseline CTE: WHERE snapshot_at_ms < ?
     args.push(params.fromMs)
+    // baseline CTE: AND account_id = ? (if filtered)
     if (params.accountId) args.push(params.accountId)
 
+    // all_snaps CTE: WHERE snapshot_at_ms >= ? AND snapshot_at_ms <= ?
     args.push(params.fromMs, params.toMs)
+    // all_snaps CTE: AND account_id = ? (if filtered)
     if (params.accountId) args.push(params.accountId)
 
+    // outer WHERE: snapshot_at_ms >= ?
     args.push(params.fromMs)
 
     return this.db
       .query(
         `WITH baseline AS (
-          SELECT qs.account_id, qs.snapshot_at_ms, qs.remaining
+          SELECT qs.account_id, qs.snapshot_at_ms, qs.remaining, qs.id
           FROM quota_snapshots qs
           INNER JOIN (
             SELECT account_id, MAX(snapshot_at_ms) AS max_ts
@@ -125,10 +130,10 @@ export class StatsStore {
                   AND qs.snapshot_at_ms = latest.max_ts
         ),
         all_snaps AS (
-          SELECT account_id, snapshot_at_ms, remaining
+          SELECT account_id, snapshot_at_ms, remaining, id
           FROM baseline
           UNION ALL
-          SELECT account_id, snapshot_at_ms, remaining
+          SELECT account_id, snapshot_at_ms, remaining, id
           FROM quota_snapshots
           WHERE snapshot_at_ms >= ? AND snapshot_at_ms <= ?
             AND unlimited = 0${accountFilter}
@@ -139,7 +144,7 @@ export class StatsStore {
             snapshot_at_ms,
             remaining,
             LAG(remaining) OVER (
-              PARTITION BY account_id ORDER BY snapshot_at_ms
+              PARTITION BY account_id ORDER BY snapshot_at_ms, id
             ) AS prev_remaining
           FROM all_snaps
         )
@@ -295,14 +300,13 @@ export class StatsStore {
     retentionDays: number = DEFAULT_STATS_RETENTION_DAYS,
   ): void {
     try {
-      const cutoffDate = toLocalDateString(
-        Date.now() - retentionDays * 24 * 60 * 60 * 1000,
-      )
+      const nowMs = Date.now()
+      const cutoffMs = nowMs - retentionDays * 24 * 60 * 60 * 1000
+      const cutoffDate = toLocalDateString(cutoffMs)
       this.db
         .query("DELETE FROM daily_premium_stats WHERE date < ?;")
         .run(cutoffDate)
 
-      const cutoffMs = Date.now() - retentionDays * 24 * 60 * 60 * 1000
       this.db
         .query("DELETE FROM quota_snapshots WHERE snapshot_at_ms < ?;")
         .run(cutoffMs)
