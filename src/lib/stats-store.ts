@@ -88,6 +88,82 @@ export class StatsStore {
     )
   }
 
+  getConsumptionFromSnapshots(params: {
+    fromMs: number
+    toMs: number
+    granularity: "day" | "hour"
+    accountId?: string
+  }): Array<{ date: string; account_id: string; premium_consumed: number }> {
+    const dateExpr =
+      params.granularity === "hour" ?
+        "strftime('%Y-%m-%d %H:00', snapshot_at_ms / 1000, 'unixepoch')"
+      : "date(snapshot_at_ms / 1000, 'unixepoch')"
+
+    const accountFilter = params.accountId ? " AND account_id = ?" : ""
+    const args: Array<string | number> = []
+
+    args.push(params.fromMs)
+    if (params.accountId) args.push(params.accountId)
+
+    args.push(params.fromMs, params.toMs)
+    if (params.accountId) args.push(params.accountId)
+
+    args.push(params.fromMs)
+
+    return this.db
+      .query(
+        `WITH baseline AS (
+          SELECT qs.account_id, qs.snapshot_at_ms, qs.remaining
+          FROM quota_snapshots qs
+          INNER JOIN (
+            SELECT account_id, MAX(snapshot_at_ms) AS max_ts
+            FROM quota_snapshots
+            WHERE snapshot_at_ms < ?
+              AND unlimited = 0${accountFilter}
+            GROUP BY account_id
+          ) latest ON qs.account_id = latest.account_id
+                  AND qs.snapshot_at_ms = latest.max_ts
+        ),
+        all_snaps AS (
+          SELECT account_id, snapshot_at_ms, remaining
+          FROM baseline
+          UNION ALL
+          SELECT account_id, snapshot_at_ms, remaining
+          FROM quota_snapshots
+          WHERE snapshot_at_ms >= ? AND snapshot_at_ms <= ?
+            AND unlimited = 0${accountFilter}
+        ),
+        with_prev AS (
+          SELECT
+            account_id,
+            snapshot_at_ms,
+            remaining,
+            LAG(remaining) OVER (
+              PARTITION BY account_id ORDER BY snapshot_at_ms
+            ) AS prev_remaining
+          FROM all_snaps
+        )
+        SELECT
+          ${dateExpr} AS date,
+          account_id,
+          SUM(
+            CASE WHEN prev_remaining IS NOT NULL AND prev_remaining > remaining
+                 THEN prev_remaining - remaining
+                 ELSE 0
+            END
+          ) AS premium_consumed
+        FROM with_prev
+        WHERE snapshot_at_ms >= ?
+        GROUP BY 1, 2
+        ORDER BY 1, 2`,
+      )
+      .all(...args) as Array<{
+      date: string
+      account_id: string
+      premium_consumed: number
+    }>
+  }
+
   getDailyPremiumStats(params: {
     from: string
     to: string

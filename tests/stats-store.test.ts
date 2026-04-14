@@ -64,7 +64,9 @@ test("insertQuotaSnapshot inserts a row into quota_snapshots", () => {
   })
 
   const rows = db
-    .query("SELECT account_id, remaining, entitlement, unlimited, source FROM quota_snapshots")
+    .query(
+      "SELECT account_id, remaining, entitlement, unlimited, source FROM quota_snapshots",
+    )
     .all() as Array<{
     account_id: string
     remaining: number
@@ -79,6 +81,202 @@ test("insertQuotaSnapshot inserts a row into quota_snapshots", () => {
   expect(rows[0].entitlement).toBe(300)
   expect(rows[0].unlimited).toBe(0)
   expect(rows[0].source).toBe("refresh")
+})
+
+test("getConsumptionFromSnapshots computes daily consumption from remaining deltas", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+  const store = new StatsStore(db)
+
+  // Day 1: remaining goes 300 → 290 → 280 (consumed 20)
+  const day1_t1 = new Date(2026, 3, 10, 8, 0, 0).getTime()
+  const day1_t2 = new Date(2026, 3, 10, 12, 0, 0).getTime()
+  const day1_t3 = new Date(2026, 3, 10, 16, 0, 0).getTime()
+
+  store.insertQuotaSnapshot({
+    accountId: "acct-a",
+    snapshotAtMs: day1_t1,
+    remaining: 300,
+    entitlement: 300,
+    unlimited: false,
+    source: "refresh",
+  })
+  store.insertQuotaSnapshot({
+    accountId: "acct-a",
+    snapshotAtMs: day1_t2,
+    remaining: 290,
+    entitlement: 300,
+    unlimited: false,
+    source: "refresh",
+  })
+  store.insertQuotaSnapshot({
+    accountId: "acct-a",
+    snapshotAtMs: day1_t3,
+    remaining: 280,
+    entitlement: 300,
+    unlimited: false,
+    source: "refresh",
+  })
+
+  // Day 2: remaining goes 280 → 270 (consumed 10)
+  const day2_t1 = new Date(2026, 3, 11, 10, 0, 0).getTime()
+  store.insertQuotaSnapshot({
+    accountId: "acct-a",
+    snapshotAtMs: day2_t1,
+    remaining: 270,
+    entitlement: 300,
+    unlimited: false,
+    source: "refresh",
+  })
+
+  const fromMs = new Date(2026, 3, 10, 0, 0, 0).getTime()
+  const toMs = new Date(2026, 3, 11, 23, 59, 59, 999).getTime()
+
+  const result = store.getConsumptionFromSnapshots({
+    fromMs,
+    toMs,
+    granularity: "day",
+  })
+
+  const day1 = result.find(
+    (r) => r.date.includes("04-10") && r.account_id === "acct-a",
+  )
+  expect(day1?.premium_consumed).toBe(20)
+
+  const day2 = result.find(
+    (r) => r.date.includes("04-11") && r.account_id === "acct-a",
+  )
+  expect(day2?.premium_consumed).toBe(10)
+})
+
+test("getConsumptionFromSnapshots handles quota reset (remaining increases)", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+  const store = new StatsStore(db)
+
+  // remaining: 50 → 20 (consumed 30), then reset → 300 → 290 (consumed 10)
+  const t1 = new Date(2026, 3, 10, 8, 0, 0).getTime()
+  const t2 = new Date(2026, 3, 10, 10, 0, 0).getTime()
+  const t3 = new Date(2026, 3, 10, 12, 0, 0).getTime() // reset
+  const t4 = new Date(2026, 3, 10, 14, 0, 0).getTime()
+
+  store.insertQuotaSnapshot({
+    accountId: "acct-a",
+    snapshotAtMs: t1,
+    remaining: 50,
+    entitlement: 300,
+    unlimited: false,
+    source: "refresh",
+  })
+  store.insertQuotaSnapshot({
+    accountId: "acct-a",
+    snapshotAtMs: t2,
+    remaining: 20,
+    entitlement: 300,
+    unlimited: false,
+    source: "refresh",
+  })
+  store.insertQuotaSnapshot({
+    accountId: "acct-a",
+    snapshotAtMs: t3,
+    remaining: 300,
+    entitlement: 300,
+    unlimited: false,
+    source: "refresh",
+  })
+  store.insertQuotaSnapshot({
+    accountId: "acct-a",
+    snapshotAtMs: t4,
+    remaining: 290,
+    entitlement: 300,
+    unlimited: false,
+    source: "refresh",
+  })
+
+  const result = store.getConsumptionFromSnapshots({
+    fromMs: t1,
+    toMs: t4 + 1,
+    granularity: "day",
+  })
+
+  const day = result.find((r) => r.account_id === "acct-a")
+  // 30 (50→20) + 0 (reset 20→300) + 10 (300→290) = 40
+  expect(day?.premium_consumed).toBe(40)
+})
+
+test("getConsumptionFromSnapshots excludes unlimited accounts", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+  const store = new StatsStore(db)
+
+  const t1 = new Date(2026, 3, 10, 8, 0, 0).getTime()
+  const t2 = new Date(2026, 3, 10, 12, 0, 0).getTime()
+
+  store.insertQuotaSnapshot({
+    accountId: "acct-unlimited",
+    snapshotAtMs: t1,
+    remaining: 999,
+    entitlement: 999,
+    unlimited: true,
+    source: "refresh",
+  })
+  store.insertQuotaSnapshot({
+    accountId: "acct-unlimited",
+    snapshotAtMs: t2,
+    remaining: 990,
+    entitlement: 999,
+    unlimited: true,
+    source: "refresh",
+  })
+
+  const result = store.getConsumptionFromSnapshots({
+    fromMs: t1,
+    toMs: t2 + 1,
+    granularity: "day",
+  })
+
+  expect(result.length).toBe(0)
+})
+
+test("getConsumptionFromSnapshots uses baseline snapshot before range", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+  const store = new StatsStore(db)
+
+  // Baseline: before range
+  const baseline = new Date(2026, 3, 9, 23, 0, 0).getTime()
+  store.insertQuotaSnapshot({
+    accountId: "acct-a",
+    snapshotAtMs: baseline,
+    remaining: 300,
+    entitlement: 300,
+    unlimited: false,
+    source: "refresh",
+  })
+
+  // In range: remaining drops
+  const t1 = new Date(2026, 3, 10, 8, 0, 0).getTime()
+  store.insertQuotaSnapshot({
+    accountId: "acct-a",
+    snapshotAtMs: t1,
+    remaining: 290,
+    entitlement: 300,
+    unlimited: false,
+    source: "refresh",
+  })
+
+  const fromMs = new Date(2026, 3, 10, 0, 0, 0).getTime()
+  const toMs = new Date(2026, 3, 10, 23, 59, 59, 999).getTime()
+
+  const result = store.getConsumptionFromSnapshots({
+    fromMs,
+    toMs,
+    granularity: "day",
+  })
+
+  const day = result.find((r) => r.account_id === "acct-a")
+  // Baseline 300 → 290 = consumed 10
+  expect(day?.premium_consumed).toBe(10)
 })
 
 test("v9 migration backfills from existing request_log data", () => {
