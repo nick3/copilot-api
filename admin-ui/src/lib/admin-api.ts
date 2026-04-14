@@ -199,8 +199,8 @@ export type DailyAccountStatsItem = DailyStatsItem & {
 }
 
 export type PremiumStatsResponse = {
-  daily: DailyStatsItem[]
-  by_account: DailyAccountStatsItem[]
+  daily: Array<DailyStatsItem>
+  by_account: Array<DailyAccountStatsItem>
   range: { from: string; to: string; granularity: "day" | "hour" }
 }
 

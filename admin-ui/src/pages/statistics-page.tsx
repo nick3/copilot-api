@@ -68,8 +68,8 @@ export function StatisticsPage(): React.JSX.Element {
   const [autoRefreshMs, setAutoRefreshMs] = useState(0)
 
   const [loading, setLoading] = useState(false)
-  const [daily, setDaily] = useState<DailyStatsItem[]>([])
-  const [byAccount, setByAccount] = useState<DailyAccountStatsItem[]>([])
+  const [daily, setDaily] = useState<Array<DailyStatsItem>>([])
+  const [byAccount, setByAccount] = useState<Array<DailyAccountStatsItem>>([])
   const [isHourly, setIsHourly] = useState(false)
 
   const loadInFlightRef = useRef(false)

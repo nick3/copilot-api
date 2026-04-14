@@ -87,7 +87,7 @@ export function PremiumUsageChart({
   data,
   isHourly = false,
 }: {
-  data: DailyStatsItem[]
+  data: Array<DailyStatsItem>
   isHourly?: boolean
 }): React.JSX.Element {
   const { t } = useTranslation()

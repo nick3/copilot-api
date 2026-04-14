@@ -36,6 +36,7 @@ import {
   type AccountStatsRow,
 } from "~/lib/request-history"
 import { applySharedSessionAffinityRetention } from "~/lib/session-affinity-store"
+import { toLocalDateString } from "~/lib/stats-store"
 import { isAccountType } from "~/lib/types/account"
 
 import { authSessionManager } from "./auth-sessions"
@@ -1664,20 +1665,22 @@ adminApiRoutes.get("/stats/premium-daily", (c) => {
   const granularity = p.get("granularity") === "hour" ? "hour" : "day"
 
   const now = new Date()
-  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
+  const todayStr = toLocalDateString(now.getTime())
 
   const resolvedFrom =
-    from
-    || (() => {
-      const d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-    })()
+    from || toLocalDateString(now.getTime() - 7 * 24 * 60 * 60 * 1000)
   const resolvedTo = to || todayStr
+
+  // Parse YYYY-MM-DD as local time (not UTC)
+  function parseLocalDate(dateStr: string): Date {
+    const [y, m, d] = dateStr.split("-").map(Number)
+    return new Date(y, m - 1, d)
+  }
 
   // Validate granularity=hour range <= 48h
   if (granularity === "hour") {
-    const fromDate = new Date(resolvedFrom)
-    const toDate = new Date(resolvedTo)
+    const fromDate = parseLocalDate(resolvedFrom)
+    const toDate = parseLocalDate(resolvedTo)
     const diffMs = toDate.getTime() - fromDate.getTime() + 24 * 60 * 60 * 1000
     if (diffMs > 48 * 60 * 60 * 1000) {
       return jsonError(c, 400, {
@@ -1698,8 +1701,8 @@ adminApiRoutes.get("/stats/premium-daily", (c) => {
   }
 
   if (granularity === "hour") {
-    const fromMs = new Date(resolvedFrom).getTime()
-    const toMs = new Date(resolvedTo + "T23:59:59.999").getTime()
+    const fromMs = parseLocalDate(resolvedFrom).getTime()
+    const toMs = parseLocalDate(resolvedTo).getTime() + 86_399_999
     const result = statsStore.getHourlyPremiumStats({
       fromMs,
       toMs,

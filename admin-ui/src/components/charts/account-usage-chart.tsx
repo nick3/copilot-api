@@ -39,7 +39,7 @@ export function AccountUsageChart({
   data,
   isHourly = false,
 }: {
-  data: DailyAccountStatsItem[]
+  data: Array<DailyAccountStatsItem>
   isHourly?: boolean
 }): React.JSX.Element {
   const { t } = useTranslation()
@@ -61,12 +61,18 @@ export function AccountUsageChart({
 
     const ids = [...accountSet]
 
+    // Zero-fill: ensure every date row has a value for every account
     const rows = [...dateMap.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, values]) => ({
-        label: formatXLabel(date, isHourly),
-        ...values,
-      }))
+      .map(([date, values]) => {
+        const row: Record<string, number | string> = {
+          label: formatXLabel(date, isHourly),
+        }
+        for (const id of ids) {
+          row[id] = values[id] ?? 0
+        }
+        return row
+      })
 
     return { pivoted: rows, accountIds: ids }
   }, [data, isHourly])
