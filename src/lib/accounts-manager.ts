@@ -62,6 +62,7 @@ import {
   addAccountToRegistry,
 } from "./accounts-registry"
 import { PATHS } from "./paths"
+import { getStatsStore } from "./request-history"
 import { getSharedSessionAffinityStore } from "./session-affinity-store"
 import { SessionOwnershipCache } from "./session-ownership"
 
@@ -731,10 +732,25 @@ export class AccountsManager {
       try {
         const usage = await getCopilotUsage(ctx)
         const premium = usage.quota_snapshots.premium_interactions
-        applyQuotaRefreshSuccessIfCurrent(account, snapshot, {
+        const applied = applyQuotaRefreshSuccessIfCurrent(account, snapshot, {
           premium,
           copilotApiUrl: usage.endpoints.api,
         })
+
+        if (applied) {
+          try {
+            getStatsStore()?.insertQuotaSnapshot({
+              accountId: account.id,
+              snapshotAtMs: Date.now(),
+              remaining: premium.remaining,
+              entitlement: premium.entitlement,
+              unlimited: premium.unlimited,
+              source: "refresh",
+            })
+          } catch {
+            // Best-effort: don't fail the quota refresh if snapshot insert fails
+          }
+        }
       } catch (error) {
         if (error instanceof HTTPError && error.response.status === 401) {
           applyUnauthorizedIfCurrent(account, snapshot, "Unauthorized (401)")

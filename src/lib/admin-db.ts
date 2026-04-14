@@ -222,13 +222,60 @@ function migrateV8(db: Database): void {
   `)
 }
 
+function migrateV10(db: Database): void {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS quota_snapshots (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id      TEXT    NOT NULL,
+      snapshot_at_ms  INTEGER NOT NULL,
+      remaining       INTEGER NOT NULL,
+      entitlement     INTEGER NOT NULL,
+      unlimited       INTEGER NOT NULL DEFAULT 0,
+      source          TEXT    NOT NULL DEFAULT 'refresh'
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_quota_snapshots_account_time
+      ON quota_snapshots(account_id, snapshot_at_ms);
+
+    CREATE INDEX IF NOT EXISTS idx_quota_snapshots_time
+      ON quota_snapshots(snapshot_at_ms);
+  `)
+
+  const hasRequestLog = db
+    .query(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'request_log' LIMIT 1;",
+    )
+    .get()
+
+  if (hasRequestLog) {
+    db.run(`
+      INSERT INTO quota_snapshots
+        (account_id, snapshot_at_ms, remaining, entitlement, unlimited, source)
+      SELECT
+        account_id,
+        finished_at_ms,
+        CAST(premium_remaining_after AS INTEGER),
+        0,
+        COALESCE(premium_unlimited_after, 0),
+        'backfill'
+      FROM request_log
+      WHERE premium_remaining_after IS NOT NULL
+        AND account_id IS NOT NULL
+        AND finished_at_ms IS NOT NULL
+      ORDER BY finished_at_ms;
+    `)
+  }
+
+  db.run("PRAGMA user_version = 10;")
+}
+
 function migrateAdminDb(db: Database): void {
   const row = db.query("PRAGMA user_version;").get() as {
     user_version?: number
   } | null
   const current = row?.user_version ?? 0
 
-  if (current >= 9) {
+  if (current >= 10) {
     return
   }
 
@@ -326,4 +373,5 @@ function migrateAdminDb(db: Database): void {
 
   migrateV8(db)
   migrateV9(db)
+  migrateV10(db)
 }

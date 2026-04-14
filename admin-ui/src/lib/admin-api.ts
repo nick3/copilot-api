@@ -189,7 +189,7 @@ export type AdminModelsDetailsResponse = {
 export type DailyStatsItem = {
   date: string
   request_count: number
-  cost_units_sum: number
+  premium_consumed: number
   tokens_total: number
   error_count: number
 }
