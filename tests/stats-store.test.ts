@@ -88,10 +88,12 @@ test("getConsumptionFromSnapshots computes daily consumption from remaining delt
   initAdminDb(db)
   const store = new StatsStore(db)
 
+  // Use hours that fall on the same calendar date in both UTC and UTC+8
+  // (bun test runs JS in UTC, SQLite 'localtime' uses system TZ)
   // Day 1: remaining goes 300 → 290 → 280 (consumed 20)
-  const day1_t1 = new Date(2026, 3, 10, 8, 0, 0).getTime()
-  const day1_t2 = new Date(2026, 3, 10, 12, 0, 0).getTime()
-  const day1_t3 = new Date(2026, 3, 10, 16, 0, 0).getTime()
+  const day1_t1 = new Date(2026, 3, 10, 2, 0, 0).getTime()
+  const day1_t2 = new Date(2026, 3, 10, 6, 0, 0).getTime()
+  const day1_t3 = new Date(2026, 3, 10, 10, 0, 0).getTime()
 
   store.insertQuotaSnapshot({
     accountId: "acct-a",
@@ -119,7 +121,7 @@ test("getConsumptionFromSnapshots computes daily consumption from remaining delt
   })
 
   // Day 2: remaining goes 280 → 270 (consumed 10)
-  const day2_t1 = new Date(2026, 3, 11, 10, 0, 0).getTime()
+  const day2_t1 = new Date(2026, 3, 11, 2, 0, 0).getTime()
   store.insertQuotaSnapshot({
     accountId: "acct-a",
     snapshotAtMs: day2_t1,
@@ -544,7 +546,7 @@ test("getDailyPremiumStats returns aggregated daily totals", () => {
   expect(result.daily.length).toBe(2)
   expect(result.daily[0].date).toBe("2026-04-10")
   expect(result.daily[0].request_count).toBe(2)
-  expect(result.daily[0].cost_units_sum).toBe(15.0)
+  expect(result.daily[0].premium_consumed).toBe(0) // No snapshots inserted
   expect(result.daily[0].tokens_total).toBe(1500)
   expect(result.daily[0].error_count).toBe(1)
 
@@ -584,7 +586,7 @@ test("getDailyPremiumStats filters by account_id", () => {
 
   expect(result.daily.length).toBe(1)
   expect(result.daily[0].request_count).toBe(1)
-  expect(result.daily[0].cost_units_sum).toBe(10.0)
+  expect(result.daily[0].premium_consumed).toBe(0) // No snapshots inserted
 
   expect(result.byAccount.length).toBe(1)
   expect(result.byAccount[0].account_id).toBe("acct-a")
@@ -632,7 +634,7 @@ test("getHourlyPremiumStats aggregates by hour from request_log", () => {
   expect(result.daily.length).toBe(2)
   // First hour should have 2 requests aggregated
   expect(result.daily[0].request_count).toBe(2)
-  expect(result.daily[0].cost_units_sum).toBe(15.0)
+  expect(result.daily[0].premium_consumed).toBe(0) // No snapshots inserted
   // Second hour should have 1 request
   expect(result.daily[1].request_count).toBe(1)
 

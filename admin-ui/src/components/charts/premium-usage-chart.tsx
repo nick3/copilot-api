@@ -51,7 +51,7 @@ function renderTooltip(
             {t("statistics.costUnits")}
           </span>
           <span className="tabular-nums font-medium">
-            {item.cost_units_sum}
+            {item.premium_consumed}
           </span>
         </div>
         <div className="flex justify-between gap-4">
@@ -143,7 +143,7 @@ export function PremiumUsageChart({
               <Area
                 yAxisId="cost"
                 type="monotone"
-                dataKey="cost_units_sum"
+                dataKey="premium_consumed"
                 name={t("statistics.costUnits")}
                 fill="var(--color-chart-1)"
                 fillOpacity={0.2}
