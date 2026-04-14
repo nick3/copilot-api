@@ -1,4 +1,5 @@
 import fs from "node:fs/promises"
+import consola from "consola"
 
 import type { AccountContext } from "~/lib/types/account"
 
@@ -13,7 +14,13 @@ export const getModels = async (account?: AccountContext) => {
     headers: copilotModelsHeaders(ctx),
   })
 
-  if (!response.ok) throw new HTTPError("Failed to get models", response)
+  if (!response.ok) {
+    const errorText = await response.clone().text()
+
+    consola.error("Failed to get models response body", errorText)
+
+    throw new HTTPError("Failed to get models", response)
+  }
 
   const models = (await response.json()) as ModelsResponse
 
