@@ -263,7 +263,7 @@ describe("RequestHistoryStore", () => {
     expect(columns).toContain("selection_reason")
     expect(columns).toContain("upstream_error_message_raw")
 
-    expect(db.query("PRAGMA user_version;").get()).toEqual({ user_version: 9 })
+    expect(db.query("PRAGMA user_version;").get()).toEqual({ user_version: 10 })
   })
 
   test("query orders by id DESC and supports cursor paging", () => {

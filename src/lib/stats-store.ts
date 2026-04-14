@@ -30,6 +30,7 @@ export function toLocalDateString(ms: number): string {
 export class StatsStore {
   private readonly db: Database
   private readonly upsertStmt: ReturnType<Database["query"]>
+  private readonly insertSnapshotStmt: ReturnType<Database["query"]>
 
   constructor(db: Database) {
     this.db = db
@@ -43,6 +44,11 @@ export class StatsStore {
         tokens_total    = tokens_total   + excluded.tokens_total,
         error_count     = error_count    + excluded.error_count,
         updated_at_ms   = excluded.updated_at_ms
+    `)
+    this.insertSnapshotStmt = db.query(`
+      INSERT INTO quota_snapshots
+        (account_id, snapshot_at_ms, remaining, entitlement, unlimited, source)
+      VALUES (?, ?, ?, ?, ?, ?)
     `)
   }
 
@@ -61,6 +67,24 @@ export class StatsStore {
       record.tokensTotal,
       record.hasError ? 1 : 0,
       Date.now(),
+    )
+  }
+
+  insertQuotaSnapshot(record: {
+    accountId: string
+    snapshotAtMs: number
+    remaining: number
+    entitlement: number
+    unlimited: boolean
+    source: string
+  }): void {
+    this.insertSnapshotStmt.run(
+      record.accountId,
+      record.snapshotAtMs,
+      record.remaining,
+      record.entitlement,
+      record.unlimited ? 1 : 0,
+      record.source,
     )
   }
 

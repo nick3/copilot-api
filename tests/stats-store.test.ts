@@ -49,6 +49,38 @@ test("quota_snapshots table has the expected columns", () => {
   ])
 })
 
+test("insertQuotaSnapshot inserts a row into quota_snapshots", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+  const store = new StatsStore(db)
+
+  store.insertQuotaSnapshot({
+    accountId: "acct-a",
+    snapshotAtMs: Date.now(),
+    remaining: 280,
+    entitlement: 300,
+    unlimited: false,
+    source: "refresh",
+  })
+
+  const rows = db
+    .query("SELECT account_id, remaining, entitlement, unlimited, source FROM quota_snapshots")
+    .all() as Array<{
+    account_id: string
+    remaining: number
+    entitlement: number
+    unlimited: number
+    source: string
+  }>
+
+  expect(rows.length).toBe(1)
+  expect(rows[0].account_id).toBe("acct-a")
+  expect(rows[0].remaining).toBe(280)
+  expect(rows[0].entitlement).toBe(300)
+  expect(rows[0].unlimited).toBe(0)
+  expect(rows[0].source).toBe("refresh")
+})
+
 test("v9 migration backfills from existing request_log data", () => {
   const db = new Database(":memory:")
   initAdminDb(db)
