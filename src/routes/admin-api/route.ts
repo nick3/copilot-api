@@ -1667,8 +1667,8 @@ adminApiRoutes.get("/stats/premium-daily", (c) => {
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
 
   const resolvedFrom =
-    from ||
-    (() => {
+    from
+    || (() => {
       const d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
     })()
