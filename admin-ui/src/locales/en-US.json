@@ -558,7 +558,7 @@
     "title": "Statistics",
     "premiumUsage": "Premium Usage Trend",
     "accountUsage": "Per-Account Premium Usage",
-    "costUnits": "Cost Units",
+    "costUnits": "Premium Usage",
     "requestCount": "Request Count",
     "tokensTotal": "Total Tokens",
     "errorCount": "Errors",
