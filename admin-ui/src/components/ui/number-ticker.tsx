@@ -1,8 +1,11 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import type { ComponentPropsWithoutRef } from "react"
 import { useInView, useMotionValue, useSpring } from "motion/react"
 
 import { cn } from "@/lib/utils"
+
+export const numberTickerTextClassName =
+  "inline-block tracking-wider text-black tabular-nums dark:text-white"
 
 interface NumberTickerProps extends ComponentPropsWithoutRef<"span"> {
   value: number
@@ -10,6 +13,7 @@ interface NumberTickerProps extends ComponentPropsWithoutRef<"span"> {
   direction?: "up" | "down"
   delay?: number
   decimalPlaces?: number
+  formatOptions?: Intl.NumberFormatOptions
 }
 
 export function NumberTicker({
@@ -19,10 +23,21 @@ export function NumberTicker({
   delay = 0,
   className,
   decimalPlaces = 0,
+  formatOptions,
   ...props
 }: NumberTickerProps) {
   const ref = useRef<HTMLSpanElement>(null)
-  const motionValue = useMotionValue(direction === "down" ? value : startValue)
+  const formatter = useMemo(
+    () =>
+      new Intl.NumberFormat("en-US", {
+        minimumFractionDigits: decimalPlaces,
+        maximumFractionDigits: decimalPlaces,
+        ...formatOptions,
+      }),
+    [decimalPlaces, formatOptions]
+  )
+  const shouldAnimate = formatOptions?.notation !== "compact"
+  const motionValue = useMotionValue(shouldAnimate ? direction === "down" ? value : startValue : value)
   const springValue = useSpring(motionValue, {
     damping: 60,
     stiffness: 100,
@@ -32,45 +47,54 @@ export function NumberTicker({
 
   // Initial animation on first view
   useEffect(() => {
-    if (isInView && !hasAnimated.current) {
-      hasAnimated.current = true
-      const timer = setTimeout(() => {
-        motionValue.set(direction === "down" ? startValue : value)
-      }, delay * 1000)
-      return () => clearTimeout(timer)
+    if (!isInView || hasAnimated.current) {
+      return
     }
-  }, [motionValue, isInView, delay, value, direction, startValue])
+
+    hasAnimated.current = true
+    if (!shouldAnimate) {
+      motionValue.set(value)
+      return
+    }
+
+    const timer = setTimeout(() => {
+      motionValue.set(direction === "down" ? startValue : value)
+    }, delay * 1000)
+    return () => clearTimeout(timer)
+  }, [motionValue, isInView, delay, value, direction, startValue, shouldAnimate])
 
   // Subsequent value changes: spring smoothly to new value (auto-refresh)
   useEffect(() => {
-    if (hasAnimated.current) {
+    if (hasAnimated.current && shouldAnimate) {
       motionValue.set(direction === "down" ? startValue : value)
     }
-  }, [motionValue, value, direction, startValue])
+  }, [motionValue, value, direction, startValue, shouldAnimate])
 
-  useEffect(
-    () =>
-      springValue.on("change", (latest) => {
-        if (ref.current) {
-          ref.current.textContent = Intl.NumberFormat("en-US", {
-            minimumFractionDigits: decimalPlaces,
-            maximumFractionDigits: decimalPlaces,
-          }).format(Number(latest.toFixed(decimalPlaces)))
-        }
-      }),
-    [springValue, decimalPlaces]
-  )
+  useEffect(() => {
+    const updateText = (latest: number) => {
+      if (!ref.current) {
+        return
+      }
+
+      ref.current.textContent = formatter.format(Number(latest.toFixed(decimalPlaces)))
+    }
+
+    if (!shouldAnimate) {
+      updateText(value)
+      return
+    }
+
+    updateText(springValue.get())
+    return springValue.on("change", updateText)
+  }, [springValue, decimalPlaces, formatter, shouldAnimate, value])
 
   return (
     <span
       ref={ref}
-      className={cn(
-        "inline-block tracking-wider text-black tabular-nums dark:text-white",
-        className
-      )}
+      className={cn(numberTickerTextClassName, className)}
       {...props}
     >
-      {startValue}
+      {shouldAnimate ? startValue : formatter.format(Number(value.toFixed(decimalPlaces)))}
     </span>
   )
 }

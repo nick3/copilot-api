@@ -50,7 +50,10 @@ import { Progress } from "@/components/ui/progress"
 import { Switch } from "@/components/ui/switch"
 import { BentoGrid } from "@/components/ui/bento-grid"
 import { MagicCard } from "@/components/ui/magic-card"
-import { NumberTicker } from "@/components/ui/number-ticker"
+import {
+  AdaptiveNumberPair,
+  AdaptiveNumberTicker,
+} from "@/components/ui/adaptive-number-ticker"
 import { Button } from "@/components/ui/button"
 import { RainbowButton } from "@/components/ui/rainbow-button"
 import { AddAccountDialog } from "@/components/add-account-dialog"
@@ -111,7 +114,7 @@ function KpiValue({
   value: number
   decimalPlaces?: number
 }): React.JSX.Element {
-  return <NumberTicker value={value} decimalPlaces={decimalPlaces} />
+  return <AdaptiveNumberTicker value={value} decimalPlaces={decimalPlaces} />
 }
 
 function KpiLabel({
@@ -512,7 +515,7 @@ export function AccountsPage(): React.JSX.Element {
           >
             <div className="p-4">
               <KpiLabel label={kpi.label} tooltip={kpi.tooltip} />
-              <div className="mt-1 flex items-baseline gap-1 text-2xl font-semibold">
+              <div className="mt-1 flex min-w-0 items-baseline gap-1 text-2xl font-semibold">
                 <KpiValue value={kpi.value} />
               </div>
             </div>
@@ -535,12 +538,11 @@ export function AccountsPage(): React.JSX.Element {
               </div>
             ) : (
               <>
-                <div className="mt-1 flex items-baseline gap-1 text-2xl font-semibold">
-                  <KpiValue value={kpis.totalPremiumUsed} />
-                  <span className="text-muted-foreground text-sm">
-                    / {fmtNum(kpis.totalPremiumEntitlement)}
-                  </span>
-                </div>
+                <AdaptiveNumberPair
+                  className="mt-1 text-2xl font-semibold"
+                  primaryValue={kpis.totalPremiumUsed}
+                  secondaryValue={kpis.totalPremiumEntitlement}
+                />
                 <Progress
                   value={kpis.premiumUsedPercent}
                   className="mt-1.5 h-1.5"
@@ -567,7 +569,7 @@ export function AccountsPage(): React.JSX.Element {
           >
             <div className="p-4">
               <KpiLabel label={kpi.label} tooltip={kpi.tooltip} />
-              <div className="mt-1 flex items-baseline gap-1 text-2xl font-semibold">
+              <div className="mt-1 flex min-w-0 items-baseline gap-1 text-2xl font-semibold">
                 <KpiValue value={kpi.value} decimalPlaces={kpi.decimal ?? 0} />
                 {kpi.suffix ? <span className="text-muted-foreground text-sm">{kpi.suffix}</span> : null}
               </div>
