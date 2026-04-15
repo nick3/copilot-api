@@ -355,12 +355,16 @@ export async function getAdminPremiumStats(params: {
   to?: string
   accountId?: string
   granularity?: "day" | "hour"
+  fromMs?: number
+  toMs?: number
 }): Promise<PremiumStatsResponse> {
   const q = new URLSearchParams()
   if (params.from) q.set("from", params.from)
   if (params.to) q.set("to", params.to)
   if (params.accountId) q.set("account_id", params.accountId)
   if (params.granularity) q.set("granularity", params.granularity)
+  if (params.fromMs != null) q.set("from_ms", String(params.fromMs))
+  if (params.toMs != null) q.set("to_ms", String(params.toMs))
   return fetchAdminJson<PremiumStatsResponse>(
     `/api/admin/stats/premium-daily?${q.toString()}`,
   )

@@ -96,7 +96,7 @@ export class StatsStore {
   }): Array<{ date: string; account_id: string; premium_consumed: number }> {
     const dateExpr =
       params.granularity === "hour" ?
-        "strftime('%Y-%m-%d %H:00', snapshot_at_ms / 1000, 'unixepoch', 'localtime')"
+        "strftime('%Y-%m-%dT%H:00:00Z', snapshot_at_ms / 1000, 'unixepoch')"
       : "date(snapshot_at_ms / 1000, 'unixepoch', 'localtime')"
 
     const accountFilter = params.accountId ? " AND account_id = ?" : ""
@@ -239,7 +239,7 @@ export class StatsStore {
 
     const dailyMetrics = this.db
       .query(
-        `SELECT strftime('%Y-%m-%d %H:00', started_at_ms / 1000, 'unixepoch', 'localtime') AS date,
+        `SELECT strftime('%Y-%m-%dT%H:00:00Z', started_at_ms / 1000, 'unixepoch') AS date,
                 COUNT(*)                                                   AS request_count,
                 COALESCE(SUM(tokens_total), 0)                             AS tokens_total,
                 SUM(CASE WHEN error_name IS NOT NULL THEN 1 ELSE 0 END)    AS error_count
@@ -263,7 +263,7 @@ export class StatsStore {
 
     const byAccountMetrics = this.db
       .query(
-        `SELECT strftime('%Y-%m-%d %H:00', started_at_ms / 1000, 'unixepoch', 'localtime') AS date,
+        `SELECT strftime('%Y-%m-%dT%H:00:00Z', started_at_ms / 1000, 'unixepoch') AS date,
                 account_id,
                 COUNT(*)                                                   AS request_count,
                 COALESCE(SUM(tokens_total), 0)                             AS tokens_total,

@@ -12,6 +12,12 @@ import {
 
 import type { DailyAccountStatsItem } from "@/lib/admin-api"
 import {
+  formatDailyLabel,
+  formatHourlyLabel,
+  formatHourlyTooltip,
+  hourlyDataCrossesDays,
+} from "@/lib/chart-format"
+import {
   Card,
   CardContent,
   CardHeader,
@@ -37,15 +43,16 @@ function renderTooltip(
   const payload = props.payload as
     | ReadonlyArray<{ payload?: Record<string, number | string> }>
     | undefined
-  const label = props.label as string | number | undefined
 
   if (!active || !payload?.length) return null
   const row = payload[0]?.payload
   if (!row) return null
 
+  const header = (row.tooltipDate as string | undefined) ?? String(row.label ?? "")
+
   return (
     <div className="bg-popover text-popover-foreground rounded-md border px-3 py-2 text-xs shadow-md">
-      <div className="mb-1 font-medium">{String(label ?? "")}</div>
+      <div className="mb-1 font-medium">{header}</div>
       <div className="space-y-0.5">
         {accountIds.map((id, idx) => (
           <div key={id} className="flex items-center justify-between gap-4">
@@ -62,15 +69,6 @@ function renderTooltip(
       </div>
     </div>
   )
-}
-
-function formatXLabel(dateStr: string, isHourly: boolean): string {
-  if (isHourly) {
-    const match = /(\d{2}):00/.exec(dateStr) ?? /T(\d{2})/.exec(dateStr)
-    return match ? `${match[1]}:00` : dateStr
-  }
-  const match = /(\d{2})-(\d{2})$/.exec(dateStr)
-  return match ? `${match[1]}-${match[2]}` : dateStr
 }
 
 export function AccountUsageChart({
@@ -99,18 +97,31 @@ export function AccountUsageChart({
 
     const ids = [...accountSet]
 
+    const sortedEntries = [...dateMap.entries()].sort(([a], [b]) => a.localeCompare(b))
+    const crossesDays = isHourly ? hourlyDataCrossesDays(sortedEntries.map(([date]) => date)) : false
+    const baseLabels = isHourly ? sortedEntries.map(([date]) => formatHourlyLabel(date, crossesDays)) : []
+    const duplicateLabels = new Set(
+      baseLabels.filter((label, index) => baseLabels.indexOf(label) !== index),
+    )
+
     // Zero-fill: ensure every date row has a value for every account
-    const rows = [...dateMap.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, values]) => {
-        const row: Record<string, number | string> = {
-          label: formatXLabel(date, isHourly),
-        }
-        for (const id of ids) {
-          row[id] = values[id] ?? 0
-        }
-        return row
-      })
+    const rows = sortedEntries.map(([date, values], index) => {
+      const baseLabel = baseLabels[index]
+      const includeOffset = isHourly && duplicateLabels.has(baseLabel)
+      const row: Record<string, number | string> = {
+        label:
+          isHourly ?
+            formatHourlyLabel(date, crossesDays, { includeOffset })
+          : formatDailyLabel(date),
+      }
+      if (isHourly) {
+        row.tooltipDate = formatHourlyTooltip(date, { includeOffset: true })
+      }
+      for (const id of ids) {
+        row[id] = values[id] ?? 0
+      }
+      return row
+    })
 
     return { pivoted: rows, accountIds: ids }
   }, [data, isHourly])

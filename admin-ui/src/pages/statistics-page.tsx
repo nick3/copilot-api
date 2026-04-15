@@ -19,11 +19,18 @@ import {
 } from "@/lib/admin-api"
 import { i18n } from "@/lib/i18n"
 import {
+  aggregateHourlyAccountStatsToLocalDays,
+  aggregateHourlyStatsToLocalDays,
+} from "@/lib/statistics-local-aggregation"
+import {
   type StatisticsTimePreset,
   resolveStatisticsRange,
+  validateCustomRange,
 } from "@/lib/statistics-range"
 
 type TimePreset = StatisticsTimePreset
+
+const MAX_LOCAL_STATS_RANGE_MS = 35 * 24 * 60 * 60 * 1000
 
 export function StatisticsPage(): React.JSX.Element {
   const { t } = useTranslation()
@@ -43,6 +50,18 @@ export function StatisticsPage(): React.JSX.Element {
 
   const refresh = useCallback(async () => {
     if (loadInFlightRef.current) return
+
+    // Validate custom range before making the request
+    if (preset === "custom") {
+      const rangeError = validateCustomRange(customFrom, customTo)
+      if (rangeError) {
+        toast.error(i18n.t("statistics.loadFailed"), {
+          description: rangeError,
+        })
+        return
+      }
+    }
+
     loadInFlightRef.current = true
     setLoading(true)
 
@@ -52,14 +71,31 @@ export function StatisticsPage(): React.JSX.Element {
         customFrom,
         customTo,
       })
+      const fromMs = range.fromMs
+      const toMs = range.toMs
+      const hasMsRange = fromMs != null && toMs != null
+      const canUseLocalAggregation =
+        hasMsRange
+        && toMs - fromMs < MAX_LOCAL_STATS_RANGE_MS
+      const requestGranularity =
+        canUseLocalAggregation ? "hour" : range.granularity
       const res = await getAdminPremiumStats({
         from: range.from,
         to: range.to,
-        granularity: range.granularity,
+        granularity: requestGranularity,
+        fromMs: canUseLocalAggregation ? fromMs : undefined,
+        toMs: canUseLocalAggregation ? toMs : undefined,
       })
-      setDaily(res.daily)
-      setByAccount(res.by_account)
-      setIsHourly(range.granularity === "hour")
+
+      if (range.granularity === "day" && requestGranularity === "hour") {
+        setDaily(aggregateHourlyStatsToLocalDays(res.daily))
+        setByAccount(aggregateHourlyAccountStatsToLocalDays(res.by_account))
+        setIsHourly(false)
+      } else {
+        setDaily(res.daily)
+        setByAccount(res.by_account)
+        setIsHourly(range.granularity === "hour")
+      }
     } catch (err) {
       const msg = err instanceof AdminApiError ? err.message : String(err)
       toast.error(i18n.t("statistics.loadFailed"), { description: msg })

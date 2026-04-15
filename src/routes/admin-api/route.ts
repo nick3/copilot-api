@@ -1668,7 +1668,10 @@ adminApiRoutes.get("/stats/premium-daily", (c) => {
   const todayStr = toLocalDateString(now.getTime())
 
   const resolvedFrom =
-    from || toLocalDateString(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+    from
+    || toLocalDateString(
+      new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6).getTime(),
+    )
   const resolvedTo = to || todayStr
 
   // Parse YYYY-MM-DD as local time (not UTC)
@@ -1677,18 +1680,10 @@ adminApiRoutes.get("/stats/premium-daily", (c) => {
     return new Date(y, m - 1, d)
   }
 
-  // Validate granularity=hour range <= 48h
-  if (granularity === "hour") {
-    const fromDate = parseLocalDate(resolvedFrom)
-    const toDate = parseLocalDate(resolvedTo)
-    const diffMs = toDate.getTime() - fromDate.getTime() + 24 * 60 * 60 * 1000
-    if (diffMs > 48 * 60 * 60 * 1000) {
-      return jsonError(c, 400, {
-        message:
-          "Hourly granularity is only supported for ranges up to 48 hours.",
-        type: "bad_request",
-      })
-    }
+  /** DST-safe end-of-day: next local midnight minus 1 ms. */
+  function localDateEndMs(dateStr: string): number {
+    const [y, m, d] = dateStr.split("-").map(Number)
+    return new Date(y, m - 1, d + 1).getTime() - 1
   }
 
   const statsStore = getStatsStore()
@@ -1701,8 +1696,31 @@ adminApiRoutes.get("/stats/premium-daily", (c) => {
   }
 
   if (granularity === "hour") {
-    const fromMs = parseLocalDate(resolvedFrom).getTime()
-    const toMs = parseLocalDate(resolvedTo).getTime() + 86_399_999
+    // Prefer client-provided ms boundaries (browser local time)
+    const clientFromMs = parseFiniteNumber(p.get("from_ms"))
+    const clientToMs = parseFiniteNumber(p.get("to_ms"))
+
+    let fromMs: number
+    let toMs: number
+
+    if (clientFromMs !== undefined && clientToMs !== undefined) {
+      fromMs = clientFromMs
+      toMs = clientToMs
+    } else {
+      // Fallback: DST-safe computation from date strings
+      fromMs = parseLocalDate(resolvedFrom).getTime()
+      toMs = localDateEndMs(resolvedTo)
+    }
+
+    // Keep raw-hour transport within a bounded range so the admin query stays predictable.
+    if (toMs - fromMs > 35 * 24 * 60 * 60 * 1000) {
+      return jsonError(c, 400, {
+        message:
+          "Hourly granularity is only supported for ranges up to 35 days.",
+        type: "bad_request",
+      })
+    }
+
     const result = statsStore.getHourlyPremiumStats({
       fromMs,
       toMs,

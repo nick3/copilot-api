@@ -20,7 +20,7 @@ import type { AffinityKeySource } from "./utils"
 import { getAdminDb, getAdminDbPath, getAdminDbUserVersion } from "./admin-db"
 import { StatsStore } from "./stats-store"
 
-const DEFAULT_RETENTION_DAYS = 14
+const DEFAULT_RETENTION_DAYS = 35
 const DEFAULT_MAX_ROWS = 200_000
 
 const INSERT_WARN_THROTTLE_MS = 30_000

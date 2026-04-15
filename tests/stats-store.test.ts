@@ -761,3 +761,63 @@ test("toLocalDateString formats correctly", () => {
   const ms2 = new Date(2026, 0, 1).getTime() // January 1, 2026
   expect(toLocalDateString(ms2)).toBe("2026-01-01")
 })
+
+test("getHourlyPremiumStats returns UTC ISO hour bucket format", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+  const store = new StatsStore(db)
+
+  // Use explicit UTC hours so the expected bucket is timezone-independent
+  const t1 = Date.UTC(2026, 3, 10, 14, 30, 0)
+
+  db.run(
+    `INSERT INTO request_log
+       (request_id, started_at_ms, method, path, account_id, cost_units, tokens_total, error_name)
+     VALUES ('utc-1', ?, 'POST', '/v1/messages', 'acct-a', 10.0, 1000, NULL)`,
+    [t1],
+  )
+
+  const result = store.getHourlyPremiumStats({
+    fromMs: t1 - 1000,
+    toMs: t1 + 1000,
+  })
+
+  expect(result.daily.length).toBe(1)
+  expect(result.daily[0].date).toBe("2026-04-10T14:00:00Z")
+})
+
+test("getConsumptionFromSnapshots hourly uses UTC ISO hour bucket format", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+  const store = new StatsStore(db)
+
+  const t1 = Date.UTC(2026, 3, 10, 14, 0, 0)
+  const t2 = Date.UTC(2026, 3, 10, 14, 30, 0)
+
+  store.insertQuotaSnapshot({
+    accountId: "acct-a",
+    snapshotAtMs: t1,
+    remaining: 300,
+    entitlement: 300,
+    unlimited: false,
+    source: "refresh",
+  })
+  store.insertQuotaSnapshot({
+    accountId: "acct-a",
+    snapshotAtMs: t2,
+    remaining: 290,
+    entitlement: 300,
+    unlimited: false,
+    source: "refresh",
+  })
+
+  const result = store.getConsumptionFromSnapshots({
+    fromMs: t1,
+    toMs: t2 + 1,
+    granularity: "hour",
+  })
+
+  expect(result.length).toBe(1)
+  expect(result[0].date).toBe("2026-04-10T14:00:00Z")
+  expect(result[0].premium_consumed).toBe(10)
+})
