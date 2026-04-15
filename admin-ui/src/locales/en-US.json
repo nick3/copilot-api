@@ -563,7 +563,7 @@
     "tokensTotal": "Total Tokens",
     "errorCount": "Errors",
     "timeRange": {
-      "24h": "24h",
+      "today": "Today",
       "7d": "7 Days",
       "month": "This Month",
       "custom": "Custom"

@@ -563,7 +563,7 @@
     "tokensTotal": "总 Token 数",
     "errorCount": "错误数",
     "timeRange": {
-      "24h": "24 小时",
+      "today": "今日",
       "7d": "7 天",
       "month": "本月",
       "custom": "自定义"
