@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test"
 
-import * as format from "../src/lib/format"
 import {
   buildAdaptiveNumberFormatCandidates,
   buildAdaptiveNumberPairCandidates,
   pickAdaptiveNumberFormatCandidate,
   pickAdaptiveNumberPairCandidate,
+  resolveAdaptiveNumberFormatCandidate,
+  resolveAdaptiveNumberPairCandidate,
 } from "../src/lib/format"
 
 test("buildAdaptiveNumberFormatCandidates returns full and compact fallbacks for large values", () => {
@@ -79,7 +80,7 @@ test("resolveAdaptiveNumberFormatCandidate reuses the current candidate when it 
   const currentCandidate = candidates[1]
 
   expect(
-    format.resolveAdaptiveNumberFormatCandidate?.(candidates, currentCandidate),
+    resolveAdaptiveNumberFormatCandidate(candidates, currentCandidate),
   ).toEqual(currentCandidate)
 })
 
@@ -88,7 +89,7 @@ test("resolveAdaptiveNumberFormatCandidate falls back to the shortest candidate 
   const nextCandidates = buildAdaptiveNumberFormatCandidates(1000)
 
   expect(
-    format.resolveAdaptiveNumberFormatCandidate?.(nextCandidates, currentCandidate),
+    resolveAdaptiveNumberFormatCandidate(nextCandidates, currentCandidate),
   ).toEqual(nextCandidates[nextCandidates.length - 1])
 })
 
@@ -97,6 +98,6 @@ test("resolveAdaptiveNumberPairCandidate falls back to the shortest pair when th
   const nextCandidates = buildAdaptiveNumberPairCandidates(1000, 1000)
 
   expect(
-    format.resolveAdaptiveNumberPairCandidate?.(nextCandidates, currentCandidate),
+    resolveAdaptiveNumberPairCandidate(nextCandidates, currentCandidate),
   ).toEqual(nextCandidates[nextCandidates.length - 1])
 })
