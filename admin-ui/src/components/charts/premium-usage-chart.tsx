@@ -12,20 +12,19 @@ import {
 
 import type { DailyStatsItem } from "@/lib/admin-api"
 import {
+  formatDailyLabel,
+  formatHourlyLabel,
+  formatHourlyTooltip,
+  hourlyDataCrossesDays,
+} from "@/lib/chart-format"
+import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
 
-function formatXLabel(dateStr: string, isHourly: boolean): string {
-  if (isHourly) {
-    const match = /(\d{2}):00/.exec(dateStr) ?? /T(\d{2})/.exec(dateStr)
-    return match ? `${match[1]}:00` : dateStr
-  }
-  const match = /(\d{2})-(\d{2})$/.exec(dateStr)
-  return match ? `${match[1]}-${match[2]}` : dateStr
-}
+type ChartItem = DailyStatsItem & { label: string; tooltipDate?: string }
 
 function renderTooltip(
   t: (key: string) => string,
@@ -34,17 +33,18 @@ function renderTooltip(
 ): React.JSX.Element | null {
   const active = props.active as boolean | undefined
   const payload = props.payload as
-    | ReadonlyArray<{ payload?: DailyStatsItem }>
+    | ReadonlyArray<{ payload?: ChartItem }>
     | undefined
-  const label = props.label as string | number | undefined
 
   if (!active || !payload?.length) return null
   const item = payload[0]?.payload
   if (!item) return null
 
+  const header = item.tooltipDate ?? String(item.label ?? "")
+
   return (
     <div className="bg-popover text-popover-foreground rounded-md border px-3 py-2 text-xs shadow-md">
-      <div className="mb-1 font-medium">{String(label ?? "")}</div>
+      <div className="mb-1 font-medium">{header}</div>
       <div className="space-y-0.5">
         <div className="flex justify-between gap-4">
           <span className="text-muted-foreground">
@@ -92,14 +92,30 @@ export function PremiumUsageChart({
 }): React.JSX.Element {
   const { t } = useTranslation()
 
-  const chartData = useMemo(
-    () =>
-      data.map((d) => ({
+  const chartData = useMemo(() => {
+    if (!isHourly) {
+      return data.map((d) => ({
         ...d,
-        label: formatXLabel(d.date, isHourly),
-      })),
-    [data, isHourly],
-  )
+        label: formatDailyLabel(d.date),
+      }))
+    }
+
+    const crossesDays = hourlyDataCrossesDays(data.map((d) => d.date))
+    const baseLabels = data.map((d) => formatHourlyLabel(d.date, crossesDays))
+    const duplicateLabels = new Set(
+      baseLabels.filter((label, index) => baseLabels.indexOf(label) !== index),
+    )
+
+    return data.map((d, index) => {
+      const baseLabel = baseLabels[index]
+      const includeOffset = duplicateLabels.has(baseLabel)
+      return {
+        ...d,
+        label: formatHourlyLabel(d.date, crossesDays, { includeOffset }),
+        tooltipDate: formatHourlyTooltip(d.date, { includeOffset: true }),
+      }
+    })
+  }, [data, isHourly])
 
   return (
     <Card>

@@ -11,6 +11,11 @@ import {
 } from "@/lib/admin-api"
 import { fmtDurationSeconds, fmtLocalDateTime, fmtNum } from "@/lib/format"
 import { i18n } from "@/lib/i18n"
+import {
+  localInputToFromMs,
+  localInputToToMs,
+  msToLocalInput,
+} from "@/lib/requests-time-range"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -130,28 +135,6 @@ function validateTimeRange(
   }
 
   return null
-}
-
-function localInputToMs(value: string): string {
-  if (!value) return ""
-  const ms = Date.parse(value)
-  if (!Number.isFinite(ms)) return ""
-  return String(ms)
-}
-
-function msToLocalInput(ms: string): string {
-  const n = Number(ms)
-  if (!Number.isFinite(n)) return ""
-  const d = new Date(n)
-
-  const pad2 = (x: number) => String(x).padStart(2, "0")
-  const yyyy = d.getFullYear()
-  const mm = pad2(d.getMonth() + 1)
-  const dd = pad2(d.getDate())
-  const hh = pad2(d.getHours())
-  const min = pad2(d.getMinutes())
-
-  return `${yyyy}-${mm}-${dd}T${hh}:${min}`
 }
 
 function presetToRange(preset: Exclude<TimeRange, "__any__" | "custom">): {
@@ -542,7 +525,7 @@ export function RequestsPage(): React.JSX.Element {
                           setTimeRange("custom")
                           setFilters((p) => ({
                             ...p,
-                            from_ms: localInputToMs(e.target.value),
+                            from_ms: localInputToFromMs(e.target.value),
                           }))
                         }}
                       />
@@ -560,7 +543,7 @@ export function RequestsPage(): React.JSX.Element {
                           setTimeRange("custom")
                           setFilters((p) => ({
                             ...p,
-                            to_ms: localInputToMs(e.target.value),
+                            to_ms: localInputToToMs(e.target.value),
                           }))
                         }}
                       />

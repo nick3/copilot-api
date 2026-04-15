@@ -12,6 +12,10 @@ import {
   getAdminMeta,
   patchAccount,
 } from "@/lib/admin-api"
+import {
+  buildAccountsCsv,
+  getAccountsCsvFilename,
+} from "@/lib/accounts-export"
 import { fmtDurationSeconds, fmtLocalDateTime, fmtNum } from "@/lib/format"
 import { i18n } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
@@ -299,46 +303,15 @@ export function AccountsPage(): React.JSX.Element {
   }, [refresh])
 
   // CSV export
-  function escapeCsvCell(value: string): string {
-    const neutralized = /^[=+\-@]/u.test(value) ? `'${value}` : value
-    return `"${neutralized.replaceAll('"', '""')}"`
-  }
-
   const handleExportCsv = useCallback(() => {
     if (accounts.length === 0) return
 
-    const headers = [
-      "account_id",
-      "status",
-      "account_type",
-      "requests",
-      "errors",
-      "tokens",
-      "avg_duration_s",
-      "last_request",
-    ]
-    const rows = accounts.map((a) => [
-      a.account_id,
-      a.runtime?.failed ? "failed" : "ok",
-      a.account_type ?? "free",
-      String(a.stats?.request_count ?? 0),
-      String(a.stats?.error_count ?? 0),
-      String(a.stats?.tokens_total ?? 0),
-      fmtDurationSeconds(a.stats?.avg_duration_ms),
-      a.stats?.last_request_at_ms
-        ? new Date(a.stats.last_request_at_ms).toISOString()
-        : "",
-    ])
-
-    const csv = [
-      headers.join(","),
-      ...rows.map((r) => r.map((c) => escapeCsvCell(c)).join(",")),
-    ].join("\n")
+    const csv = buildAccountsCsv(accounts)
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = `accounts-${new Date().toISOString().slice(0, 10)}.csv`
+    a.download = getAccountsCsvFilename()
     a.click()
     URL.revokeObjectURL(url)
     toast.success(t("accountsPage.exportSuccess"))
