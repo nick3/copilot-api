@@ -1,8 +1,9 @@
 import consola from "consola"
 import { events } from "fetch-event-stream"
 
+import type { CompactType } from "~/lib/compact"
+import type { SubagentMarker } from "~/lib/subagent"
 import type { AccountContext } from "~/lib/types/account"
-import type { SubagentMarker } from "~/routes/messages/subagent-marker"
 
 import {
   copilotBaseUrl,
@@ -361,7 +362,7 @@ interface ResponsesRequestOptions {
   upstreamRequestId?: string
   subagentMarker?: SubagentMarker | null
   sessionId?: string
-  isCompact?: boolean
+  compactType?: CompactType
 }
 
 export const createResponses = async (
@@ -372,13 +373,14 @@ export const createResponses = async (
     upstreamRequestId,
     subagentMarker,
     sessionId,
-    isCompact,
+    compactType,
   }: ResponsesRequestOptions,
   account?: AccountContext,
 ): Promise<CreateResponsesReturn> => {
   const ctx = account ?? accountFromState()
   if (!ctx.copilotToken) throw new Error("Copilot token not found")
 
+  const isCompact = Boolean(compactType)
   const effectiveInitiator = resolveEffectiveInitiator(initiator, {
     isCompact,
     isSubagent: Boolean(subagentMarker),
@@ -391,7 +393,7 @@ export const createResponses = async (
 
   prepareInteractionHeaders(sessionId, Boolean(subagentMarker), headers)
 
-  prepareForCompact(headers, isCompact)
+  prepareForCompact(headers, compactType)
 
   // service_tier is not supported by github copilot
   payload.service_tier = null

@@ -6,6 +6,7 @@ import type {
   AnthropicUserMessage,
 } from "../src/routes/messages/anthropic-types"
 
+import { COMPACT_REQUEST } from "../src/lib/compact"
 import { requestContext } from "../src/lib/request-context"
 import { createMessages } from "../src/services/copilot/create-messages"
 
@@ -115,14 +116,59 @@ test("sets interaction headers for subagent session", async () => {
   expect(headers["x-initiator"]).toBe("agent")
 })
 
+test("keeps subagent interaction type for compact subagent requests", async () => {
+  const payload = basePayload([{ type: "text", text: "hello" }])
+
+  await createMessages(payload, accountContext, {
+    upstreamRequestId: "request-compact-subagent",
+    sessionId: "session-compact-subagent",
+    subagentMarker: {
+      agent_id: "agent-compact-subagent",
+      agent_type: "opencode-subagent",
+      session_id: "session-compact-subagent",
+    },
+    compactType: COMPACT_REQUEST,
+  })
+
+  const headers = getLastHeaders()
+  expect(headers["x-request-id"]).toBe("request-compact-subagent")
+  expect(headers["x-agent-task-id"]).toBe("request-compact-subagent")
+  expect(headers["x-interaction-id"]).toBe("session-compact-subagent")
+  expect(headers["x-interaction-type"]).toBe("conversation-subagent")
+  expect(headers["x-initiator"]).toBe("agent")
+})
+
 test("forces agent initiator for compact requests", async () => {
   const payload = basePayload([{ type: "text", text: "hello" }])
 
   await createMessages(payload, accountContext, {
-    isCompact: true,
+    compactType: COMPACT_REQUEST,
   })
 
   expect(getLastHeaders()["x-initiator"]).toBe("agent")
+})
+
+test("drops interleaved thinking beta for adaptive thinking requests", async () => {
+  const payload = {
+    ...basePayload([{ type: "text", text: "hello" }]),
+    thinking: {
+      type: "adaptive",
+    },
+  } satisfies AnthropicMessagesPayload
+
+  await createMessages(payload, accountContext, {
+    anthropicBetaHeader:
+      "interleaved-thinking-2025-05-14,context-management-2025-06-27",
+  })
+
+  const anthropicBeta = getLastHeaders()["anthropic-beta"]
+  expect(anthropicBeta).toBeTruthy()
+
+  const betas = anthropicBeta.split(",").map((item) => item.trim())
+
+  expect(betas).toContain("advanced-tool-use-2025-11-20")
+  expect(betas).toContain("context-management-2025-06-27")
+  expect(betas).not.toContain("interleaved-thinking-2025-05-14")
 })
 
 test("enables vision headers for images nested inside tool results", async () => {
@@ -177,7 +223,7 @@ test("captures final outbound headers after messages-proxy overrides", async () 
       expect(outboundHeaders?.xInteractionType).toBe("messages-proxy")
       expect(outboundHeaders?.openaiIntent).toBe("messages-proxy")
       expect(outboundHeaders?.userAgent).toBe(
-        "vscode_claude_code/2.1.81 (external, sdk-ts, agent-sdk/0.2.81)",
+        "vscode_claude_code/2.1.98 (external, sdk-ts, agent-sdk/0.2.98)",
       )
     },
   )

@@ -15,6 +15,7 @@ import type {
   AnthropicResponse,
 } from "./anthropic-types"
 export {
+  getCompactType,
   isCompactRequest,
   mergeToolResultForClaude,
   stripCacheControl,

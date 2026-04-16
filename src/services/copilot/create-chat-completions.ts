@@ -1,8 +1,9 @@
 import consola from "consola"
 import { events } from "fetch-event-stream"
 
+import type { CompactType } from "~/lib/compact"
+import type { SubagentMarker } from "~/lib/subagent"
 import type { AccountContext } from "~/lib/types/account"
-import type { SubagentMarker } from "~/routes/messages/subagent-marker"
 
 import {
   copilotBaseUrl,
@@ -62,7 +63,7 @@ export const createChatCompletions = async (
     initiator?: "agent" | "user"
     subagentMarker?: SubagentMarker | null
     sessionId?: string
-    isCompact?: boolean
+    compactType?: CompactType
   },
 ) => {
   const ctx = account ?? accountFromState()
@@ -75,9 +76,10 @@ export const createChatCompletions = async (
   )
 
   const initiator = options?.initiator ?? getChatInitiator(payload.messages)
+  const isCompact = Boolean(options?.compactType)
 
   const effectiveInitiator = resolveEffectiveInitiator(initiator, {
-    isCompact: options?.isCompact,
+    isCompact,
     isSubagent: Boolean(options?.subagentMarker),
   })
 
@@ -94,7 +96,8 @@ export const createChatCompletions = async (
   )
 
   const upstreamPayload = applyDefaultReasoningEffort(payload)
-  prepareForCompact(headers, options?.isCompact)
+
+  prepareForCompact(headers, options?.compactType)
   captureOutboundHeadersSnapshot(headers)
 
   const response = await fetch(`${copilotBaseUrl(ctx)}/chat/completions`, {

@@ -1,12 +1,13 @@
 import consola from "consola"
 import { events } from "fetch-event-stream"
 
+import type { CompactType } from "~/lib/compact"
+import type { SubagentMarker } from "~/lib/subagent"
 import type { AccountContext } from "~/lib/types/account"
 import type {
   AnthropicMessagesPayload,
   AnthropicResponse,
 } from "~/routes/messages/anthropic-types"
-import type { SubagentMarker } from "~/routes/messages/subagent-marker"
 
 import {
   copilotBaseUrl,
@@ -67,10 +68,11 @@ export type MessagesStream = ReturnType<typeof events>
 export type CreateMessagesReturn = AnthropicResponse | MessagesStream
 
 const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14"
+const ADVANCED_TOOL_USE_BETA = "advanced-tool-use-2025-11-20"
 const allowedAnthropicBetas = new Set([
   INTERLEAVED_THINKING_BETA,
   "context-management-2025-06-27",
-  "advanced-tool-use-2025-11-20",
+  ADVANCED_TOOL_USE_BETA,
 ])
 
 const buildAnthropicBetaHeader = (
@@ -85,14 +87,18 @@ const buildAnthropicBetaHeader = (
       .map((item) => item.trim())
       .filter((item) => item.length > 0)
       .filter((item) => allowedAnthropicBetas.has(item))
-    const uniqueFilteredBetas = [...new Set(filteredBeta)]
-    const finalFilteredBetas =
-      isAdaptiveThinking ?
-        uniqueFilteredBetas.filter((item) => item !== INTERLEAVED_THINKING_BETA)
-      : uniqueFilteredBetas
+      .filter(
+        (item) => !isAdaptiveThinking || item !== INTERLEAVED_THINKING_BETA,
+      )
 
-    if (finalFilteredBetas.length > 0) {
-      return finalFilteredBetas.join(",")
+    // in vscode copilot extension, advanced-tool-use is enabled by default
+    // align header with vscode copilot extension
+    const uniqueFilteredBetas = [
+      ...new Set([ADVANCED_TOOL_USE_BETA, ...filteredBeta]),
+    ]
+
+    if (uniqueFilteredBetas.length > 0) {
+      return uniqueFilteredBetas.join(",")
     }
 
     return undefined
@@ -145,13 +151,14 @@ const buildMessagesHeaders = ({
         initiator?: "agent" | "user"
         subagentMarker?: SubagentMarker | null
         sessionId?: string
-        isCompact?: boolean
+        compactType?: CompactType
       }
     | undefined
   payload: AnthropicMessagesPayload
 }): Record<string, string> => {
+  const isCompact = Boolean(options?.compactType)
   const effectiveInitiator = resolveEffectiveInitiator(initiator, {
-    isCompact: options?.isCompact,
+    isCompact,
     isSubagent: Boolean(options?.subagentMarker),
   })
 
@@ -166,7 +173,7 @@ const buildMessagesHeaders = ({
     headers,
   )
 
-  prepareForCompact(headers, options?.isCompact)
+  prepareForCompact(headers, options?.compactType)
 
   if (shouldUseMessageProxyHeaders(payload)) {
     prepareMessageProxyHeaders(headers)
@@ -192,7 +199,7 @@ export const createMessages = async (
     initiator?: "agent" | "user"
     subagentMarker?: SubagentMarker | null
     sessionId?: string
-    isCompact?: boolean
+    compactType?: CompactType
   },
 ): Promise<CreateMessagesReturn> => {
   const ctx = account ?? accountFromState()
