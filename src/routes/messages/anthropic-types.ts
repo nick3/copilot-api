@@ -3,14 +3,9 @@
 export interface AnthropicMessagesPayload {
   model: string
   messages: Array<AnthropicMessage>
-  max_tokens: number
   system?: string | Array<AnthropicTextBlock>
-  metadata?: {
-    user_id?: string
-  }
   stop_sequences?: Array<string>
   stream?: boolean
-  temperature?: number
   top_p?: number
   top_k?: number
   tools?: Array<AnthropicTool>
@@ -18,14 +13,20 @@ export interface AnthropicMessagesPayload {
     type: "auto" | "any" | "tool" | "none"
     name?: string
   }
+  max_tokens: number
   thinking?: {
     type: "enabled" | "adaptive"
     budget_tokens?: number
+    display?: string
   }
   service_tier?: "auto" | "standard_only"
   output_config?: {
     effort?: "low" | "medium" | "high" | "max"
   }
+  metadata?: {
+    user_id?: string
+  }
+  temperature?: number
 }
 
 export interface AnthropicTextBlock {

@@ -1,5 +1,6 @@
 import { expect, mock, test } from "bun:test"
 
+import { COMPACT_REQUEST } from "../src/lib/compact"
 import { state } from "../src/lib/state"
 import {
   createResponses,
@@ -72,10 +73,32 @@ test("forces agent initiator for compact responses requests", async () => {
   await createResponses(basePayload([{ role: "user", content: "hello" }]), {
     vision: false,
     initiator: "user",
-    isCompact: true,
+    compactType: COMPACT_REQUEST,
   })
 
   expect(getLastHeaders()["x-initiator"]).toBe("agent")
+})
+
+test("keeps subagent interaction type for compact responses requests", async () => {
+  await createResponses(basePayload([{ role: "user", content: "hello" }]), {
+    vision: false,
+    initiator: "user",
+    upstreamRequestId: "request-compact-responses",
+    sessionId: "session-compact-responses",
+    subagentMarker: {
+      agent_id: "agent-compact-responses",
+      agent_type: "opencode-subagent",
+      session_id: "session-compact-responses",
+    },
+    compactType: COMPACT_REQUEST,
+  })
+
+  const headers = getLastHeaders()
+  expect(headers["x-request-id"]).toBe("request-compact-responses")
+  expect(headers["x-agent-task-id"]).toBe("request-compact-responses")
+  expect(headers["x-interaction-id"]).toBe("session-compact-responses")
+  expect(headers["x-interaction-type"]).toBe("conversation-subagent")
+  expect(headers["x-initiator"]).toBe("agent")
 })
 
 test("forces agent initiator for subagent responses requests", async () => {

@@ -315,7 +315,10 @@ describe("prepareMessagesApiPayload", () => {
         },
       ],
     })
-    expect(payload.thinking).toEqual({ type: "adaptive" })
+    expect(payload.thinking).toEqual({
+      type: "adaptive",
+      display: "summarized",
+    })
     expect(payload.output_config).toEqual({ effort: "max" })
   })
 

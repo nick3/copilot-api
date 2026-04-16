@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test"
 
+import { COMPACT_REQUEST } from "../src/lib/compact"
 import { getReasoningEffortForModel } from "../src/lib/config"
 import { state } from "../src/lib/state"
 import {
@@ -144,10 +145,35 @@ test("forces agent initiator for compact chat requests", async () => {
   }
 
   await createChatCompletions(payload, undefined, {
-    isCompact: true,
+    compactType: COMPACT_REQUEST,
   })
 
   const { headers } = getLastFetchCall()
+  expect(headers["x-initiator"]).toBe("agent")
+})
+
+test("keeps subagent interaction type for compact chat requests", async () => {
+  const payload: ChatCompletionsPayload = {
+    messages: [{ role: "user", content: "hi" }],
+    model: "gpt-test",
+  }
+
+  await createChatCompletions(payload, undefined, {
+    upstreamRequestId: "request-compact-chat",
+    sessionId: "session-compact-chat",
+    subagentMarker: {
+      agent_id: "agent-compact-chat",
+      agent_type: "opencode-subagent",
+      session_id: "session-compact-chat",
+    },
+    compactType: COMPACT_REQUEST,
+  })
+
+  const { headers } = getLastFetchCall()
+  expect(headers["x-request-id"]).toBe("request-compact-chat")
+  expect(headers["x-agent-task-id"]).toBe("request-compact-chat")
+  expect(headers["x-interaction-id"]).toBe("session-compact-chat")
+  expect(headers["x-interaction-type"]).toBe("conversation-subagent")
   expect(headers["x-initiator"]).toBe("agent")
 })
 

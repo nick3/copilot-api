@@ -4,6 +4,7 @@ import type { Context } from "hono"
 import { streamSSE } from "hono/streaming"
 import { randomUUID } from "node:crypto"
 
+import type { SubagentMarker } from "~/lib/subagent"
 import type { AccountRuntime } from "~/lib/types/account"
 import type { Model } from "~/services/copilot/get-models"
 
@@ -12,6 +13,7 @@ import {
   type AccountSelectionReason,
 } from "~/lib/accounts-manager"
 import { awaitApproval } from "~/lib/approval"
+import { COMPACT_REQUEST, type CompactType } from "~/lib/compact"
 import {
   getSmallModel,
   isMessageStartInputTokensFallbackEnabled,
@@ -78,8 +80,6 @@ import {
   type ResponseStreamEvent,
 } from "~/services/copilot/create-responses"
 
-import type { SubagentMarker } from "./subagent-marker"
-
 import {
   type AnthropicMessagesPayload,
   type AnthropicResponse,
@@ -91,9 +91,10 @@ import {
   translateToOpenAI,
 } from "./non-stream-translation"
 import {
-  isCompactRequest,
+  getCompactType,
   mergeToolResultForClaude,
   prepareMessagesApiPayload,
+  sanitizeIdeTools,
   stripToolReferenceTurnBoundary,
 } from "./preprocess"
 import { translateChunkToAnthropicEvents } from "./stream-translation"
@@ -170,6 +171,7 @@ export async function handleCompletion(c: Context) {
   const { ip: clientIp, source: clientIpSource } = getClientIpInfo(c)
   const userAgent = c.req.header("user-agent") ?? undefined
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
+  sanitizeIdeTools(anthropicPayload)
   debugJson(logger, "Anthropic request payload:", anthropicPayload)
 
   const markerInspection = inspectSubagentMarkerFromFirstUser(anthropicPayload)
@@ -197,7 +199,8 @@ export async function handleCompletion(c: Context) {
     markerInspection.kind === "none" ? sessionId : undefined
 
   const anthropicBeta = c.req.header("anthropic-beta")
-  const isCompact = isCompactRequest(anthropicPayload)
+  const compactType = getCompactType(anthropicPayload)
+  const isCompact = compactType !== 0
   const originalRequestModel = anthropicPayload.model
 
   // Fix warmup probe: force small model for Claude Code warmup requests (CLAUDE_CODE_SUBAGENT_MODEL also works).
@@ -205,12 +208,15 @@ export async function handleCompletion(c: Context) {
     anthropicPayload.model = getSmallModel()
   }
 
-  if (isCompact) {
-    logger.debug("Is compact request:", isCompact)
-    if (shouldCompactUseSmallModel()) {
-      anthropicPayload.model = getSmallModel()
-    }
-  } else {
+  if (compactType !== 0) {
+    logger.debug("Compact request type:", compactType)
+  }
+
+  if (compactType === COMPACT_REQUEST && shouldCompactUseSmallModel()) {
+    anthropicPayload.model = getSmallModel()
+  }
+
+  if (compactType === 0) {
     stripToolReferenceTurnBoundary(anthropicPayload)
 
     // Merge tool_result and text blocks into tool_result to avoid consuming premium requests
@@ -376,7 +382,7 @@ export async function handleCompletion(c: Context) {
       sessionId,
       instr,
       selectedModel,
-      isCompact,
+      compactType,
     })
   }
   if (endpoint === RESPONSES_ENDPOINT) {
@@ -388,7 +394,7 @@ export async function handleCompletion(c: Context) {
       sessionId,
       selectedModel,
       instr,
-      isCompact,
+      compactType,
     })
   }
 
@@ -399,7 +405,7 @@ export async function handleCompletion(c: Context) {
     sessionId,
     selectedModel,
     instr,
-    isCompact,
+    compactType,
   })
 }
 
@@ -410,7 +416,7 @@ const handleWithChatCompletions = async (params: {
   sessionId?: string
   selectedModel: Model
   instr: InstrumentationContext
-  isCompact?: boolean
+  compactType?: CompactType
 }): Promise<Response> => {
   const {
     c,
@@ -419,12 +425,13 @@ const handleWithChatCompletions = async (params: {
     sessionId,
     selectedModel,
     instr,
-    isCompact,
+    compactType,
   } = params
   debugJson(logger, "Translated OpenAI request payload:", openAIPayload)
 
   const ctx = toAccountContext(instr.account)
   const initiator = getChatInitiator(openAIPayload.messages)
+  const isCompact = compactType !== 0
   const effectiveInitiator = resolveEffectiveInitiator(initiator, {
     isCompact,
     isSubagent: Boolean(subagentMarker),
@@ -440,7 +447,7 @@ const handleWithChatCompletions = async (params: {
       initiator: effectiveInitiator,
       subagentMarker,
       sessionId,
-      isCompact,
+      compactType,
     })
     instr.confirmAffinity?.()
     instr.confirmOwnership?.()
@@ -497,7 +504,7 @@ const handleWithResponsesApi = async (params: {
   sessionId?: string
   selectedModel: Model
   instr: InstrumentationContext
-  isCompact?: boolean
+  compactType?: CompactType
 }): Promise<Response> => {
   const {
     c,
@@ -507,7 +514,7 @@ const handleWithResponsesApi = async (params: {
     sessionId,
     selectedModel,
     instr,
-    isCompact,
+    compactType,
   } = params
   const responsesPayload = translateAnthropicMessagesToResponsesPayload(
     anthropicPayload,
@@ -523,6 +530,7 @@ const handleWithResponsesApi = async (params: {
   debugJson(logger, "Translated Responses payload:", responsesPayload)
 
   const { vision, initiator } = getResponsesRequestOptions(responsesPayload)
+  const isCompact = compactType !== 0
   const effectiveInitiator = resolveEffectiveInitiator(initiator, {
     isCompact,
     isSubagent: Boolean(subagentMarker),
@@ -542,7 +550,7 @@ const handleWithResponsesApi = async (params: {
         upstreamRequestId: instr.upstreamRequestId,
         subagentMarker,
         sessionId,
-        isCompact,
+        compactType,
       },
       ctx,
     )
@@ -1367,7 +1375,7 @@ const handleWithMessagesApi = async (params: {
   sessionId?: string
   instr: InstrumentationContext
   selectedModel: Model
-  isCompact?: boolean
+  compactType?: CompactType
 }): Promise<Response> => {
   const {
     c,
@@ -1377,7 +1385,7 @@ const handleWithMessagesApi = async (params: {
     sessionId,
     instr,
     selectedModel,
-    isCompact,
+    compactType,
   } = params
 
   prepareMessagesApiPayload(anthropicPayload, selectedModel)
@@ -1386,6 +1394,7 @@ const handleWithMessagesApi = async (params: {
 
   const ctx = toAccountContext(instr.account)
   const initiator = getMessagesInitiator(anthropicPayload)
+  const isCompact = compactType !== 0
   const effectiveInitiator = resolveEffectiveInitiator(initiator, {
     isCompact,
     isSubagent: Boolean(subagentMarker),
@@ -1402,7 +1411,7 @@ const handleWithMessagesApi = async (params: {
       initiator: effectiveInitiator,
       subagentMarker,
       sessionId,
-      isCompact,
+      compactType,
     })
     instr.confirmAffinity?.()
     instr.confirmOwnership?.()

@@ -1,6 +1,6 @@
 # Copilot API Proxy
 
-English | [中文](./README_CN.md)
+English | [简体中文](./README.zh-CN.md)
 
 > [!WARNING]
 > This is a reverse-engineered proxy of GitHub Copilot API. It is not supported by GitHub, and may break unexpectedly. Use at your own risk. In the current version, if not using opencode OAuth, the device ID and machine ID will be sent to GitHub Copilot. It is not recommended to use a large number of accounts on a single device; if necessary, it is advised to run them in Docker containers.
@@ -44,7 +44,7 @@ English | [中文](./README_CN.md)
 
 ## Project Overview
 
-A reverse-engineered proxy for the GitHub Copilot API that exposes it as an OpenAI and Anthropic compatible service. This allows you to use GitHub Copilot with any tool that supports the OpenAI Chat Completions API or the Anthropic Messages API, including to power [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview).
+A reverse-engineered proxy for the GitHub Copilot API that exposes it as an OpenAI and Anthropic compatible service. This allows you to use GitHub Copilot with any tool that supports the OpenAI Chat Completions / Responses API or the Anthropic Messages API, including to power [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview).
 
 Compared with routing everything through plain Chat Completions compatibility, this proxy can prefer Copilot's native Anthropic-style Messages API for Claude-family models, preserve more native thinking/tool semantics, reduce unnecessary Premium request consumption on warmup or resumed tool turns, and expose phase-aware `gpt-5.4` / `gpt-5.3-codex` responses that are easier for users to follow.
 
@@ -128,10 +128,6 @@ When an Anthropic API key is configured, the proxy forwards Claude model token c
 > [!NOTE]
 > Anthropic's `/v1/messages/count_tokens` endpoint is **free** (no per-token cost). It is rate-limited to 100 RPM at Tier 1. The $5 credit purchase is only needed to activate API access — the token counting calls themselves cost nothing.
 
-## Demo
-
-https://github.com/user-attachments/assets/7654b383-669d-4eb9-b23c-06d7aefee8c5
-
 ## Prerequisites
 
 - Bun (>= 1.2.x)
@@ -143,6 +139,32 @@ To install dependencies, run:
 
 ```sh
 bun install
+```
+
+To start the server directly from source:
+
+```sh
+bun run start start
+```
+
+## Using with npx
+
+You can run the project directly using npx:
+
+```sh
+npx @nick3/copilot-api@latest start
+```
+
+With options:
+
+```sh
+npx @nick3/copilot-api@latest start --port 8080
+```
+
+For authentication only:
+
+```sh
+npx @nick3/copilot-api@latest auth
 ```
 
 ## Using with Docker
@@ -232,26 +254,6 @@ The Docker image includes:
 - Non-root user for enhanced security
 - Health check for container monitoring
 - Pinned base image version for reproducible builds
-
-## Using with npx
-
-You can run the project directly using npx:
-
-```sh
-npx @nick3/copilot-api@latest start
-```
-
-With options:
-
-```sh
-npx @nick3/copilot-api@latest start --port 8080
-```
-
-For authentication only:
-
-```sh
-npx @nick3/copilot-api@latest auth
-```
 
 ## Command Structure
 
@@ -917,13 +919,13 @@ The project can be run from source in several ways:
 ### Development Mode
 
 ```sh
-bun run dev
+bun run dev start
 ```
 
 ### Production Mode
 
 ```sh
-bun run start
+bun run start start
 ```
 
 ## Usage Tips

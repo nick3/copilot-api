@@ -198,6 +198,77 @@ afterEach(() => {
   accountsManager.markAccountFailed = originalMarkFailed
 })
 
+describe("messages handler sanitization", () => {
+  test("removes executeCode and rewrites getDiagnostics before forwarding tools", async () => {
+    let upstreamBody: Record<string, unknown> | undefined
+
+    const selection = buildSelection("/v1/messages", "messages-model")
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    const fetchMock = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = parseFetchBody(opts?.body)
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildAnthropicResponse("messages-model", "messages")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          createPayload({
+            tools: [
+              {
+                name: "mcp__ide__executeCode",
+                description: "Execute code in VS Code",
+                input_schema: { type: "object" },
+              },
+              {
+                name: "mcp__ide__getDiagnostics",
+                description: "Old description",
+                input_schema: { type: "object" },
+              },
+              {
+                name: "keep_me",
+                description: "Keep me",
+                input_schema: { type: "object" },
+              },
+            ],
+          }),
+        ),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(upstreamBody?.tools).toEqual([
+      {
+        name: "mcp__ide__getDiagnostics",
+        description:
+          "Get language diagnostics from VS Code. Returns errors, warnings, information, and hints for files in the workspace.",
+        input_schema: { type: "object" },
+      },
+      {
+        name: "keep_me",
+        description: "Keep me",
+        input_schema: { type: "object" },
+      },
+    ])
+    expect(selection.confirmAffinity).toHaveBeenCalledTimes(1)
+    expect(selection.confirmOwnership).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe("messages handler routing", () => {
   test("routes to the Messages API when selection chooses /v1/messages", async () => {
     let requestedUrl = ""

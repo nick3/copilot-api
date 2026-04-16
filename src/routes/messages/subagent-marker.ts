@@ -1,14 +1,9 @@
+import { subagentMarkerPrefix, type SubagentMarker } from "~/lib/subagent"
+
 import type { AnthropicMessagesPayload } from "./anthropic-types"
 
-const subagentMarkerPrefix = "__SUBAGENT_MARKER__"
 const subagentStartContextPrefix = "SubagentStart hook additional context:"
 const REMINDER_RE = /<system-reminder>([\s\S]*?)<\/system-reminder>/g
-
-export interface SubagentMarker {
-  session_id: string
-  agent_id: string
-  agent_type: string
-}
 
 export type SubagentMarkerInspection =
   | { kind: "none"; marker: null }
