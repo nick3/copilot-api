@@ -16,6 +16,10 @@ import type {
 
 import { initAdminDb } from "~/lib/admin-db"
 import {
+  captureOutboundHeadersSnapshot,
+  requestContext,
+} from "~/lib/request-context"
+import {
   RequestHistoryStore,
   extractResponsesUsageFromResult,
   extractResponsesUsageFromStreamEvent,
@@ -238,9 +242,114 @@ describe("RequestHistoryStore", () => {
     expect(row?.affinity_key_source).toBe("x_session_id")
     expect(row?.selection_reason).toBe("affinity_miss")
     expect(row?.upstream_error_message_raw).toBe("test error body")
-    expect(store.meta().userVersion).toBeGreaterThanOrEqual(7)
+    expect(store.meta().userVersion).toBeGreaterThanOrEqual(11)
   })
 
+  test("initAdminDb adds outbound header columns and store persists them", () => {
+    const db = new Database(":memory:")
+    initAdminDb(db)
+
+    const columns = db
+      .query("PRAGMA table_info(request_log);")
+      .all()
+      .map((row) => (row as { name: string }).name)
+
+    expect(columns).toContain("outbound_x_request_id")
+    expect(columns).toContain("outbound_x_agent_task_id")
+    expect(columns).toContain("outbound_x_interaction_type")
+    expect(columns).toContain("outbound_openai_intent")
+    expect(columns).toContain("outbound_user_agent")
+
+    const store = new RequestHistoryStore(db)
+
+    store.insert({
+      requestId: "r-outbound",
+      startedAtMs: 2000,
+      method: "POST",
+      path: "/v1/messages",
+      stream: false,
+      httpStatus: 200,
+      outboundXRequestId: "upstream-req-1",
+      outboundXAgentTaskId: "agent-task-1",
+      outboundXInteractionType: "messages-proxy",
+      outboundOpenaiIntent: "messages-proxy",
+      outboundUserAgent: "vscode_claude_code/2.1.81",
+    } as never)
+
+    const row = store.getByRequestId("r-outbound") as
+      | (Record<string, unknown> & { request_id?: string })
+      | null
+
+    expect(row?.request_id).toBe("r-outbound")
+    expect(row?.outbound_x_request_id).toBe("upstream-req-1")
+    expect(row?.outbound_x_agent_task_id).toBe("agent-task-1")
+    expect(row?.outbound_x_interaction_type).toBe("messages-proxy")
+    expect(row?.outbound_openai_intent).toBe("messages-proxy")
+    expect(row?.outbound_user_agent).toBe("vscode_claude_code/2.1.81")
+    expect(store.meta().userVersion).toBe(11)
+  })
+
+  test("store.insert consumes outbound snapshot after the first write", () => {
+    const db = new Database(":memory:")
+    initAdminDb(db)
+
+    const store = new RequestHistoryStore(db)
+
+    requestContext.run(
+      {
+        traceId: "trace-1",
+        startTime: 1,
+        userAgent: "Claude-Code-Test",
+        sessionAffinity: undefined,
+        parentSessionId: undefined,
+      },
+      () => {
+        captureOutboundHeadersSnapshot({
+          "x-request-id": "upstream-req-2",
+          "x-agent-task-id": "agent-task-2",
+          "x-interaction-type": "messages-proxy",
+          "openai-intent": "messages-proxy",
+          "user-agent": "vscode_claude_code/2.1.81",
+        })
+
+        store.insert({
+          requestId: "r-snapshot-1",
+          startedAtMs: 3000,
+          method: "POST",
+          path: "/v1/messages",
+          stream: false,
+          httpStatus: 200,
+        } as never)
+
+        store.insert({
+          requestId: "r-snapshot-2",
+          startedAtMs: 4000,
+          method: "POST",
+          path: "/v1/messages",
+          stream: false,
+          httpStatus: 200,
+        } as never)
+      },
+    )
+
+    const firstRow = store.getByRequestId("r-snapshot-1") as
+      | (Record<string, unknown> & { request_id?: string })
+      | null
+    const secondRow = store.getByRequestId("r-snapshot-2") as
+      | (Record<string, unknown> & { request_id?: string })
+      | null
+
+    expect(firstRow?.outbound_x_request_id).toBe("upstream-req-2")
+    expect(firstRow?.outbound_user_agent).toBe("vscode_claude_code/2.1.81")
+    expect(secondRow?.outbound_x_request_id).toBeNull()
+    expect(secondRow?.outbound_x_agent_task_id).toBeNull()
+    expect(secondRow?.outbound_x_interaction_type).toBeNull()
+    expect(secondRow?.outbound_openai_intent).toBeNull()
+    expect(secondRow?.outbound_user_agent).toBeNull()
+  })
+})
+
+describe("RequestHistoryStore migrations", () => {
   test("initAdminDb is idempotent when is_subagent already exists but user_version is stale", () => {
     const db = new Database(":memory:")
     initAdminDb(db)
@@ -262,10 +371,77 @@ describe("RequestHistoryStore", () => {
     expect(columns).toContain("affinity_key_source")
     expect(columns).toContain("selection_reason")
     expect(columns).toContain("upstream_error_message_raw")
+    expect(columns).toContain("outbound_x_request_id")
+    expect(columns).toContain("outbound_x_agent_task_id")
+    expect(columns).toContain("outbound_x_interaction_type")
+    expect(columns).toContain("outbound_openai_intent")
+    expect(columns).toContain("outbound_user_agent")
 
-    expect(db.query("PRAGMA user_version;").get()).toEqual({ user_version: 10 })
+    expect(db.query("PRAGMA user_version;").get()).toEqual({ user_version: 11 })
   })
 
+  test("initAdminDb upgrades v10 to v11 without replaying quota backfill", () => {
+    const db = new Database(":memory:")
+    initAdminDb(db)
+
+    db.run(
+      `INSERT INTO request_log (
+        request_id,
+        started_at_ms,
+        finished_at_ms,
+        method,
+        path,
+        stream,
+        account_id,
+        premium_remaining_after,
+        premium_unlimited_after,
+        http_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        "r-v10-upgrade",
+        1000,
+        2000,
+        "POST",
+        "/v1/messages",
+        0,
+        "acct-upgrade",
+        42,
+        0,
+        200,
+      ],
+    )
+
+    db.run(
+      `INSERT INTO quota_snapshots (
+        account_id,
+        snapshot_at_ms,
+        remaining,
+        entitlement,
+        unlimited,
+        source
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+      ["acct-upgrade", 2000, 42, 0, 0, "backfill"],
+    )
+
+    db.run("PRAGMA user_version = 10;")
+
+    initAdminDb(db)
+
+    const row = db
+      .query(
+        `SELECT COUNT(*) AS count
+         FROM quota_snapshots
+         WHERE account_id = 'acct-upgrade'
+           AND snapshot_at_ms = 2000`,
+      )
+      .get() as { count: number }
+
+    expect(row.count).toBe(1)
+    expect(db.query("PRAGMA user_version;").get()).toEqual({ user_version: 11 })
+  })
+})
+
+describe("RequestHistoryStore queries and stats", () => {
   test("query orders by id DESC and supports cursor paging", () => {
     const db = new Database(":memory:")
     initAdminDb(db)

@@ -17,6 +17,7 @@ import {
 } from "~/lib/api-config"
 import { isForceAgentEnabled } from "~/lib/config"
 import { HTTPError } from "~/lib/error"
+import { captureOutboundHeadersSnapshot } from "~/lib/request-context"
 import { resolveEffectiveInitiator } from "~/lib/request-initiator"
 import { accountFromState } from "~/lib/state"
 import { parseUserIdMetadata } from "~/lib/utils"
@@ -206,6 +207,8 @@ export const createMessages = async (
     options,
     payload,
   })
+
+  captureOutboundHeadersSnapshot(headers)
 
   const response = await fetch(`${copilotBaseUrl(ctx)}/v1/messages`, {
     method: "POST",

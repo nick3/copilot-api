@@ -269,13 +269,49 @@ function migrateV10(db: Database): void {
   db.run("PRAGMA user_version = 10;")
 }
 
+function migrateV11(db: Database): void {
+  const outboundHeaderColumns = [
+    "outbound_x_request_id",
+    "outbound_x_agent_task_id",
+    "outbound_x_interaction_type",
+    "outbound_openai_intent",
+    "outbound_user_agent",
+  ] as const
+
+  for (const columnName of outboundHeaderColumns) {
+    if (!hasRequestLogColumn(db, columnName)) {
+      db.run(`ALTER TABLE request_log ADD COLUMN ${columnName} TEXT;`)
+    }
+  }
+
+  db.run("PRAGMA user_version = 11;")
+}
+
+function migrateV8ToV11(db: Database, current: number): void {
+  if (current < 8) {
+    migrateV8(db)
+  }
+
+  if (current < 9) {
+    migrateV9(db)
+  }
+
+  if (current < 10) {
+    migrateV10(db)
+  }
+
+  if (current < 11) {
+    migrateV11(db)
+  }
+}
+
 function migrateAdminDb(db: Database): void {
   const row = db.query("PRAGMA user_version;").get() as {
     user_version?: number
   } | null
   const current = row?.user_version ?? 0
 
-  if (current >= 10) {
+  if (current >= 11) {
     return
   }
 
@@ -371,7 +407,5 @@ function migrateAdminDb(db: Database): void {
     db.run("PRAGMA user_version = 7;")
   }
 
-  migrateV8(db)
-  migrateV9(db)
-  migrateV10(db)
+  migrateV8ToV11(db, current)
 }

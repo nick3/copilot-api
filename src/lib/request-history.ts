@@ -18,6 +18,7 @@ import type { AccountSelectionReason } from "./accounts-manager"
 import type { AffinityKeySource } from "./utils"
 
 import { getAdminDb, getAdminDbPath, getAdminDbUserVersion } from "./admin-db"
+import { consumeOutboundHeadersSnapshot } from "./request-context"
 import { StatsStore } from "./stats-store"
 
 const DEFAULT_RETENTION_DAYS = 14
@@ -196,6 +197,11 @@ export type RequestLogInsert = {
   initiator?: "agent" | "user"
   isSubagent?: boolean
   upstreamRequestId?: string
+  outboundXRequestId?: string
+  outboundXAgentTaskId?: string
+  outboundXInteractionType?: string
+  outboundOpenaiIntent?: string
+  outboundUserAgent?: string
   affinityKeyUsed?: string
   affinityKeySource?: AffinityKeySource
   selectionReason?: AccountSelectionReason
@@ -252,6 +258,11 @@ export type RequestLogRow = {
   initiator: string | null
   is_subagent: number | null
   upstream_request_id: string | null
+  outbound_x_request_id: string | null
+  outbound_x_agent_task_id: string | null
+  outbound_x_interaction_type: string | null
+  outbound_openai_intent: string | null
+  outbound_user_agent: string | null
   affinity_key_used: string | null
   affinity_key_source: string | null
   selection_reason: string | null
@@ -315,6 +326,98 @@ export type AccountStatsRow = {
   last_request_at_ms: number
 }
 
+function pickRecordedHeader(
+  explicitValue: string | undefined,
+  snapshotValue: string | undefined,
+): string | undefined {
+  return explicitValue ?? snapshotValue
+}
+
+function buildInsertArgs(record: RequestLogInsert) {
+  const outboundHeadersSnapshot = consumeOutboundHeadersSnapshot()
+  const recordedOutboundHeaders = {
+    xRequestId: pickRecordedHeader(
+      record.outboundXRequestId,
+      outboundHeadersSnapshot?.xRequestId,
+    ),
+    xAgentTaskId: pickRecordedHeader(
+      record.outboundXAgentTaskId,
+      outboundHeadersSnapshot?.xAgentTaskId,
+    ),
+    xInteractionType: pickRecordedHeader(
+      record.outboundXInteractionType,
+      outboundHeadersSnapshot?.xInteractionType,
+    ),
+    openaiIntent: pickRecordedHeader(
+      record.outboundOpenaiIntent,
+      outboundHeadersSnapshot?.openaiIntent,
+    ),
+    userAgent: pickRecordedHeader(
+      record.outboundUserAgent,
+      outboundHeadersSnapshot?.userAgent,
+    ),
+  }
+
+  return [
+    record.requestId,
+    record.startedAtMs,
+    toDbNull(record.finishedAtMs),
+    toDbNull(record.durationMs),
+    toDbNull(record.ttfbMs),
+
+    record.method,
+    record.path,
+    toDbNull(record.upstreamEndpoint),
+    record.stream ? 1 : 0,
+
+    toDbNull(record.accountId),
+    toDbNull(record.accountType),
+    toDbNull(record.costUnits),
+    toDbNull(record.clientModel),
+    toDbNull(record.upstreamModel),
+
+    toDbNull(record.clientIp),
+    toDbNull(record.clientIpSource),
+    toDbNull(record.userAgent),
+    toDbNull(record.userId),
+    toDbNull(record.safetyIdentifier),
+    toDbNull(record.promptCacheKey),
+    toDbNull(record.initiator),
+    toDbBool(record.isSubagent),
+    toDbNull(record.upstreamRequestId),
+    toDbNull(recordedOutboundHeaders.xRequestId),
+    toDbNull(recordedOutboundHeaders.xAgentTaskId),
+    toDbNull(recordedOutboundHeaders.xInteractionType),
+    toDbNull(recordedOutboundHeaders.openaiIntent),
+    toDbNull(recordedOutboundHeaders.userAgent),
+    toDbNull(record.affinityKeyUsed),
+    toDbNull(record.affinityKeySource),
+    toDbNull(record.selectionReason),
+
+    toDbNull(record.tokensInput),
+    toDbNull(record.tokensOutput),
+    toDbNull(record.tokensTotal),
+    toDbNull(record.tokensCachedInput),
+    toDbNull(record.usageJson),
+
+    toDbNull(record.premiumRemainingBefore),
+    toDbNull(record.premiumRemainingAfter),
+    toDbNull(record.premiumRemainingDiff),
+    toDbBool(record.premiumUnlimitedBefore),
+    toDbBool(record.premiumUnlimitedAfter),
+
+    toDbNull(record.httpStatus),
+    toDbNull(record.errorName),
+    toDbNull(record.errorStatus),
+    toDbNull(record.errorMessage),
+    toDbNull(record.upstreamErrorMessageRaw),
+    toDbNull(record.selectionFailureReason),
+
+    toDbBool(record.affinityHit),
+    toDbNull(record.affinityCacheKey),
+  ] as const
+}
+
 export class RequestHistoryStore {
   private readonly db: Database
   private readonly insertStmt: ReturnType<Database["query"]>
@@ -327,60 +430,61 @@ export class RequestHistoryStore {
   constructor(db: Database) {
     this.db = db
 
+    const insertColumns = [
+      "request_id",
+      "started_at_ms",
+      "finished_at_ms",
+      "duration_ms",
+      "ttfb_ms",
+      "method",
+      "path",
+      "upstream_endpoint",
+      "stream",
+      "account_id",
+      "account_type",
+      "cost_units",
+      "client_model",
+      "upstream_model",
+      "client_ip",
+      "client_ip_source",
+      "user_agent",
+      "user_id",
+      "safety_identifier",
+      "prompt_cache_key",
+      "initiator",
+      "is_subagent",
+      "upstream_request_id",
+      "outbound_x_request_id",
+      "outbound_x_agent_task_id",
+      "outbound_x_interaction_type",
+      "outbound_openai_intent",
+      "outbound_user_agent",
+      "affinity_key_used",
+      "affinity_key_source",
+      "selection_reason",
+      "tokens_input",
+      "tokens_output",
+      "tokens_total",
+      "tokens_cached_input",
+      "usage_json",
+      "premium_remaining_before",
+      "premium_remaining_after",
+      "premium_remaining_diff",
+      "premium_unlimited_before",
+      "premium_unlimited_after",
+      "http_status",
+      "error_name",
+      "error_status",
+      "error_message",
+      "upstream_error_message_raw",
+      "selection_failure_reason",
+      "affinity_hit",
+      "affinity_cache_key",
+    ]
+
     this.insertStmt = db.query(`
-      INSERT INTO request_log (
-        request_id,
-        started_at_ms,
-        finished_at_ms,
-        duration_ms,
-        ttfb_ms,
-        method,
-        path,
-        upstream_endpoint,
-        stream,
-        account_id,
-        account_type,
-        cost_units,
-        client_model,
-        upstream_model,
-        client_ip,
-        client_ip_source,
-        user_agent,
-        user_id,
-        safety_identifier,
-        prompt_cache_key,
-        initiator,
-        is_subagent,
-        upstream_request_id,
-        affinity_key_used,
-        affinity_key_source,
-        selection_reason,
-        tokens_input,
-        tokens_output,
-        tokens_total,
-        tokens_cached_input,
-        usage_json,
-        premium_remaining_before,
-        premium_remaining_after,
-        premium_remaining_diff,
-        premium_unlimited_before,
-        premium_unlimited_after,
-        http_status,
-        error_name,
-        error_status,
-        error_message,
-        upstream_error_message_raw,
-        selection_failure_reason,
-        affinity_hit,
-        affinity_cache_key
-      ) VALUES (
-        ?,?,?,?,?,?,?,?,
-        ?,?,?,?,?,?,?,?,
-        ?,?,?,?,?,?,?,?,
-        ?,?,?,?,?,?,?,?,
-        ?,?,?,?,?,?,?,?,
-        ?,?,?,?
-      );
+      INSERT INTO request_log (${insertColumns.join(", ")})
+      VALUES (${insertColumns.map(() => "?").join(", ")});
     `)
 
     this.getByRequestIdStmt = db.query(
@@ -406,59 +510,7 @@ export class RequestHistoryStore {
 
   insert(record: RequestLogInsert): void {
     try {
-      const args = [
-        record.requestId,
-        record.startedAtMs,
-        toDbNull(record.finishedAtMs),
-        toDbNull(record.durationMs),
-        toDbNull(record.ttfbMs),
-
-        record.method,
-        record.path,
-        toDbNull(record.upstreamEndpoint),
-        record.stream ? 1 : 0,
-
-        toDbNull(record.accountId),
-        toDbNull(record.accountType),
-        toDbNull(record.costUnits),
-        toDbNull(record.clientModel),
-        toDbNull(record.upstreamModel),
-
-        toDbNull(record.clientIp),
-        toDbNull(record.clientIpSource),
-        toDbNull(record.userAgent),
-        toDbNull(record.userId),
-        toDbNull(record.safetyIdentifier),
-        toDbNull(record.promptCacheKey),
-        toDbNull(record.initiator),
-        toDbBool(record.isSubagent),
-        toDbNull(record.upstreamRequestId),
-        toDbNull(record.affinityKeyUsed),
-        toDbNull(record.affinityKeySource),
-        toDbNull(record.selectionReason),
-
-        toDbNull(record.tokensInput),
-        toDbNull(record.tokensOutput),
-        toDbNull(record.tokensTotal),
-        toDbNull(record.tokensCachedInput),
-        toDbNull(record.usageJson),
-
-        toDbNull(record.premiumRemainingBefore),
-        toDbNull(record.premiumRemainingAfter),
-        toDbNull(record.premiumRemainingDiff),
-        toDbBool(record.premiumUnlimitedBefore),
-        toDbBool(record.premiumUnlimitedAfter),
-
-        toDbNull(record.httpStatus),
-        toDbNull(record.errorName),
-        toDbNull(record.errorStatus),
-        toDbNull(record.errorMessage),
-        toDbNull(record.upstreamErrorMessageRaw),
-        toDbNull(record.selectionFailureReason),
-
-        toDbBool(record.affinityHit),
-        toDbNull(record.affinityCacheKey),
-      ] as const
+      const args = buildInsertArgs(record)
 
       this.insertStmt.run(...args)
 

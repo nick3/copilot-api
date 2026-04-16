@@ -6,6 +6,7 @@ import type {
   AnthropicUserMessage,
 } from "../src/routes/messages/anthropic-types"
 
+import { requestContext } from "../src/lib/request-context"
 import { createMessages } from "../src/services/copilot/create-messages"
 
 type FetchOpts = {
@@ -145,4 +146,39 @@ test("enables vision headers for images nested inside tool results", async () =>
   await createMessages(payload, accountContext)
 
   expect(getLastHeaders()["copilot-vision-request"]).toBe("true")
+})
+
+test("captures final outbound headers after messages-proxy overrides", async () => {
+  const payload = {
+    ...basePayload([{ type: "text", text: "hello" }]),
+    metadata: {
+      user_id: "user_safety123_account_session_session-123",
+    },
+  } satisfies AnthropicMessagesPayload
+
+  await requestContext.run(
+    {
+      traceId: "trace-1",
+      startTime: Date.now(),
+      userAgent: "Claude-Code-Test",
+      sessionAffinity: undefined,
+      parentSessionId: undefined,
+    },
+    async () => {
+      await createMessages(payload, accountContext, {
+        upstreamRequestId: "request-original",
+      })
+
+      const outboundHeaders = requestContext.getStore()?.outboundHeaders
+
+      expect(outboundHeaders?.xRequestId).toBeDefined()
+      expect(outboundHeaders?.xRequestId).not.toBe("request-original")
+      expect(outboundHeaders?.xAgentTaskId).toBe(outboundHeaders?.xRequestId)
+      expect(outboundHeaders?.xInteractionType).toBe("messages-proxy")
+      expect(outboundHeaders?.openaiIntent).toBe("messages-proxy")
+      expect(outboundHeaders?.userAgent).toBe(
+        "vscode_claude_code/2.1.81 (external, sdk-ts, agent-sdk/0.2.81)",
+      )
+    },
+  )
 })

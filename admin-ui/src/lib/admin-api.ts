@@ -36,6 +36,11 @@ type AdminRequestItemWire = {
   initiator?: string
   is_subagent?: number | null
   upstream_request_id?: string
+  outbound_x_request_id?: string
+  outbound_x_agent_task_id?: string
+  outbound_x_interaction_type?: string
+  outbound_openai_intent?: string
+  outbound_user_agent?: string
 
   affinity_hit?: number | null
   affinity_cache_key?: string | null
@@ -52,11 +57,21 @@ export type AdminRequestItem = Omit<AdminRequestItemWire, "is_subagent"> & {
   is_subagent?: boolean | null
 }
 
-export function normalizeAdminRequestItem(wire: AdminRequestItemWire): AdminRequestItem {
+export function normalizeAdminRequestItem(
+  wire: AdminRequestItemWire,
+): AdminRequestItem {
   const { is_subagent, ...rest } = wire
+
+  let normalizedIsSubagent: boolean | null = null
+  if (is_subagent === 1) {
+    normalizedIsSubagent = true
+  } else if (is_subagent === 0) {
+    normalizedIsSubagent = false
+  }
+
   return {
     ...rest,
-    is_subagent: is_subagent === 1 ? true : is_subagent === 0 ? false : null,
+    is_subagent: normalizedIsSubagent,
   }
 }
 
