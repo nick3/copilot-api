@@ -3,7 +3,7 @@
 English | [简体中文](./README.zh-CN.md)
 
 > [!WARNING]
-> This is a reverse-engineered proxy of GitHub Copilot API. It is not supported by GitHub, and may break unexpectedly. Use at your own risk. In the current version, if not using opencode OAuth, the device ID and machine ID will be sent to GitHub Copilot. It is not recommended to use a large number of accounts on a single device; if necessary, it is advised to run them in Docker containers.
+> This is a reverse-engineered proxy of GitHub Copilot API. It is not supported by GitHub, and may break unexpectedly. Use at your own risk. In the current version, if not using opencode OAuth, the device ID and machine ID will be sent to GitHub Copilot.
 
 > [!WARNING]
 > **GitHub Security Notice:**  

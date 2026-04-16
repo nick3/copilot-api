@@ -3,7 +3,7 @@
 [English](./README.md) | 简体中文
 
 > [!WARNING]
-> 这是一个通过逆向工程实现的 GitHub Copilot API 代理。它不受 GitHub 官方支持，并且可能随时异常失效。请自行承担使用风险。当前版本中，如果不使用 opencode OAuth，设备 ID 和机器 ID 会被发送给 GitHub Copilot。不建议在单台设备上使用大量账号；如确有需要，建议放在 Docker 容器中运行。
+> 这是一个通过逆向工程实现的 GitHub Copilot API 代理，不受 GitHub 官方支持，并且可能随时异常失效。请自行承担使用风险。当前版本中，如果不使用 opencode OAuth，设备 ID 和机器 ID 会被发送给 GitHub Copilot。
 
 > [!WARNING]
 > **GitHub 安全提示：**  
@@ -22,7 +22,7 @@
 ---
 
 > [!NOTE]
-> [opencode](https://github.com/sst/opencode) 已经内置 GitHub Copilot provider，因此在基础使用场景下你未必需要本项目。如果你希望 OpenCode 通过 `@ai-sdk/anthropic` 接入 Copilot、保留 Anthropic Messages 的工具调用语义、对 Claude 系模型优先走原生 Messages API 而不是 Chat Completions API、使用带阶段提示的 gpt commentary，或者优化 premium request 的消耗，这个代理仍然很有价值。
+> [opencode](https://github.com/sst/opencode) 已经内置 GitHub Copilot provider，因此在基础使用场景下你未必需要本项目。如果你希望 OpenCode 通过 `@ai-sdk/anthropic` 接入 Copilot、保留 Anthropic Messages 的工具调用语义、让 Claude 系模型优先走原生 Messages API 而不是 Chat Completions API、使用带阶段感知的 gpt commentary，或者进一步优化 premium requests 的消耗，这个代理仍然很有价值。
 
 ---
 
@@ -31,7 +31,7 @@
 > [!IMPORTANT]
 > **使用前请先注意以下几点：**
 >
-> 1. **Claude Code 配置：** 与 Claude Code 搭配使用时，请将模型 ID 配置为 `claude-opus-4-6` 或 `claude-opus-4.6`（不要带 `[1m]` 后缀，超出 GitHub Copilot 上下文窗口限制太多可能导致账号被封）。示例 claude `settings.json` 见 [通过 `settings.json` 手动配置](#manual-configuration-with-settingsjson)。
+> 1. **Claude Code 配置：** 与 Claude Code 搭配使用时，请将模型 ID 配置为 `claude-opus-4-6` 或 `claude-opus-4.6`（不要带 `[1m]` 后缀，超出 GitHub Copilot 上下文窗口限制太多可能导致账号被封）。示例 `settings.json` 见 [通过 `settings.json` 手动配置](#manual-configuration-with-settingsjson)。
 >
 > 2. **推荐给 opencode 用户：** 与 opencode 搭配时，推荐优先使用 opencode OAuth app 启动。该方式与 opencode 内置的 GitHub Copilot provider 行为一致，且不存在 Terms of Service 风险：
 >    ```sh
@@ -58,12 +58,14 @@
 - **Subagent 标记集成**：Claude Code 与 opencode 插件可以注入 `__SUBAGENT_MARKER__...`，并传递 `x-session-id`，从而让 subagent 流量保留正确的根会话以及 agent/user 语义。
 - **通过 `@ai-sdk/anthropic` 接入 OpenCode**：可以将 OpenCode 指向这个代理作为 Anthropic provider，从而端到端保留 Anthropic Messages 语义、premium request 优化以及更原生的 Claude 行为。
 - **Claude Code 集成**：可通过简单的命令行参数（`--claude-code`）快速配置并启动 [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) 使用 Copilot 作为后端。
-- **使用量看板**：提供基于 Web 的看板，用于监控 Copilot API 使用情况、查看额度以及详细统计数据。
-- **速率限制控制**：通过速率限制选项（`--rate-limit`）和等待机制（`--wait`）管理 API 使用，避免因请求过快而报错。
+- **用量看板**：提供基于 Web 的看板，用于监控你的 Copilot API 使用情况、查看额度以及详细统计数据。
+- **Admin UI**：提供现代化管理控制台（`/admin`），可查看账号运行状态与请求历史，支持丰富过滤和请求详情 JSON 查看器（搜索/复制/下载），并包含主题（system/light/dark）与动效（magic/subtle/off）切换。
+- **速率控制**：通过速率限制选项（`--rate-limit`）和等待机制（`--wait`）管理 API 使用，避免因请求过快而报错。
 - **手动请求审批**：可对每个 API 请求进行手动批准或拒绝，实现更细粒度的使用控制（`--manual`）。
 - **令牌可见性**：可在认证和刷新期间显示 GitHub 与 Copilot token，便于调试（`--show-token`）。
 - **灵活认证方式**：既可交互式认证，也可以直接传入 GitHub token，适合 CI/CD 等非交互环境。
 - **支持不同账号类型**：兼容个人版、Business 和 Enterprise 的 GitHub Copilot 方案。
+- **多账号支持**：使用多个 GitHub Copilot 账号并自动路由：Premium 模型按账号顺序尝试，并在配额耗尽时自动回退；免费模型默认在多个账号之间轮转分发（可在 `config.json` 中配置）。
 - **支持 opencode OAuth**：可通过设置环境变量 `COPILOT_API_OAUTH_APP=opencode` 或使用命令行参数 `--oauth-app=opencode` 来启用 opencode GitHub Copilot 认证。
 - **支持 GitHub Enterprise**：可通过设置环境变量 `COPILOT_API_ENTERPRISE_URL`（例如 `company.ghe.com`）或命令行参数 `--enterprise-url=company.ghe.com` 连接到 GHE.com。
 - **自定义数据目录**：可通过环境变量 `COPILOT_API_HOME` 或命令行参数 `--api-home=/path/to/dir` 修改默认数据目录（存放 token 和配置）。
@@ -188,7 +190,25 @@ docker run -p 4141:4141 -v $(pwd)/copilot-data:/root/.local/share/copilot-api co
 ```
 
 > **注意：**
-> GitHub token 及相关数据会保存在宿主机的 `copilot-data` 目录中。该目录会映射到容器内的 `/root/.local/share/copilot-api`，从而在容器重启后继续保留数据。
+> GitHub token 及相关数据会保存在宿主机的 `copilot-data` 目录中。该目录会映射到容器内的 `/root/.local/share/copilot-api`，从而在容器重启后继续保留数据。这个目录还会保存 `/admin` 使用的管理端请求历史数据库（`admin.sqlite`）。
+
+### 在 Docker 中添加多个账号
+
+如果你在 Docker 中运行并希望添加多个账号：
+
+> **注意：** Docker 镜像默认使用的 entrypoint 会直接执行 `start` 命令。因此如果你想在容器内运行 `auth` 子命令，需要加上 `--auth` 前缀（例如 `--auth add`）。
+
+```sh
+# 交互式添加账号（一次一个）
+docker run -it -v $(pwd)/copilot-data:/root/.local/share/copilot-api copilot-api --auth add
+docker run -it -v $(pwd)/copilot-data:/root/.local/share/copilot-api copilot-api --auth add
+
+# 列出已注册账号
+docker run -it -v $(pwd)/copilot-data:/root/.local/share/copilot-api copilot-api --auth ls -q
+```
+
+> **注意：** 使用多账号时，所有账号数据（token 与注册表）都会保存在挂载的 `copilot-data` 目录中。
+> Premium 模型请求会按账号顺序尝试，并在 premium 配额耗尽时自动切换；免费模型请求默认会在多个账号间轮转分发（可在 `config.json` 中配置）。
 
 ### 在 Docker 中使用环境变量
 
@@ -201,8 +221,17 @@ docker build --build-arg GH_TOKEN=your_github_token_here -t copilot-api .
 # 运行时注入 GitHub token
 docker run -p 4141:4141 -e GH_TOKEN=your_github_token_here copilot-api
 
+# （可选）启用远程 Admin UI/API 访问
+# 这需要设置 ADMIN_TOKEN，并通过请求头发送（x-admin-token / Authorization: Bearer）
+docker run -p 4141:4141 -e GH_TOKEN=your_github_token_here -e ADMIN_TOKEN=your_admin_token_here copilot-api
+
+# （可选）启用请求鉴权
+# 推荐方式：在 config.json 中配置 auth.apiKeys。
+# 兼容迁移场景时，仍支持旧的 COPILOT_API_KEY。
+docker run -p 4141:4141 -e GH_TOKEN=your_github_token_here -e COPILOT_API_KEY=your_api_key_here copilot-api
+
 # 搭配附加选项运行
-docker run -p 4141:4141 -e GH_TOKEN=your_token copilot-api start --verbose --port 4141
+docker run -p 4141:4141 -e GH_TOKEN=your_token copilot-api --verbose --port 4141
 ```
 
 ### Docker Compose 示例
@@ -216,6 +245,8 @@ services:
       - "4141:4141"
     environment:
       - GH_TOKEN=your_github_token_here
+      - ADMIN_TOKEN=your_admin_token_here
+      - COPILOT_API_KEY=your_api_key_here
     restart: unless-stopped
 ```
 
@@ -231,7 +262,12 @@ Docker 镜像包含：
 Copilot API 现在使用子命令结构，主要命令包括：
 
 - `start`：启动 Copilot API 服务。如有需要，也会自动处理认证。
-- `auth`：仅执行 GitHub 认证流程，不启动服务。通常用于生成可与 `--github-token` 一起使用的 token，尤其适合非交互环境。
+- `auth`：管理 GitHub Copilot 账号。支持以下子命令：
+  - `auth add`：通过 GitHub OAuth 流程添加新账号
+  - `auth ls`：列出所有已注册账号（使用 `-q` 显示配额）
+  - `auth rm <id|index>`：按账号 ID 或 1-based 索引删除账号
+
+  为兼容旧行为，不带子命令直接执行 `auth` 时，默认等价于 `auth add`。
 - `check-usage`：直接在终端中显示当前 GitHub Copilot 用量与额度信息（无需启动服务）。
 - `debug`：显示诊断信息，包括版本、运行时详情、文件路径以及认证状态，便于排障与支持。
 
@@ -243,9 +279,9 @@ Copilot API 现在使用子命令结构，主要命令包括：
 
 | 选项 | 说明 | 默认值 | 别名 |
 | --- | --- | --- | --- |
-| --api-home | API home 目录路径（设置 `COPILOT_API_HOME`） | 无 | 无 |
-| --oauth-app | OAuth app 标识符（设置 `COPILOT_API_OAUTH_APP`） | 无 | 无 |
-| --enterprise-url | GitHub Enterprise URL（设置 `COPILOT_API_ENTERPRISE_URL`） | 无 | 无 |
+| `--api-home` | API home 目录路径（设置 `COPILOT_API_HOME`） | 无 | 无 |
+| `--oauth-app` | OAuth app 标识符（设置 `COPILOT_API_OAUTH_APP`） | 无 | 无 |
+| `--enterprise-url` | GitHub Enterprise URL（设置 `COPILOT_API_ENTERPRISE_URL`） | 无 | 无 |
 
 ### Start 命令选项
 
@@ -253,29 +289,50 @@ Copilot API 现在使用子命令结构，主要命令包括：
 
 | 选项 | 说明 | 默认值 | 别名 |
 | --- | --- | --- | --- |
-| --port | 监听端口 | 4141 | -p |
-| --verbose | 启用详细日志 | false | -v |
-| --account-type | 使用的账号类型（individual、business、enterprise） | individual | -a |
-| --manual | 启用手动请求审批 | false | 无 |
-| --rate-limit | 请求之间的速率限制秒数 | 无 | -r |
-| --wait | 达到速率限制时等待，而不是直接报错 | false | -w |
-| --github-token | 直接提供 GitHub token（必须通过 `auth` 子命令生成） | 无 | -g |
-| --claude-code | 生成一个使用 Copilot API 配置启动 Claude Code 的命令 | false | -c |
-| --show-token | 在获取和刷新时显示 GitHub 与 Copilot token | false | 无 |
-| --proxy-env | 从环境变量初始化代理 | false | 无 |
+| `--port` | 监听端口 | `4141` | `-p` |
+| `--verbose` | 启用详细日志 | `false` | `-v` |
+| `--account-type` | 使用的账号类型（individual、business、enterprise） | `individual` | `-a` |
+| `--manual` | 启用手动请求审批 | `false` | 无 |
+| `--rate-limit` | 请求之间的速率限制秒数 | 无 | `-r` |
+| `--wait` | 达到速率限制时等待，而不是直接报错 | `false` | `-w` |
+| `--github-token` | 直接提供 GitHub token（必须通过 `auth` 子命令生成） | 无 | `-g` |
+| `--claude-code` | 生成一个使用 Copilot API 配置启动 Claude Code 的命令 | `false` | `-c` |
+| `--show-token` | 在获取和刷新时显示 GitHub 与 Copilot token | `false` | 无 |
+| `--proxy-env` | 从环境变量初始化代理 | `false` | 无 |
 
 ### Auth 命令选项
 
+`auth` 命令提供三个子命令来管理多账号：
+
+#### `auth add` - 添加新账号
+
 | 选项 | 说明 | 默认值 | 别名 |
 | --- | --- | --- | --- |
-| --verbose | 启用详细日志 | false | -v |
-| --show-token | 认证时显示 GitHub token | false | 无 |
+| `--account-type` | 账号类型（individual、business、enterprise） | `individual` | `-a` |
+| `--verbose` | 启用详细日志 | `false` | `-v` |
+| `--show-token` | 认证后显示 GitHub token | `false` | 无 |
+
+#### `auth ls` - 列出已注册账号
+
+| 选项 | 说明 | 默认值 | 别名 |
+| --- | --- | --- | --- |
+| `--show-quota` | 显示配额信息（需要发起 API 调用） | `false` | `-q` |
+| `--verbose` | 启用详细日志 | `false` | `-v` |
+
+#### `auth rm <target>` - 删除账号
+
+| 选项 | 说明 | 默认值 | 别名 |
+| --- | --- | --- | --- |
+| `--force` | 跳过确认提示 | `false` | `-f` |
+| `--verbose` | 启用详细日志 | `false` | `-v` |
+
+其中 `<target>` 可以是账号 ID（GitHub 用户名），也可以是 1-based 索引。
 
 ### Debug 命令选项
 
 | 选项 | 说明 | 默认值 | 别名 |
 | --- | --- | --- | --- |
-| --json | 以 JSON 输出调试信息 | false | 无 |
+| `--json` | 以 JSON 输出调试信息 | `false` | 无 |
 
 <a id="configuration-configjson"></a>
 
@@ -288,11 +345,56 @@ Copilot API 现在使用子命令结构，主要命令包括：
     "auth": {
       "apiKeys": []
     },
+    "providers": {},
+    "extraPrompts": {
+      "gpt-5-mini": "<built-in exploration prompt>",
+      "gpt-5.3-codex": "<built-in commentary prompt>",
+      "gpt-5.4-mini": "<built-in commentary prompt>",
+      "gpt-5.4": "<built-in commentary prompt>"
+    },
+    "smallModel": "gpt-5-mini",
+    "accountAffinity": true,
+    "responsesApiContextManagementModels": [],
+    "modelReasoningEfforts": {
+      "gpt-5-mini": "low",
+      "gpt-5.3-codex": "xhigh",
+      "gpt-5.4-mini": "xhigh",
+      "gpt-5.4": "xhigh"
+    },
+    "allowOriginalModelNamesForAliases": false,
+    "useFunctionApplyPatch": true,
+    "forceAgent": false,
+    "compactUseSmallModel": true,
+    "messageStartInputTokensFallback": false,
+    "modelRefreshIntervalHours": 24,
+    "sessionAffinityRetentionDays": 7,
+    "useMessagesApi": true,
+    "useResponsesApiWebSearch": true,
+    "logLevel": "info"
+  }
+  ```
+- **auth.apiKeys：** 用于请求认证的 API key。支持多个 key 轮换使用。请求可通过 `x-api-key: <key>` 或 `Authorization: Bearer <key>` 进行认证。若为空或省略，则禁用认证。
+- **extraPrompts：** `model -> prompt` 的映射。把 Anthropic 风格请求翻译给 Copilot 时，会将其附加到第一条 system prompt 后面。你可以借此为不同模型注入护栏或指引。缺失的默认项会自动补齐，但不会覆盖你自定义的 prompt。内置的 `gpt-5.3-codex`、`gpt-5.4-mini` 与 `gpt-5.4` prompt 会启用带阶段感知的 commentary，让模型在工具调用或更深层推理前先发出简短的、用户可见的进度说明。
+- **providers：** 全局上游 provider 映射。每个 provider key（例如 `custom`）都会变成一个路由前缀（`/custom/v1/messages`）。目前仅支持 `type: "anthropic"`。
+  - `enabled`：若省略则默认为 `true`。
+  - `baseUrl`：provider API 的基础 URL，不要带结尾的 `/v1/messages`。
+  - `apiKey`：作为上游凭据值使用。
+  - `authType`（可选）：控制 `apiKey` 如何发送到上游。支持 `x-api-key`（默认）和 `authorization`。当设置为 `authorization` 时，代理会发送 `Authorization: Bearer <apiKey>`。
+  - `adjustInputTokens`（可选）：当为 `true` 时，代理会在 usage 响应里用 `input_tokens` 减去 `cache_read_input_tokens` 和 `cache_creation_input_tokens`。
+  - `models`（可选）：按模型 ID 配置的映射。每个键都是请求中的模型名，值支持：
+    - `temperature`（可选）：请求未指定时使用的默认温度。
+    - `topP`（可选）：请求未指定时使用的默认 `top_p`。
+    - `topK`（可选）：请求未指定时使用的默认 `top_k`。
+
+  provider 配置示例：
+
+  ```json
+  {
     "providers": {
       "custom": {
         "type": "anthropic",
         "enabled": true,
-        "baseUrl": "your-base-url",
+        "baseUrl": "https://your-provider.example",
         "apiKey": "sk-your-provider-key",
         "authType": "x-api-key",
         "adjustInputTokens": false,
@@ -303,57 +405,41 @@ Copilot API 现在使用子命令结构，主要命令包括：
           }
         }
       }
-    },
-    "extraPrompts": {
-      "gpt-5-mini": "<built-in exploration prompt>",
-      "gpt-5.3-codex": "<built-in commentary prompt>",
-      "gpt-5.4-mini": "<built-in commentary prompt>",
-      "gpt-5.4": "<built-in commentary prompt>"
-    },
-    "smallModel": "gpt-5-mini",
-    "responsesApiContextManagementModels": [],
-    "modelReasoningEfforts": {
-      "gpt-5-mini": "low",
-      "gpt-5.3-codex": "xhigh",
-      "gpt-5.4-mini": "xhigh",
-      "gpt-5.4": "xhigh"
-    },
-    "useFunctionApplyPatch": true,
-    "useMessagesApi": true,
-    "useResponsesApiWebSearch": true
+    }
   }
   ```
-- **auth.apiKeys：** 用于请求认证的 API key。支持多个 key 轮换使用。请求可通过 `x-api-key: <key>` 或 `Authorization: Bearer <key>` 进行认证。若为空或省略，则禁用认证。
-- **extraPrompts：** `model -> prompt` 的映射。把 Anthropic 风格请求翻译给 Copilot 时，会将其附加到第一条 system prompt 后面。你可以借此为不同模型注入护栏或指引。缺失的默认项会自动补齐，但不会覆盖你自定义的 prompt。内置的 `gpt-5.3-codex` 和 `gpt-5.4` prompt 会启用带阶段感知的 commentary，让模型在工具调用或更深层推理前先发出简短的用户可见进度说明。
-- **providers：** 全局上游 provider 映射。每个 provider key（例如 `custom`）都会变成一个路由前缀（`/custom/v1/messages`）。目前仅支持 `type: "anthropic"`。
-  - `enabled`：可选，若省略则默认为 `true`。
-  - `baseUrl`：provider API 的基础 URL，不要带结尾的 `/v1/messages`。
-  - `apiKey`：作为上游凭据值使用。
-  - `authType`：可选，控制 `apiKey` 如何发送到上游。支持 `x-api-key`（默认）和 `authorization`。当设置为 `authorization` 时，代理会发送 `Authorization: Bearer <apiKey>`。
-  - `adjustInputTokens`：可选，当为 `true` 时，代理会在 usage 响应里用 `input_tokens` 减去 `cache_read_input_tokens` 和 `cache_creation_input_tokens`。
-  - `models`：可选，按模型 ID 配置的映射。每个键为请求中的模型名，值支持：
-    - `temperature`：可选，当请求未指定时使用的默认温度。
-    - `topP`：可选，当请求未指定时使用的默认 `top_p`。
-    - `topK`：可选，当请求未指定时使用的默认 `top_k`。
-- **smallModel：** 无工具预热消息的回退模型（例如 Claude Code 的探测请求），用于避免消耗 premium requests；默认是 `gpt-5-mini`。
-- **responsesApiContextManagementModels：** 需要启用 Responses API `context_management` 压缩指令的 GPT 模型 ID 列表。默认是 `[]`，需要你显式开启。一个不错的起点是 `["gpt-5-mini", "gpt-5.3-codex", "gpt-5.4-mini", "gpt-5.4"]`。启用后，请求体会带上 `context_management`，并在后续轮次中仅保留最新的压缩承载内容。实际压缩由服务端完成，看起来会在 usage 接近模型 `maxPromptTokens` 的约 90% 时开始，因此特别适合长任务场景，同时不会额外消耗 premium requests。实践中 `compact_threshold` 似乎也是服务端固定的，所以在本项目中修改它目前不会改变压缩行为。当前该优化仅面向 GPT 系模型。
+- **responsesApiContextManagementModels：** 需要注入 Responses API `context_management` 压缩指令的模型 ID 列表。适用于支持服务端上下文管理的模型，并且你希望代理在后续轮次中只保留最新的压缩承载内容。
+- **smallModel：** 用于无工具预热消息、compact/background 请求以及其他短小维护型轮次（例如 Claude Code 或 OpenCode 发出的 housekeeping 请求）的回退模型，用来避免消耗 premium requests；默认是 `gpt-5-mini`。如果原始模型名被屏蔽，而这里指向的是某个别名目标模型，则会解析为首选别名。
+- **accountAffinity：** 是否根据 session 标识启用粘性账号路由。开启后，同一 session 针对同一模型的请求会优先路由到上次成功处理它的账号。该策略同时适用于免费模型和付费模型。默认值为 `true`。设为 `false` 则所有模型都改为顺序路由。
+- **apiKey（已弃用）：** 兼容迁移的旧单 key 字段。优先使用 `auth.apiKeys`。当 `auth.apiKeys` 为空时，服务端会回退到 `COPILOT_API_KEY`，再回退到 `apiKey`。
 - **modelReasoningEfforts：** 按模型配置发送到 Copilot Responses API 的 `reasoning.effort`。可选值包括 `none`、`minimal`、`low`、`medium`、`high` 和 `xhigh`。若某模型未配置，则默认使用 `high`。
-- **useFunctionApplyPatch：** 当为 `true` 时，服务端会把 Responses payload 中任何名为 `apply_patch` 的自定义工具转换为 OpenAI 风格的函数工具（`type: "function"`），并附带参数 schema，从而让 assistant 可以通过 function-calling 语义调用它来编辑文件。若设为 `false`，则保持工具原样。默认值为 `true`。
-- **useMessagesApi：** 当为 `true` 时，支持 Copilot 原生 `/v1/messages` 的 Claude 系模型会走 Messages API；否则回退到 `/chat/completions`。设为 `false` 可禁用 Messages API 路由，始终使用 `/chat/completions`。默认值为 `true`。
-- **useResponsesApiWebSearch：** 当为 `true` 时，服务端会保留 Responses API 中 `type: "web_search"` 的工具并透传到上游。设为 `false` 则会从 `/responses` payload 中移除这些工具。默认值为 `true`。
-- **claudeTokenMultiplier：** 用于 Claude `/v1/messages/count_tokens` 请求在本地走 GPT tokenizer 估算时的乘数。默认值为 `1.15`。如果你的客户端仍然过晚触发上下文压缩，可以适当调大。这个配置只会在代理本地估算 Claude token 时生效；如果已经配置 `anthropicApiKey` 且 Anthropic token counting 调用成功，则会直接返回 Anthropic 的精确计数，不会使用这个乘数。
-- **anthropicApiKey：** 用于精确 Claude token 计数的 Anthropic API key（参见下方 [精确的 Claude Token 计数](#accurate-claude-token-counting)）。也可通过环境变量 `ANTHROPIC_API_KEY` 设置。若未配置，则回退到 GPT tokenizer 估算。
+- **modelAliases：** `alias -> { target, allowOriginal? }` 的映射（也仍然接受旧的字符串写法）。别名 key 会先做标准化（trim + lowercase），且不能为空；别名不能映射回自己（大小写不敏感），冲突的标准化别名会被拒绝。`allowOriginal` 可为单个别名覆盖全局默认值。如果多个别名映射到同一个 target，只要其中任意一个设置了 `allowOriginal: true`，原始模型名就会被允许（allow-wins）。Admin UI/API 会拒绝被屏蔽的键（`__proto__`、`constructor`、`prototype`）。下游请求可以直接使用这些别名。
+- **allowOriginalModelNamesForAliases：** 对未显式设置 `allowOriginal` 的别名所采用的全局默认值。当其为 `false`（默认）时，target 原名默认被屏蔽，除非某个别名显式允许；当其为 `true` 时，target 原名默认可用，除非所有别名都显式阻止。
+- **useFunctionApplyPatch：** 当为 `true`（默认）时，`POST /v1/responses` 会把 `tools` 中形如 `{ "type": "custom", "name": "apply_patch" }` 的条目转换为 OpenAI 风格的 `function` 工具（带参数 schema），以便与上游更好兼容。设为 `false` 则保留自定义工具原样。
+- **forceAgent：** 当为 `true` 时，只要 `POST /v1/responses` 的任一 input item 带有 `role: "assistant"`，就会把请求视为由 agent 发起；当为 `false`（默认）时，只检查最后一个 input item。
+- **compactUseSmallModel：** 当为 `true` 时，检测到的“compact”请求（例如 Claude Code 或 opencode 的 compact 模式）会自动改用配置中的 `smallModel`，以避免短后台任务消耗 premium 使用量。默认值为 `true`。
+- **messageStartInputTokensFallback：** 当为 `true` 时，如果上游流式事件没有提供 `message_start.input_tokens`，Anthropic 流式翻译层会自行估算该值。默认值为 `false`。
+- **modelRefreshIntervalHours：** 后台刷新账号模型列表的间隔小时数。设为 `0` 可关闭自动刷新。默认值为 `24`。
+- **sessionAffinityRetentionDays：** session affinity 绑定的保留天数。默认值为 `7`。
+- **useMessagesApi：** 当为 `true`（默认）时，支持 Copilot 原生 `/v1/messages` 端点的 Claude 系模型会走 Messages API 路径。设为 `false` 时，将跳过 Messages API 候选，回退到 `/responses`（如支持）或 `/chat/completions`。
+- **useResponsesApiWebSearch：** 当为 `true`（默认）时，`/v1/responses` 会保留 `type: "web_search"` 的工具并转发到上游。设为 `false` 则会在发送 Copilot 请求之前将其剥离。
+- **logLevel：** 控制 `logs/*.log` 下 handler 文件日志的详细级别。可选值：`error`、`warn`、`info`、`debug`。默认值为 `info`。如果你需要把 payload 级或 stream 级的调试内容写入文件日志，请显式设置为 `debug`。
+- **anthropicApiKey：** 可选的 Anthropic API key，用于精确的 Claude token 计数（见下文 [精确的 Claude Token 计数](#accurate-claude-token-counting)）。也可通过环境变量 `ANTHROPIC_API_KEY` 设置。未配置时会回退到 GPT tokenizer 估算。
 
-编辑此文件后即可自定义 prompts，或替换为你自己的快速模型。修改完成后请重启服务（或重新执行命令），让缓存中的配置刷新生效。
+`--verbose` 不再隐式开启 debug 级别文件日志。如果你需要 `logs/*.log` 下更详细的 handler 日志，请在 `config.json` 中显式设置 `"logLevel": "debug"`。
+
+编辑此文件即可自定义 prompts，或替换为你自己的快速模型。如果手动修改了这个文件，请重启服务（或调用 `GET /api/admin/config`）以刷新缓存中的配置。通过 Admin UI/API 做出的修改会经过校验、写盘并立即生效；未知键会被拒绝。
 
 ## API 认证
 
-- **受保护路由：** 当配置了 `auth.apiKeys` 且非空时，除 `/`、`/usage-viewer` 和 `/usage-viewer/` 以外的所有路由都需要认证。
+- **受保护路由：** 当配置了有效 API key 时，除 `/`、`/admin` 和 `/api/admin/*` 之外的所有路由都需要认证。
+- **有效 key 的解析顺序：** 优先使用 `auth.apiKeys`。如果为空，则回退到旧的 `COPILOT_API_KEY`，再回退到 `config.json` 中的 `apiKey`。
 - **允许的认证头：**
   - `x-api-key: <your_key>`
   - `Authorization: Bearer <your_key>`
 - **CORS 预检：** `OPTIONS` 请求始终允许。
 - **未配置 key 时：** 服务会正常启动，并允许请求通过（即禁用认证）。
+- **Admin 路由：** `/admin` 和 `/api/admin/*` 不走这一层中间件，而是继续使用 admin 专用的访问控制（`localhost` / `ADMIN_TOKEN`）。
 
 示例请求：
 
@@ -391,12 +477,67 @@ curl http://localhost:4141/v1/models \
 
 ### 使用量监控端点
 
-用于监控 Copilot 用量与额度的新端点。
+用于监控 Copilot 账号运行状态和按账号划分的详细用量信息。
 
 | 端点 | 方法 | 说明 |
 | --- | --- | --- |
-| `GET /usage` | `GET` | 获取详细的 Copilot 使用统计与额度信息。 |
+| `GET /usage` | `GET` | 获取所有已加载账号的运行状态快照（ID、剩余额度、是否无限量）。 |
+| `GET /usage/:accountIndex` | `GET` | 获取指定账号索引的详细 Copilot 用量（0-based，包含 `quota_snapshots`）。 |
 | `GET /token` | `GET` | 获取当前 API 正在使用的 Copilot token。 |
+
+> **关于账号索引的说明**
+> - `/usage/:accountIndex` 使用 **0-based** 索引。
+> - 如果你通过 `start --github-token ...` 启动服务，会额外加入一个临时账号，并在 `GET /usage` 中显示为 `"(temporary)"`。此时 `accountIndex=0` 指向临时账号，已注册账号从 `accountIndex=1` 开始。
+> - `auth rm <index>` 使用的是 **1-based** 索引（与 `auth ls` 输出一致）。
+
+示例：
+
+```sh
+# 账号运行状态列表
+curl "http://localhost:4141/usage"
+
+# 查看索引为 0 的账号详细用量
+curl "http://localhost:4141/usage/0"
+```
+
+> **API Key 提示：** 如果启用了 API key 鉴权，访问 `/usage` 相关端点时也需要带上 `Authorization: Bearer <key>` 或 `x-api-key`。
+
+### 旧认证方式兼容
+
+为了兼容旧部署的迁移，服务端仍接受：
+
+- `COPILOT_API_KEY`（环境变量）
+- `config.json` 中的 `apiKey`
+
+只有在 `auth.apiKeys` 为空时，才会启用这些兼容项。新部署应直接使用 `auth.apiKeys`。
+
+### Admin UI 与 Admin API
+
+服务端还内置了 Admin UI 与 Admin API，用于查看代理记录下来的账号状态和请求历史。
+
+| 端点 | 方法 | 说明 |
+| --- | --- | --- |
+| `GET /admin` | `GET` | 内置 Admin UI（单页 Web 应用）。 |
+| `GET /api/admin/meta` | `GET` | Admin DB 元信息（数据库路径、保留策略等）。 |
+| `GET /api/admin/accounts` | `GET` | 列出账号及其运行状态，并可选返回聚合统计。 |
+| `GET /api/admin/requests` | `GET` | 使用过滤条件和 cursor 分页查询请求日志。 |
+| `GET /api/admin/requests/:requestId` | `GET` | 按请求 ID 获取单条请求日志。 |
+
+#### 认证与访问控制
+
+- 当主机名为 `localhost`、`127.0.0.1` 或 `::1` 时，默认允许 loopback 访问。
+- 远程访问默认关闭，除非你在服务端设置了 `ADMIN_TOKEN`。
+- 设置了 `ADMIN_TOKEN` 后，请通过以下任一方式传递 token：
+  - `x-admin-token: <token>`
+  - `Authorization: Bearer <token>`
+- 出于安全考虑，不支持通过 URL query 参数传 token。
+
+#### Requests 查询（分页与过滤）
+
+- `limit` 默认是 50，最大不超过 200。
+- `cursor_id` 是分页用的整数游标（使用上一次响应中的 `next_cursor_id`）。
+- 可用过滤条件：`account_id`、`upstream_model`、`client_model`、`upstream_endpoint`、`path`、`status`、`has_error`、`from_ms`、`to_ms`。
+- 响应字段：`items`、`next_cursor_id`、`has_more`。
 
 ## 使用示例
 
@@ -433,6 +574,22 @@ npx @nick3/copilot-api@latest auth
 # 认证时启用详细日志
 npx @nick3/copilot-api@latest auth --verbose
 
+# 添加多个账号（账号会按添加顺序记录）
+npx @nick3/copilot-api@latest auth add
+npx @nick3/copilot-api@latest auth add  # 添加第二个账号
+
+# 列出所有已注册账号
+npx @nick3/copilot-api@latest auth ls
+
+# 列出账号并显示配额信息
+npx @nick3/copilot-api@latest auth ls -q
+
+# 按索引删除账号（1-based）
+npx @nick3/copilot-api@latest auth rm 2
+
+# 按 ID 删除账号（GitHub 用户名）
+npx @nick3/copilot-api@latest auth rm octocat
+
 # 在终端中查看 Copilot 用量与额度（无需启动服务）
 npx @nick3/copilot-api@latest check-usage
 
@@ -461,9 +618,28 @@ npx @nick3/copilot-api@latest --oauth-app=opencode start
 npx @nick3/copilot-api@latest --api-home=/custom/path --oauth-app=opencode --enterprise-url=company.ghe.com start
 ```
 
+### Opencode OAuth 认证
+
+你可以使用 opencode GitHub Copilot 认证，替代默认的认证方式：
+
+```sh
+# 在执行任何命令前先设置环境变量
+export COPILOT_API_OAUTH_APP=opencode
+
+# 然后执行 start 或 auth 命令
+npx @nick3/copilot-api@latest start
+npx @nick3/copilot-api@latest auth
+```
+
+也可以使用内联环境变量：
+
+```sh
+COPILOT_API_OAUTH_APP=opencode npx @nick3/copilot-api@latest start
+```
+
 ## 与 OpenCode 一起使用
 
-OpenCode 已经有直接的 GitHub Copilot provider。本节适用于你希望让 OpenCode 通过 `@ai-sdk/anthropic` 指向这个代理，并复用本 README 前面提到的 agent 行为时。
+OpenCode 已经内置了 GitHub Copilot provider。本节适用于你希望让 OpenCode 通过 `@ai-sdk/anthropic` 指向这个代理，并复用本 README 前面提到的 agent 行为时。
 
 ### 最小配置
 
@@ -553,24 +729,69 @@ npx @nick3/copilot-api@latest --oauth-app=opencode start
 
 ## 使用量查看器
 
-服务启动后，控制台会输出一个 Copilot 使用量看板 URL。这个看板是一个用于监控 API 用量的 Web 界面。
+### Admin API 示例
+
+```sh
+# 本地回环访问（无需 token）
+curl "http://localhost:4141/api/admin/meta"
+
+# 启用远程 Admin UI/API 访问（服务端）
+# ADMIN_TOKEN=your_admin_token_here npx @nick3/copilot-api@latest start
+
+# 远程访问（需要 token）
+curl -H "x-admin-token: your_admin_token_here" "http://localhost:4141/api/admin/accounts?include_stats=1"
+
+# 请求日志（过滤 + 分页）
+curl "http://localhost:4141/api/admin/requests?limit=50&has_error=1"
+# 使用响应里的 next_cursor_id 继续翻页：
+curl "http://localhost:4141/api/admin/requests?limit=50&cursor_id=<next_cursor_id>"
+
+# 单条请求详情
+curl "http://localhost:4141/api/admin/requests/<requestId>"
+```
+
+## 使用 Admin UI（/admin）
+
+代理内置了一个随服务实例一起提供的 Admin UI。你可以用它查看代理捕获的账号状态与请求历史（模型/端点、tokens/usage、耗时以及错误摘要等）。
 
 1. 启动服务。例如使用 npx：
    ```sh
    npx @nick3/copilot-api@latest start
    ```
-2. 服务会输出一个 usage viewer 的 URL。将它复制到浏览器中打开，形式大致如下：
-   `http://localhost:4141/usage-viewer?endpoint=http://localhost:4141/usage`
-   - 如果你在 Windows 上使用 `start.bat` 脚本，这个页面会自动打开。
+2. 在浏览器中打开：
+   - `http://localhost:4141/admin`（如果改过端口，请替换为对应端口）
 
-看板提供了更易读的 Copilot 用量视图：
+### UI 提示
 
-- **API Endpoint URL**：看板会通过 URL 查询参数，默认从本地服务端点拉取数据。你也可以把这个 URL 改成任意其他兼容 API 端点。
-- **Fetch Data**：点击 “Fetch” 按钮即可加载或刷新使用数据。页面首次加载时也会自动拉取。
-- **Usage Quotas**：使用进度条汇总展示 Chat、Completions 等不同服务的额度使用情况。
-- **Detailed Information**：可查看 API 返回的完整 JSON，以便深入分析所有可用统计信息。
-- **URL-based Configuration**：你也可以直接通过 URL 查询参数指定 API 端点，便于收藏或分享。例如：
-  `http://localhost:4141/usage-viewer?endpoint=http://your-api-server/usage`
+- **顶部右上角控制项**
+  - **Motion**：`Magic` / `Subtle` / `Off`（如果你的系统启用了 reduced motion，会自动强制为 `Off`）
+  - **Theme**：`System` / `Light` / `Dark`
+  - **Admin token**：保存在 `sessionStorage` 中（可通过 Token 对话框保存和测试）
+- **导航**
+  - **Accounts**：提供 KPI 概览（包括错误率、tokens/request）、过滤与排序；点击某个账号可带着过滤条件跳转到 Requests。
+  - **Requests**：支持 Quick/Advanced filters、时间范围预设（15m/1h/6h/24h/7d）与自定义日期时间、cursor 分页。
+  - **Request detail**：返回按钮会回到 Requests（从列表进入时会保留过滤条件）；摘要字段支持反向跳转回 Requests；JSON 查看器支持搜索/高亮、展开/折叠，以及 Copy/Download。
+- **深链接**
+  - Admin UI 使用 hash 路由，因此可分享的链接形如：`http://localhost:4141/admin/#/requests?...`
+
+### 访问控制
+
+- 通过 `localhost` / `127.0.0.1` / `::1` 访问时，admin API 无需 token。
+- 对于非 loopback 访问（例如机器 IP 或主机名），你必须在服务端设置 `ADMIN_TOKEN` 以启用远程访问，并在请求中带上该 token。
+
+UI 会把 token 保存在 `sessionStorage` 中，并通过 `x-admin-token` 请求头发送（不会出现在 URL 中）。
+
+如果你看到：
+- `403 forbidden`：说明 admin API 仍限制为 localhost，除非设置了 `ADMIN_TOKEN`（或者请求被判定为跨源而拦截）。
+- `401 unauthorized`：说明虽然已经设置了 `ADMIN_TOKEN`，但请求没有携带有效 token。
+
+### 数据存储（admin.sqlite）
+
+- 请求历史保存在应用数据目录下的 `admin.sqlite` 中：
+  - Linux/macOS：`~/.local/share/copilot-api/admin.sqlite`
+  - Windows：`%USERPROFILE%\.local\share\copilot-api\admin.sqlite`
+- 默认保留最多 14 天日志，数据库上限为 200,000 行（更旧的数据会自动清理）。
+- 出于安全考虑，admin DB 只保存元数据，不保存 GitHub/Copilot token，也不保存请求/响应正文。
 
 ## 与 Claude Code 一起使用
 
@@ -590,6 +811,8 @@ npx @nick3/copilot-api@latest start --claude-code
 
 在新的终端中粘贴并执行这条命令，即可启动 Claude Code。
 
+> **API Key 提示：** 如果启用了请求鉴权（推荐 `auth.apiKeys`；旧的 `COPILOT_API_KEY` / `apiKey` 也仍可用），请将 `ANTHROPIC_AUTH_TOKEN` 设置为其中一个可用 API key。
+
 <a id="manual-configuration-with-settingsjson"></a>
 
 ### 通过 `settings.json` 手动配置
@@ -597,6 +820,8 @@ npx @nick3/copilot-api@latest start --claude-code
 另一种方式是在项目根目录中创建 `.claude/settings.json` 文件，并写入 Claude Code 所需的环境变量。这样你就不需要每次都运行交互式配置了。
 
 下面是一个 `.claude/settings.json` 示例：
+
+> **API Key 提示：** 如果启用了请求鉴权，请将 `ANTHROPIC_AUTH_TOKEN` 设为你的某个 API key，这样 Claude Code 才能发送 `x-api-key`。如果未启用鉴权，则任意值都可以。
 
 ```json
 {
@@ -621,11 +846,22 @@ npx @nick3/copilot-api@latest start --claude-code
 }
 ```
 
-- 请根据需要替换 `ANTHROPIC_MODEL`、`ANTHROPIC_DEFAULT_OPUS_MODEL`、`ANTHROPIC_DEFAULT_SONNET_MODEL` 和 `ANTHROPIC_DEFAULT_HAIKU_MODEL`。配置完成后，请安装 claude code 插件，见 [插件集成](#plugin-integrations)。如果你配置的是 Claude 模型，建议把这些模型配置都设为相同，以保持与 github-copilot claude agent 行为一致。
+- 请根据需要替换 `ANTHROPIC_MODEL`、`ANTHROPIC_DEFAULT_OPUS_MODEL`、`ANTHROPIC_DEFAULT_SONNET_MODEL` 和 `ANTHROPIC_DEFAULT_HAIKU_MODEL`。配置完成后，请安装 Claude Code 插件，见 [插件集成](#plugin-integrations)。如果你配置的是 Claude 模型，建议把这些模型配置尽量设为一致，以保持与 GitHub Copilot Claude agent 行为一致。
 - 将 `CLAUDE_CODE_ATTRIBUTION_HEADER` 设为 `0` 可以阻止 Claude Code 在 system prompt 中附加计费和版本信息，从而避免 prompt cache 失效。
 - 关闭 `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` 可以避免不必要地消耗额度。
-- `permissions` 中禁止 `WebSearch`，因为 GitHub Copilot API 不支持原生 web search（部分 gpt 模型支持 websearch，但本项目目前尚未适配）；建议安装 mcp 的 `mcp_server_fetch` 工具或其他搜索工具作为替代。
-- 如果使用的不是 Claude 模型，请不要启用 `ENABLE_TOOL_SEARCH`。如果使用的是 Claude 模型，则可以启用 `ENABLE_TOOL_SEARCH`。当前 Claude Code 使用的是客户端 tool search 模式，在该模式下每次加载 defer tools 都需要额外请求一次。
+- 如果你想禁用 Claude Code 的 WebSearch，可以在 `permissions` 中拒绝 `WebSearch`，或在 `config.json` 中将 `useResponsesApiWebSearch` 设为 `false`。开启后，`/v1/responses` 仍可以向上游转发 `web_search` 工具，但实际是否可用仍取决于所选模型与 Copilot 上游行为。
+- 请不要启用 `ENABLE_TOOL_SEARCH`。Claude Code 当前使用的是客户端 tool search 模式，在该模式下每次加载 defer tools 都需要额外请求一次，缓存命中率也会受到影响，因此不一定真的省 token。只有服务端 tool search 模式才有节省 token 的空间，而本项目目前与客户端 tool search 模式仍存在兼容性问题，启用后也可能引发错误。
+
+<a id="claudemd-or-agentsmd-recommended-content"></a>
+
+### CLAUDE.md 或 AGENTS.md 推荐内容
+
+如果你想手动加入这些提醒，请在 Claude Code 的 `CLAUDE.md`，或 opencode/codex 的 `AGENTS.md` 中加入以下内容：
+
+```
+- Prohibited from directly asking questions to users, MUST use question tool.
+- Once you can confirm that the task is complete, MUST use question tool to make user confirm. The user may respond with feedback if they are not satisfied with the result, which you can use to make improvements and try again, after try again, MUST use question tool to make user confirm again.
+```
 
 更多选项见：[Claude Code settings](https://docs.anthropic.com/en/docs/claude-code/settings#environment-variables)
 
@@ -635,7 +871,7 @@ npx @nick3/copilot-api@latest start --claude-code
 
 ## 插件集成
 
-本项目为 Claude Code 和 opencode 提供了插件集成。
+插件集成同时适用于 Claude Code 与 opencode。
 
 #### Claude Code 插件集成（基于 marketplace）
 
@@ -647,7 +883,7 @@ Claude Code 集成被打包为名为 `claude-plugin` 的插件。
 远程添加 marketplace：
 
 ```sh
-/plugin marketplace add https://github.com/caozhiyuan/copilot-api.git
+/plugin marketplace add https://github.com/nick3/copilot-api.git#all
 ```
 
 从 marketplace 安装插件：
@@ -665,7 +901,7 @@ Claude Code 集成被打包为名为 `claude-plugin` 的插件。
 
 #### Opencode 插件
 
-subagent 标记生成器被打包为一个 opencode 插件，位于 `.opencode/plugins/subagent-marker.js`。
+subagent marker 生成器被打包为一个 opencode 插件，位于 `.opencode/plugins/subagent-marker.js`。
 
 **安装方式：**
 
@@ -705,19 +941,12 @@ bun run start start
 
 ## 使用建议
 
-- 为避免触发 GitHub Copilot 速率限制，可以使用以下参数：
+- 为避免触发 GitHub Copilot 的速率限制，可以使用以下参数：
   - `--manual`：为每个请求启用手动审批，让你完全控制何时发送请求。
   - `--rate-limit <seconds>`：强制请求之间至少保持一定秒数的间隔。例如 `copilot-api start --rate-limit 30` 会确保两次请求之间至少间隔 30 秒。
   - `--wait`：与 `--rate-limit` 配合使用。在命中速率限制时，服务会等待冷却结束，而不是直接返回错误。对于不会自动重试的客户端，这会很有帮助。
 - 如果你使用的是 GitHub Business 或 Enterprise 版 Copilot 账号，请使用 `--account-type` 参数（例如 `--account-type business`）。详见 [官方文档](https://docs.github.com/en/enterprise-cloud@latest/copilot/managing-copilot/managing-github-copilot-in-your-organization/managing-access-to-github-copilot-in-your-organization/managing-github-copilot-access-to-your-organizations-network#configuring-copilot-subscription-based-network-routing-for-your-enterprise-or-organization)。
-
-<a id="claudemd-or-agentsmd-recommended-content"></a>
-
-### CLAUDE.md 或 AGENTS.md 推荐内容
-
-如果你想手动加入这些提醒，请在 Claude Code 的 `CLAUDE.md`，或 opencode/codex 的 `AGENTS.md` 中加入以下内容：
-
-```
-- Prohibited from directly asking questions to users, MUST use question tool.
-- Once you can confirm that the task is complete, MUST use question tool to make user confirm. The user may respond with feedback if they are not satisfied with the result, which you can use to make improvements and try again, after try again, MUST use question tool to make user confirm again.
-```
+- **多账号请求路由：** 使用 `auth add` 添加多个 GitHub Copilot 账号。
+  - **Premium 模型：** 会按添加顺序依次尝试账号。当某个账号的 premium request 配额（`remaining=0`）耗尽，或对当前模型来说不足时，代理会自动切换到下一个可用账号。
+  - **免费模型：** 当 `accountAffinity=true` 时，拥有相同 affinity key 和 model 的请求会粘在上次成功处理它的账号上。亲和性未命中时，会回退到第一个可用账号。若在 `config.json` 中将 `accountAffinity=false`，则所有请求都改为顺序路由。
+  - **模型分类：** 依据 Copilot 模型元数据中的 `billing.is_premium` / `billing.multiplier` 进行判断。缺失 billing 信息或 `billing.is_premium !== true` 的模型，会被视为免费模型。
