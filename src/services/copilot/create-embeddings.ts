@@ -2,6 +2,7 @@ import type { AccountContext } from "~/lib/types/account"
 
 import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
+import { captureOutboundHeadersSnapshot } from "~/lib/request-context"
 import { accountFromState } from "~/lib/state"
 
 export const createEmbeddings = async (
@@ -11,9 +12,12 @@ export const createEmbeddings = async (
   const ctx = account ?? accountFromState()
   if (!ctx.copilotToken) throw new Error("Copilot token not found")
 
+  const headers = copilotHeaders(ctx)
+  captureOutboundHeadersSnapshot(headers)
+
   const response = await fetch(`${copilotBaseUrl(ctx)}/embeddings`, {
     method: "POST",
-    headers: copilotHeaders(ctx),
+    headers,
     body: JSON.stringify(payload),
   })
 

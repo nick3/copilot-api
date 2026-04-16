@@ -4,17 +4,74 @@ import { expect, test } from "bun:test"
 import { getAdminDbUserVersion, initAdminDb } from "../src/lib/admin-db"
 import { SessionAffinityStore } from "../src/lib/session-affinity-store"
 
-test("initAdminDb migrates admin DB to user_version 10", () => {
+test("initAdminDb migrates admin DB to user_version 11", () => {
   const db = new Database(":memory:")
   initAdminDb(db)
 
-  expect(getAdminDbUserVersion(db)).toBe(10)
+  expect(getAdminDbUserVersion(db)).toBe(11)
 })
 
-test("initAdminDb upgrades an existing v7 DB to v10 and creates session_affinity", () => {
+test("initAdminDb upgrades an existing v7 DB with request_log to v11 and creates session_affinity", () => {
   const db = new Database(":memory:")
 
+  db.run(`
+    CREATE TABLE request_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_id TEXT NOT NULL UNIQUE,
+      started_at_ms INTEGER NOT NULL,
+      finished_at_ms INTEGER,
+      duration_ms INTEGER,
+      ttfb_ms INTEGER,
+      method TEXT NOT NULL,
+      path TEXT NOT NULL,
+      upstream_endpoint TEXT,
+      stream INTEGER NOT NULL DEFAULT 0,
+      account_id TEXT,
+      account_type TEXT,
+      cost_units REAL,
+      client_model TEXT,
+      upstream_model TEXT,
+      client_ip TEXT,
+      client_ip_source TEXT,
+      user_agent TEXT,
+      tokens_input INTEGER,
+      tokens_output INTEGER,
+      tokens_total INTEGER,
+      tokens_cached_input INTEGER,
+      usage_json TEXT,
+      premium_remaining_before REAL,
+      premium_remaining_after REAL,
+      premium_remaining_diff REAL,
+      premium_unlimited_before INTEGER,
+      premium_unlimited_after INTEGER,
+      http_status INTEGER,
+      error_name TEXT,
+      error_status INTEGER,
+      error_message TEXT,
+      selection_failure_reason TEXT,
+      user_id TEXT,
+      safety_identifier TEXT,
+      prompt_cache_key TEXT,
+      initiator TEXT,
+      upstream_request_id TEXT,
+      affinity_hit INTEGER,
+      affinity_cache_key TEXT,
+      is_subagent INTEGER,
+      affinity_key_used TEXT,
+      affinity_key_source TEXT,
+      selection_reason TEXT,
+      upstream_error_message_raw TEXT
+    );
+  `)
   db.run("PRAGMA user_version = 7;")
+
+  const requestLogColumnsBefore = db
+    .query("PRAGMA table_info(request_log);")
+    .all() as Array<{ name: string }>
+  const columnNamesBefore = requestLogColumnsBefore.map((column) => column.name)
+
+  expect(columnNamesBefore).toContain("upstream_error_message_raw")
+  expect(columnNamesBefore).not.toContain("outbound_x_request_id")
 
   const before = db
     .query(
@@ -31,9 +88,14 @@ test("initAdminDb upgrades an existing v7 DB to v10 and creates session_affinity
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_affinity' LIMIT 1;",
     )
     .get() as { name?: string } | null
+  const requestLogColumnsAfter = db
+    .query("PRAGMA table_info(request_log);")
+    .all() as Array<{ name: string }>
+  const columnNamesAfter = requestLogColumnsAfter.map((column) => column.name)
 
-  expect(getAdminDbUserVersion(db)).toBe(10)
+  expect(getAdminDbUserVersion(db)).toBe(11)
   expect(after?.name).toBe("session_affinity")
+  expect(columnNamesAfter).toContain("outbound_x_request_id")
 })
 
 test("initAdminDb creates session_affinity with the expected columns", () => {

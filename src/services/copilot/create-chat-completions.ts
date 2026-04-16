@@ -12,6 +12,7 @@ import {
 } from "~/lib/api-config"
 import { getReasoningEffortForModel, isForceAgentEnabled } from "~/lib/config"
 import { HTTPError } from "~/lib/error"
+import { captureOutboundHeadersSnapshot } from "~/lib/request-context"
 import { resolveEffectiveInitiator } from "~/lib/request-initiator"
 import { accountFromState } from "~/lib/state"
 
@@ -94,6 +95,7 @@ export const createChatCompletions = async (
 
   const upstreamPayload = applyDefaultReasoningEffort(payload)
   prepareForCompact(headers, options?.isCompact)
+  captureOutboundHeadersSnapshot(headers)
 
   const response = await fetch(`${copilotBaseUrl(ctx)}/chat/completions`, {
     method: "POST",

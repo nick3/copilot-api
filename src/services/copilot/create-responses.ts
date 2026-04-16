@@ -11,6 +11,7 @@ import {
   prepareInteractionHeaders,
 } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
+import { captureOutboundHeadersSnapshot } from "~/lib/request-context"
 import { resolveEffectiveInitiator } from "~/lib/request-initiator"
 import { accountFromState } from "~/lib/state"
 
@@ -394,6 +395,7 @@ export const createResponses = async (
 
   // service_tier is not supported by github copilot
   payload.service_tier = null
+  captureOutboundHeadersSnapshot(headers)
 
   const response = await fetch(`${copilotBaseUrl(ctx)}/responses`, {
     method: "POST",

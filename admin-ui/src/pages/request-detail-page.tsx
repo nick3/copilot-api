@@ -47,6 +47,18 @@ import {
 
 const EMPTY = "—"
 
+function getQuotaLabel(item: AdminRequestItem): string {
+  if (item.premium_unlimited_after) {
+    return "∞"
+  }
+
+  if (item.premium_remaining_after != null) {
+    return fmtNum(item.premium_remaining_after)
+  }
+
+  return ""
+}
+
 function StatusBadge({ status }: { status: number }): React.JSX.Element {
   return status >= 400 ? (
     <Badge variant="destructive">{status}</Badge>
@@ -263,11 +275,7 @@ export function RequestDetailPage(): React.JSX.Element {
     )
   }
 
-  const quota = item.premium_unlimited_after
-    ? "∞"
-    : item.premium_remaining_after != null
-      ? fmtNum(item.premium_remaining_after)
-      : ""
+  const quota = getQuotaLabel(item)
 
   return (
     <div className="space-y-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-300">
@@ -502,6 +510,78 @@ export function RequestDetailPage(): React.JSX.Element {
                   </TableCell>
                 </TableRow>
 
+                {/* ── Upstream Headers ── */}
+                <SectionHeader
+                  label={t("requestDetailPage.sections.upstreamHeaders")}
+                />
+                <TableRow>
+                  <TableCell className="text-muted-foreground">
+                    <FieldLabel
+                      label={t("requestDetailPage.fields.outboundXRequestId")}
+                      tooltip={t(
+                        "requestDetailPage.fieldTooltip.outboundXRequestId",
+                      )}
+                    />
+                  </TableCell>
+                  <TableCell className="font-mono text-xs whitespace-normal break-words">
+                    {item.outbound_x_request_id || EMPTY}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="text-muted-foreground">
+                    <FieldLabel
+                      label={t("requestDetailPage.fields.outboundXAgentTaskId")}
+                      tooltip={t(
+                        "requestDetailPage.fieldTooltip.outboundXAgentTaskId",
+                      )}
+                    />
+                  </TableCell>
+                  <TableCell className="font-mono text-xs whitespace-normal break-words">
+                    {item.outbound_x_agent_task_id || EMPTY}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="text-muted-foreground">
+                    <FieldLabel
+                      label={t(
+                        "requestDetailPage.fields.outboundXInteractionType",
+                      )}
+                      tooltip={t(
+                        "requestDetailPage.fieldTooltip.outboundXInteractionType",
+                      )}
+                    />
+                  </TableCell>
+                  <TableCell className="font-mono text-xs whitespace-normal break-words">
+                    {item.outbound_x_interaction_type || EMPTY}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="text-muted-foreground">
+                    <FieldLabel
+                      label={t("requestDetailPage.fields.outboundOpenaiIntent")}
+                      tooltip={t(
+                        "requestDetailPage.fieldTooltip.outboundOpenaiIntent",
+                      )}
+                    />
+                  </TableCell>
+                  <TableCell className="font-mono text-xs whitespace-normal break-words">
+                    {item.outbound_openai_intent || EMPTY}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="text-muted-foreground">
+                    <FieldLabel
+                      label={t("requestDetailPage.fields.outboundUserAgent")}
+                      tooltip={t(
+                        "requestDetailPage.fieldTooltip.outboundUserAgent",
+                      )}
+                    />
+                  </TableCell>
+                  <TableCell className="font-mono text-xs whitespace-normal break-words">
+                    {item.outbound_user_agent || EMPTY}
+                  </TableCell>
+                </TableRow>
+
                 {/* ── Client ── */}
                 <SectionHeader
                   label={t("requestDetailPage.sections.client")}
@@ -545,11 +625,26 @@ export function RequestDetailPage(): React.JSX.Element {
                 </TableRow>
                 <TableRow>
                   <TableCell className="text-muted-foreground">
-                    {t("requestDetailPage.fields.client")}
+                    <FieldLabel
+                      label={t("requestDetailPage.fields.clientIp")}
+                      tooltip={t("requestDetailPage.fieldTooltip.clientIp")}
+                    />
                   </TableCell>
                   <TableCell className="font-mono text-xs whitespace-normal break-words">
                     {item.client_ip || EMPTY}
-                    {item.user_agent ? ` (${item.user_agent})` : ""}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="text-muted-foreground">
+                    <FieldLabel
+                      label={t("requestDetailPage.fields.inboundUserAgent")}
+                      tooltip={t(
+                        "requestDetailPage.fieldTooltip.inboundUserAgent",
+                      )}
+                    />
+                  </TableCell>
+                  <TableCell className="font-mono text-xs whitespace-normal break-words">
+                    {item.user_agent || EMPTY}
                   </TableCell>
                 </TableRow>
 
