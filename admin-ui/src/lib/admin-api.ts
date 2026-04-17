@@ -115,6 +115,7 @@ export type AdminRequestsResponse = {
 
 export type AdminRequestDetailResponse = {
   item: AdminRequestItem | null
+  has_outbound?: boolean
 }
 
 export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
@@ -396,12 +397,14 @@ export async function queryAdminRequests(params: {
 export async function getAdminRequestDetail(
   requestId: string
 ): Promise<AdminRequestDetailResponse> {
-  const response = await fetchAdminJson<{ item: AdminRequestItemWire | null }>(
-    `/api/admin/requests/${encodeURIComponent(requestId)}`
-  )
+  const response = await fetchAdminJson<{
+    item: AdminRequestItemWire | null
+    has_outbound?: boolean
+  }>(`/api/admin/requests/${encodeURIComponent(requestId)}`)
 
   return {
     item: response.item ? normalizeAdminRequestItem(response.item) : null,
+    has_outbound: response.has_outbound,
   }
 }
 

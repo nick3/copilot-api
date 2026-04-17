@@ -350,6 +350,10 @@
       "before": "Before",
       "after": "After",
       "diff": "Change"
+    },
+    "replay": {
+      "button": "Replay",
+      "noBlob": "No outbound data captured. This request did not trigger 4xx capture or predates Developer Mode."
     }
   },
   "replayPage": {

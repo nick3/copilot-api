@@ -34,6 +34,7 @@ import {
   getStatsStore,
   type AccountStatsRow,
 } from "~/lib/request-history"
+import { getRequestOutboundStore } from "~/lib/request-outbound"
 import { applySharedSessionAffinityRetention } from "~/lib/session-affinity-store"
 import { toLocalDateString } from "~/lib/stats-store"
 import { isAccountType } from "~/lib/types/account"
@@ -1460,7 +1461,10 @@ adminApiRoutes.get("/requests/:requestId", (c) => {
   const requestId = c.req.param("requestId")
   const store = getRequestHistoryStore()
   const item = store.getByRequestId(requestId)
-  return c.json({ item })
+  const hasOutbound =
+    item !== null
+    && getRequestOutboundStore().getByRequestId(requestId) !== null
+  return c.json({ item, has_outbound: hasOutbound })
 })
 
 adminApiRoutes.post("/accounts/auth/start", async (c) => {
