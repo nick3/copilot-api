@@ -1,7 +1,5 @@
 /* eslint-disable max-lines */
 import { Hono, type Context } from "hono"
-import { randomUUID } from "node:crypto"
-import fs from "node:fs/promises"
 
 import {
   DEFAULT_IDENTITY_ENTERPRISE_DOMAIN,
@@ -41,7 +39,8 @@ import { toLocalDateString } from "~/lib/stats-store"
 import { isAccountType } from "~/lib/types/account"
 
 import { authSessionManager } from "./auth-sessions"
-
+import { writeConfigFile } from "./config-writer"
+import { replayRoutes } from "./replay"
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN?.trim() || undefined
 
 type AdminAccessDecision =
@@ -1098,26 +1097,6 @@ function applyConfigPatch(
   return { config: next }
 }
 
-async function writeConfigFile(config: AppConfig): Promise<void> {
-  await fs.mkdir(PATHS.APP_DIR, { recursive: true })
-
-  const content = `${JSON.stringify(config, null, 2)}\n`
-  const tmpPath = `${PATHS.CONFIG_PATH}.tmp-${randomUUID()}`
-
-  try {
-    await fs.writeFile(tmpPath, content, "utf8")
-    try {
-      await fs.chmod(tmpPath, 0o600)
-    } catch {
-      // Ignore chmod errors (e.g. unsupported filesystem).
-    }
-    await fs.rename(tmpPath, PATHS.CONFIG_PATH)
-  } catch (error) {
-    await fs.rm(tmpPath, { force: true }).catch(() => {})
-    throw error
-  }
-}
-
 export const adminApiRoutes = new Hono()
 
 adminApiRoutes.use("*", async (c, next) => {
@@ -1788,3 +1767,5 @@ adminApiRoutes.get("/stats/premium-daily", (c) => {
     range: { from: resolvedFrom, to: resolvedTo, granularity },
   })
 })
+
+adminApiRoutes.route("/", replayRoutes)
