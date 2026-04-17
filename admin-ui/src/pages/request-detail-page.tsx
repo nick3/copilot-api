@@ -322,7 +322,7 @@ export function RequestDetailPage(): React.JSX.Element {
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-[1fr_2fr]">
         {/* Summary card */}
         <Card
-          className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:duration-300 fill-mode-backwards"
+          className="min-w-0 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:duration-300 fill-mode-backwards"
           style={{ animationDelay: "100ms" }}
         >
           <CardHeader>
@@ -734,7 +734,7 @@ export function RequestDetailPage(): React.JSX.Element {
 
         {/* Raw JSON card */}
         <Card
-          className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:duration-300 fill-mode-backwards"
+          className="min-w-0 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:duration-300 fill-mode-backwards"
           style={{ animationDelay: "150ms" }}
         >
           <CardHeader>
