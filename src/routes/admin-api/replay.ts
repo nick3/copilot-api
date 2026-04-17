@@ -1,6 +1,8 @@
 import { Hono, type Context } from "hono"
+import { streamSSE } from "hono/streaming"
 
 import type { AppConfig, DevModeConfig } from "~/lib/config"
+import type { RequestLogRow } from "~/lib/request-history"
 import type { OutboundCaptureRow } from "~/lib/request-outbound"
 import type { AccountContext } from "~/lib/types/account"
 
@@ -127,6 +129,12 @@ type ReplayError = {
   status: number
 }
 
+function isReplayError(
+  value: string | null | ReplayError,
+): value is ReplayError {
+  return value !== null && typeof value === "object" && "json" in value
+}
+
 function resolveRequestBody(
   blob: OutboundCaptureRow,
   bodyOverride: unknown,
@@ -190,6 +198,29 @@ function headersToRecord(headers: Headers): Record<string, string> {
   return out
 }
 
+async function readReplayChunks(
+  body: ReadableStream<Uint8Array> | null,
+): Promise<Array<string>> {
+  if (!body) {
+    return []
+  }
+
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  const rawChunks: Array<string> = []
+
+  for (;;) {
+    const readResult = await reader.read()
+    if (readResult.done) {
+      break
+    }
+
+    rawChunks.push(decoder.decode(readResult.value, { stream: true }))
+  }
+
+  return rawChunks
+}
+
 function tryTranslate(
   upstreamEndpoint: string,
   rawText: string,
@@ -207,7 +238,6 @@ replayRoutes.post("/requests/:requestId/replay", async (c) => {
   if (gate) return gate
 
   const requestId = c.req.param("requestId")
-
   const blob = getRequestOutboundStore().getByRequestId(requestId)
   if (!blob) {
     return c.json(
@@ -244,6 +274,19 @@ replayRoutes.post("/requests/:requestId/replay", async (c) => {
     )
   }
 
+  return handleReplayRequest(c, { blob, logRow, payload })
+})
+
+async function handleReplayRequest(
+  c: Context,
+  input: {
+    blob: OutboundCaptureRow
+    logRow: RequestLogRow
+    payload: ReplayPayload
+  },
+) {
+  const { blob, logRow, payload } = input
+
   if (!payload.accountId || typeof payload.accountId !== "string") {
     return c.json(
       { error: { message: "accountId is required", type: "bad_request" } },
@@ -265,28 +308,34 @@ replayRoutes.post("/requests/:requestId/replay", async (c) => {
   }
 
   const bodyResult = resolveRequestBody(blob, payload.body)
-  if (
-    bodyResult !== null
-    && typeof bodyResult === "object"
-    && "json" in bodyResult
-  ) {
+  if (isReplayError(bodyResult)) {
     return c.json(bodyResult.json, bodyResult.status as 400)
   }
-  const requestBody = bodyResult
 
+  const requestBody = bodyResult
   const mergedHeaders = buildReplayHeaders(blob, payload.headers, account)
   const mode = payload.mode ?? "collect"
 
   if (mode === "live") {
-    return c.json(
-      {
-        error: {
-          message: "Live SSE mode is not yet implemented",
-          type: "not_implemented",
-        },
-      },
-      501,
-    )
+    const startMs = Date.now()
+    let upstreamResponse: Response
+    try {
+      upstreamResponse = await fetchReplayUpstream({
+        blob,
+        headers: mergedHeaders,
+        body: requestBody,
+      })
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Upstream fetch failed"
+      return c.json({ error: { message, type: "upstream_error" } }, 502)
+    }
+
+    return streamAndRespond(c, {
+      upstreamRes: upstreamResponse,
+      logRow,
+      startMs,
+    })
   }
 
   return collectAndRespond(c, {
@@ -295,13 +344,33 @@ replayRoutes.post("/requests/:requestId/replay", async (c) => {
     headers: mergedHeaders,
     body: requestBody,
   })
-})
+}
 
-type CollectInput = {
+type ReplayUpstreamInput = {
   blob: OutboundCaptureRow
-  upstreamEndpoint: string
   headers: Record<string, string>
   body: string | null
+}
+
+type CollectInput = ReplayUpstreamInput & {
+  upstreamEndpoint: string
+}
+
+type StreamInput = {
+  upstreamRes: Response
+  logRow: RequestLogRow | null
+  startMs: number
+}
+
+async function fetchReplayUpstream(
+  input: ReplayUpstreamInput,
+): Promise<Response> {
+  const { blob, headers, body } = input
+  return copilotFetch(
+    blob.upstreamUrl,
+    { method: blob.upstreamMethod, headers, body },
+    { callSite: "replay", capturable: false },
+  )
 }
 
 async function collectAndRespond(c: Context, input: CollectInput) {
@@ -309,11 +378,7 @@ async function collectAndRespond(c: Context, input: CollectInput) {
   const startMs = Date.now()
   let upstreamResponse: Response
   try {
-    upstreamResponse = await copilotFetch(
-      blob.upstreamUrl,
-      { method: blob.upstreamMethod, headers, body },
-      { callSite: "replay", capturable: false },
-    )
+    upstreamResponse = await fetchReplayUpstream({ blob, headers, body })
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Upstream fetch failed"
@@ -333,6 +398,59 @@ async function collectAndRespond(c: Context, input: CollectInput) {
     translated: tryTranslate(upstreamEndpoint, responseText, rawKind),
     durationMs,
     replayedAt: Date.now(),
+  })
+}
+
+function streamAndRespond(c: Context, input: StreamInput): Response {
+  const { upstreamRes, logRow, startMs } = input
+
+  return streamSSE(c, async (sse) => {
+    const responseHeaders = headersToRecord(upstreamRes.headers)
+
+    await sse.writeSSE({
+      event: "upstream-start",
+      data: JSON.stringify({
+        status: upstreamRes.status,
+        statusText: upstreamRes.statusText,
+        headers: responseHeaders,
+      }),
+    })
+
+    const rawChunks = await readReplayChunks(upstreamRes.body)
+    for (const chunk of rawChunks) {
+      await sse.writeSSE({
+        event: "upstream-chunk",
+        data: JSON.stringify({ raw: chunk }),
+      })
+    }
+
+    await sse.writeSSE({
+      event: "upstream-done",
+      data: JSON.stringify({ durationMs: Date.now() - startMs }),
+    })
+
+    if (logRow?.path === "/v1/messages") {
+      const contentType = upstreamRes.headers.get("content-type") ?? ""
+      const rawText = rawChunks.join("")
+      const rawKind = detectRawKind(contentType)
+
+      try {
+        const translated = translateForReplay({
+          upstreamEndpoint: logRow.upstream_endpoint ?? "",
+          rawText,
+          rawKind,
+        })
+        await sse.writeSSE({
+          event: "translated",
+          data: JSON.stringify(translated),
+        })
+      } catch (err) {
+        await sse.writeSSE({
+          event: "translated",
+          data: JSON.stringify({ error: (err as Error).message }),
+        })
+      }
+    }
   })
 }
 
