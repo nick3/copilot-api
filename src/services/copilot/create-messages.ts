@@ -23,6 +23,8 @@ import { resolveEffectiveInitiator } from "~/lib/request-initiator"
 import { accountFromState } from "~/lib/state"
 import { parseUserIdMetadata } from "~/lib/utils"
 
+import { copilotFetch } from "./copilot-fetch"
+
 const isAgentMessage = (
   msg: AnthropicMessagesPayload["messages"][number],
 ): boolean => {
@@ -152,6 +154,7 @@ const buildMessagesHeaders = ({
         subagentMarker?: SubagentMarker | null
         sessionId?: string
         compactType?: CompactType
+        requestId?: string
       }
     | undefined
   payload: AnthropicMessagesPayload
@@ -200,6 +203,7 @@ export const createMessages = async (
     subagentMarker?: SubagentMarker | null
     sessionId?: string
     compactType?: CompactType
+    requestId?: string
   },
 ): Promise<CreateMessagesReturn> => {
   const ctx = account ?? accountFromState()
@@ -217,11 +221,18 @@ export const createMessages = async (
 
   captureOutboundHeadersSnapshot(headers)
 
-  const response = await fetch(`${copilotBaseUrl(ctx)}/v1/messages`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-  })
+  const response = await copilotFetch(
+    `${copilotBaseUrl(ctx)}/v1/messages`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    },
+    {
+      requestId: options?.requestId,
+      callSite: "messages",
+    },
+  )
 
   if (!response.ok) {
     consola.error("Failed to create messages", response)

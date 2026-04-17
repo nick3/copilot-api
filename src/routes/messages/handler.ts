@@ -448,6 +448,7 @@ const handleWithChatCompletions = async (params: {
       subagentMarker,
       sessionId,
       compactType,
+      requestId: instr.requestId,
     })
     instr.confirmAffinity?.()
     instr.confirmOwnership?.()
@@ -551,6 +552,7 @@ const handleWithResponsesApi = async (params: {
         subagentMarker,
         sessionId,
         compactType,
+        requestId: instr.requestId,
       },
       ctx,
     )
@@ -1412,6 +1414,7 @@ const handleWithMessagesApi = async (params: {
       subagentMarker,
       sessionId,
       compactType,
+      requestId: instr.requestId,
     })
     instr.confirmAffinity?.()
     instr.confirmOwnership?.()

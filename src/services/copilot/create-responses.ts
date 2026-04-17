@@ -16,6 +16,8 @@ import { captureOutboundHeadersSnapshot } from "~/lib/request-context"
 import { resolveEffectiveInitiator } from "~/lib/request-initiator"
 import { accountFromState } from "~/lib/state"
 
+import { copilotFetch } from "./copilot-fetch"
+
 export interface ResponsesPayload {
   model: string
   instructions?: string | null
@@ -363,6 +365,7 @@ interface ResponsesRequestOptions {
   subagentMarker?: SubagentMarker | null
   sessionId?: string
   compactType?: CompactType
+  requestId?: string
 }
 
 export const createResponses = async (
@@ -374,6 +377,7 @@ export const createResponses = async (
     subagentMarker,
     sessionId,
     compactType,
+    requestId,
   }: ResponsesRequestOptions,
   account?: AccountContext,
 ): Promise<CreateResponsesReturn> => {
@@ -399,11 +403,18 @@ export const createResponses = async (
   payload.service_tier = null
   captureOutboundHeadersSnapshot(headers)
 
-  const response = await fetch(`${copilotBaseUrl(ctx)}/responses`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-  })
+  const response = await copilotFetch(
+    `${copilotBaseUrl(ctx)}/responses`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    },
+    {
+      requestId,
+      callSite: "responses",
+    },
+  )
 
   if (!response.ok) {
     consola.error("Failed to create responses", response)

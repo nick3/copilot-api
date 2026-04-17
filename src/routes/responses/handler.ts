@@ -464,6 +464,7 @@ async function handleStreamingResponses(params: {
         initiator,
         upstreamRequestId: request.upstreamRequestId,
         sessionId: request.upstreamSessionId,
+        requestId: request.requestId,
       },
       accountCtx,
     )
@@ -794,6 +795,7 @@ async function handleNonStreamingResponses(params: {
         initiator,
         upstreamRequestId: request.upstreamRequestId,
         sessionId: request.upstreamSessionId,
+        requestId: request.requestId,
       },
       accountCtx,
     )

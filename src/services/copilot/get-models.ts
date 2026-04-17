@@ -8,11 +8,26 @@ import { HTTPError } from "~/lib/error"
 import { PATHS } from "~/lib/paths"
 import { accountFromState } from "~/lib/state"
 
-export const getModels = async (account?: AccountContext) => {
+import { copilotFetch } from "./copilot-fetch"
+
+export const getModels = async (
+  account?: AccountContext,
+  options?: {
+    requestId?: string
+  },
+) => {
   const ctx = account ?? accountFromState()
-  const response = await fetch(`${copilotBaseUrl(ctx)}/models`, {
-    headers: copilotModelsHeaders(ctx),
-  })
+  const response = await copilotFetch(
+    `${copilotBaseUrl(ctx)}/models`,
+    {
+      headers: copilotModelsHeaders(ctx),
+    },
+    {
+      requestId: options?.requestId,
+      callSite: "models",
+      capturable: false,
+    },
+  )
 
   if (!response.ok) {
     const errorText = await response.clone().text()
