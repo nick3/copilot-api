@@ -366,8 +366,16 @@
     "devModeDisabledHint": "请在设置中启用开发者模式以使用请求重放。",
     "loadError": "加载重放数据失败。",
     "contextTitle": "原始请求",
-    "placeholderBody": "请求体编辑器（即将推出）",
     "placeholderResponse": "响应面板（即将推出）",
+    "body": {
+      "title": "请求体",
+      "format": "格式化",
+      "reset": "重置",
+      "valid": "有效 JSON",
+      "invalid": "无效 JSON",
+      "binaryReadOnly": "二进制请求体 — 内容为只读。",
+      "formatError": "无法格式化：无效的 JSON"
+    },
     "account": {
       "label": "账号",
       "original": "原始",

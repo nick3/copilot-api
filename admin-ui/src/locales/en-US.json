@@ -366,8 +366,16 @@
     "devModeDisabledHint": "Enable Developer Mode in Settings to use request replay.",
     "loadError": "Failed to load replay data.",
     "contextTitle": "Original Request",
-    "placeholderBody": "Body editor (coming soon)",
     "placeholderResponse": "Response panel (coming soon)",
+    "body": {
+      "title": "Request Body",
+      "format": "Format",
+      "reset": "Reset",
+      "valid": "Valid JSON",
+      "invalid": "Invalid JSON",
+      "binaryReadOnly": "Binary body — content is read-only.",
+      "formatError": "Cannot format: invalid JSON"
+    },
     "account": {
       "label": "Account",
       "original": "original",

@@ -10,6 +10,10 @@ import {
   getRequestOutbound,
 } from "@/lib/admin-api"
 import { ReplayAccountSelect } from "@/components/replay/replay-account-select"
+import {
+  ReplayBodyEditor,
+  validateReplayBody,
+} from "@/components/replay/replay-body-editor"
 import { ReplayContextCard } from "@/components/replay/replay-context-card"
 import { ReplayHeadersEditor } from "@/components/replay/replay-headers-editor"
 import { Button } from "@/components/ui/button"
@@ -121,6 +125,10 @@ export function RequestReplayPage(): React.JSX.Element {
     if (!initialForm || !form) return false
     return JSON.stringify(initialForm) !== JSON.stringify(form)
   }, [form, initialForm])
+  const bodyValidation = useMemo(
+    () => validateReplayBody(form?.bodyText ?? "", blob?.request_body_kind ?? "text"),
+    [blob?.request_body_kind, form?.bodyText],
+  )
 
   function resetForm(): void {
     if (!initialForm) return
@@ -274,27 +282,28 @@ export function RequestReplayPage(): React.JSX.Element {
               setForm({ ...form, headers })
             }}
           />
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">{t("replayPage.placeholderBody")}</CardTitle>
-              <CardDescription>{t("replayPage.placeholderBody")}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="font-mono text-xs text-muted-foreground whitespace-pre-wrap break-words">
-                {`bodyKind: ${blob.request_body_kind}\nlength: ${form.bodyText.length}`}
-              </p>
-            </CardContent>
-          </Card>
+          <ReplayBodyEditor
+            value={form.bodyText}
+            kind={blob.request_body_kind}
+            originalValue={blob.request_body ?? ""}
+            onChange={(bodyText) => {
+              setForm({ ...form, bodyText })
+            }}
+          />
         </div>
 
         <Card>
           <CardHeader>
             <CardTitle className="text-base">{t("replayPage.placeholderResponse")}</CardTitle>
-            <CardDescription>{t("replayPage.placeholderResponse")}</CardDescription>
+            <CardDescription>
+              {bodyValidation.ok
+                ? t("replayPage.placeholderResponse")
+                : `${t("replayPage.body.invalid")}: ${bodyValidation.message}`}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <p className="font-mono text-xs text-muted-foreground whitespace-pre-wrap break-words">
-              {`mode: ${form.mode}\nresponseStatus: ${blob.response_status}`}
+              {`mode: ${form.mode}\nresponseStatus: ${blob.response_status}\ncanSend: ${String(bodyValidation.ok)}`}
             </p>
           </CardContent>
         </Card>
