@@ -366,10 +366,22 @@
     "devModeDisabledHint": "请在设置中启用开发者模式以使用请求重放。",
     "loadError": "加载重放数据失败。",
     "contextTitle": "原始请求",
-    "placeholderAccount": "账号选择（即将推出）",
-    "placeholderHeaders": "请求头编辑器（即将推出）",
     "placeholderBody": "请求体编辑器（即将推出）",
-    "placeholderResponse": "响应面板（即将推出）"
+    "placeholderResponse": "响应面板（即将推出）",
+    "account": {
+      "label": "账号",
+      "original": "原始",
+      "noAccounts": "没有可用账号"
+    },
+    "headers": {
+      "title": "请求头",
+      "authTitle": "认证头（只读）",
+      "addHeader": "添加请求头",
+      "keyPlaceholder": "请求头名称",
+      "valuePlaceholder": "请求头值",
+      "invalidKey": "无效的请求头名称",
+      "sensitiveKey": "无法添加敏感请求头 — 认证头由系统自动管理。"
+    }
   },
   "jsonViewer": {
     "expand": "展开",

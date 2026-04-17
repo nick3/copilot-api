@@ -9,7 +9,9 @@ import {
   getDevMode,
   getRequestOutbound,
 } from "@/lib/admin-api"
+import { ReplayAccountSelect } from "@/components/replay/replay-account-select"
 import { ReplayContextCard } from "@/components/replay/replay-context-card"
+import { ReplayHeadersEditor } from "@/components/replay/replay-headers-editor"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -41,34 +43,6 @@ function buildReplayForm(blob: OutboundBlob): ReplayForm {
     bodyText: blob.request_body ?? "",
     mode: "collect",
   }
-}
-
-type PlaceholderCardProps = {
-  title: string
-  description: string
-  detail?: string
-}
-
-function PlaceholderCard({
-  title,
-  description,
-  detail,
-}: PlaceholderCardProps): React.JSX.Element {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
-      </CardHeader>
-      {detail ? (
-        <CardContent>
-          <p className="font-mono text-xs text-muted-foreground whitespace-pre-wrap break-words">
-            {detail}
-          </p>
-        </CardContent>
-      ) : null}
-    </Card>
-  )
 }
 
 export function RequestReplayPage(): React.JSX.Element {
@@ -262,9 +236,6 @@ export function RequestReplayPage(): React.JSX.Element {
     )
   }
 
-  const editableHeaders = form.headers.filter((header) => header.editable).length
-  const lockedHeaders = form.headers.length - editableHeaders
-
   return (
     <div className="space-y-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-300">
       <div className="flex flex-wrap items-center gap-2">
@@ -290,28 +261,43 @@ export function RequestReplayPage(): React.JSX.Element {
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <div className="space-y-3">
-          <PlaceholderCard
-            title={t("replayPage.placeholderAccount")}
-            description={t("replayPage.placeholderAccount")}
-            detail={`accountId: ${form.accountId || "(empty)"}`}
+          <ReplayAccountSelect
+            value={form.accountId}
+            originalAccountId={blob.original?.account_id ?? null}
+            onChange={(accountId) => {
+              setForm({ ...form, accountId })
+            }}
           />
-          <PlaceholderCard
-            title={t("replayPage.placeholderHeaders")}
-            description={t("replayPage.placeholderHeaders")}
-            detail={`headers: ${form.headers.length}\neditable: ${editableHeaders}\nlocked: ${lockedHeaders}`}
+          <ReplayHeadersEditor
+            headers={form.headers}
+            onChange={(headers) => {
+              setForm({ ...form, headers })
+            }}
           />
-          <PlaceholderCard
-            title={t("replayPage.placeholderBody")}
-            description={t("replayPage.placeholderBody")}
-            detail={`bodyKind: ${blob.request_body_kind}\nlength: ${form.bodyText.length}`}
-          />
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">{t("replayPage.placeholderBody")}</CardTitle>
+              <CardDescription>{t("replayPage.placeholderBody")}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="font-mono text-xs text-muted-foreground whitespace-pre-wrap break-words">
+                {`bodyKind: ${blob.request_body_kind}\nlength: ${form.bodyText.length}`}
+              </p>
+            </CardContent>
+          </Card>
         </div>
 
-        <PlaceholderCard
-          title={t("replayPage.placeholderResponse")}
-          description={t("replayPage.placeholderResponse")}
-          detail={`mode: ${form.mode}\nresponseStatus: ${blob.response_status}`}
-        />
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">{t("replayPage.placeholderResponse")}</CardTitle>
+            <CardDescription>{t("replayPage.placeholderResponse")}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="font-mono text-xs text-muted-foreground whitespace-pre-wrap break-words">
+              {`mode: ${form.mode}\nresponseStatus: ${blob.response_status}`}
+            </p>
+          </CardContent>
+        </Card>
       </div>
     </div>
   )

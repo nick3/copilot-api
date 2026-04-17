@@ -366,10 +366,22 @@
     "devModeDisabledHint": "Enable Developer Mode in Settings to use request replay.",
     "loadError": "Failed to load replay data.",
     "contextTitle": "Original Request",
-    "placeholderAccount": "Account selection (coming soon)",
-    "placeholderHeaders": "Headers editor (coming soon)",
     "placeholderBody": "Body editor (coming soon)",
-    "placeholderResponse": "Response panel (coming soon)"
+    "placeholderResponse": "Response panel (coming soon)",
+    "account": {
+      "label": "Account",
+      "original": "original",
+      "noAccounts": "No available accounts"
+    },
+    "headers": {
+      "title": "Request Headers",
+      "authTitle": "Auth Headers (read-only)",
+      "addHeader": "Add header",
+      "keyPlaceholder": "Header name",
+      "valuePlaceholder": "Header value",
+      "invalidKey": "Invalid header name",
+      "sensitiveKey": "Cannot add sensitive header — auth headers are managed automatically."
+    }
   },
   "jsonViewer": {
     "expand": "Expand",
