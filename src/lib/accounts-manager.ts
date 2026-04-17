@@ -1605,6 +1605,23 @@ export class AccountsManager {
   }
 
   /**
+   * Get account context by account ID.
+   * Returns null if no account with the given ID exists.
+   */
+  getAccountContextById(id: string): AccountContext | null {
+    if (this.temporaryAccount && this.temporaryAccount.id === id) {
+      return this.toAccountContext(this.temporaryAccount)
+    }
+
+    const account = this.accounts.get(id)
+    if (account) {
+      return this.toAccountContext(account)
+    }
+
+    return null
+  }
+
+  /**
    * Get account context by index.
    * Index 0 is the temporary account (if exists), otherwise the first registered account.
    * Returns null if index is out of bounds.
