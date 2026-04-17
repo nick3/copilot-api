@@ -26,17 +26,6 @@ const IDE_GET_DIAGNOSTICS_TOOL = "mcp__ide__getDiagnostics"
 const IDE_GET_DIAGNOSTICS_DESCRIPTION =
   "Get language diagnostics from VS Code. Returns errors, warnings, information, and hints for files in the workspace."
 
-const getAnthropicEffortForModel = (
-  model: string,
-): "low" | "medium" | "high" | "max" => {
-  const reasoningEffort = getReasoningEffortForModel(model)
-
-  if (reasoningEffort === "xhigh") return "max"
-  if (reasoningEffort === "none" || reasoningEffort === "minimal") return "low"
-
-  return reasoningEffort
-}
-
 const getCompactCandidateText = (message: AnthropicMessage): string => {
   if (message.role !== "user") {
     return ""
@@ -338,8 +327,19 @@ export const prepareMessagesApiPayload = (
     if (!hasThinking) {
       payload.thinking.display = "summarized"
     }
+    if (payload.model === "claude-opus-4.7") {
+      payload.thinking.display = "summarized"
+    }
+    let effort = getReasoningEffortForModel(payload.model)
+    if (effort === "none" || effort === "minimal") {
+      effort = "low"
+    }
+    const reasoningEffort = selectedModel.capabilities.supports.reasoning_effort
+    if (reasoningEffort && !reasoningEffort.includes(effort)) {
+      effort = reasoningEffort.at(-1) as "low" | "medium" | "high"
+    }
     payload.output_config = {
-      effort: getAnthropicEffortForModel(payload.model),
+      effort: effort,
     }
   }
 }

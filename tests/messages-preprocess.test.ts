@@ -319,7 +319,7 @@ describe("prepareMessagesApiPayload", () => {
       type: "adaptive",
       display: "summarized",
     })
-    expect(payload.output_config).toEqual({ effort: "max" })
+    expect(payload.output_config).toEqual({ effort: "xhigh" })
   })
 
   test("does not enable adaptive thinking when tool choice forces tool use", () => {

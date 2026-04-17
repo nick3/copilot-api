@@ -21,7 +21,7 @@ export interface AnthropicMessagesPayload {
   }
   service_tier?: "auto" | "standard_only"
   output_config?: {
-    effort?: "low" | "medium" | "high" | "max"
+    effort?: "low" | "medium" | "high" | "xhigh" | "max"
   }
   metadata?: {
     user_id?: string
