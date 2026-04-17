@@ -5,6 +5,11 @@ import { PATHS } from "./paths"
 
 export type LogLevel = "error" | "warn" | "info" | "debug"
 
+export interface DevModeConfig {
+  enabled: boolean
+  capture4xx: boolean
+}
+
 export interface AppConfig {
   auth?: {
     apiKeys?: Array<string>
@@ -33,6 +38,7 @@ export interface AppConfig {
   useResponsesApiWebSearch?: boolean
   claudeTokenMultiplier?: number
   logLevel?: LogLevel
+  devMode?: DevModeConfig
 }
 
 export interface ModelConfig {
@@ -124,6 +130,10 @@ const defaultConfig: AppConfig = {
   useMessagesApi: true,
   useResponsesApiWebSearch: true,
   logLevel: "info",
+  devMode: {
+    enabled: false,
+    capture4xx: false,
+  },
 }
 
 let cachedConfig: AppConfig | null = null
@@ -367,6 +377,28 @@ function mergeDefaultLogLevel(config: AppConfig): {
   }
 }
 
+function mergeDefaultDevMode(config: AppConfig): ConfigMergeResult {
+  const current = config.devMode
+  if (
+    current
+    && typeof current.enabled === "boolean"
+    && typeof current.capture4xx === "boolean"
+  ) {
+    return { mergedConfig: config, changed: false }
+  }
+
+  return {
+    mergedConfig: {
+      ...config,
+      devMode: {
+        enabled: current?.enabled === true,
+        capture4xx: current?.capture4xx === true,
+      },
+    },
+    changed: true,
+  }
+}
+
 type ConfigMergeResult = {
   mergedConfig: AppConfig
   changed: boolean
@@ -400,6 +432,7 @@ export function mergeConfigWithDefaults(): AppConfig {
     mergeDefaultModelRefreshInterval,
     mergeDefaultSessionAffinityRetention,
     mergeDefaultLogLevel,
+    mergeDefaultDevMode,
   ])
 
   if (changed) {

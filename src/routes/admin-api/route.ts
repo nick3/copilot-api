@@ -25,6 +25,7 @@ import {
   mergeConfigWithDefaults,
   PROVIDER_TYPE_ANTHROPIC,
   type AppConfig,
+  type DevModeConfig,
   type LogLevel,
   type ModelConfig,
   type ProviderConfig,
@@ -193,6 +194,7 @@ const CONFIG_KEYS = new Set<keyof AppConfig>([
   "sessionAffinityRetentionDays",
   "useMessagesApi",
   "useResponsesApiWebSearch",
+  "devMode",
 ])
 
 const REASONING_EFFORTS = new Set<ReasoningEffort>([
@@ -992,6 +994,49 @@ function applyProvidersConfig(
   return undefined
 }
 
+function parseDevModeConfig(
+  value: unknown,
+): ParseFieldResult<DevModeConfig> {
+  if (value === null || value === undefined) return { clear: true }
+  if (!isPlainObject(value)) return { error: "devMode must be an object" }
+
+  for (const key of Object.keys(value)) {
+    if (key !== "enabled" && key !== "capture4xx") {
+      return { error: `devMode.${key} is not supported` }
+    }
+  }
+
+  const enabled = value.enabled
+  const capture4xx = value.capture4xx
+  if (enabled !== undefined && typeof enabled !== "boolean") {
+    return { error: "devMode.enabled must be a boolean" }
+  }
+  if (capture4xx !== undefined && typeof capture4xx !== "boolean") {
+    return { error: "devMode.capture4xx must be a boolean" }
+  }
+
+  return {
+    value: {
+      enabled: enabled === true,
+      capture4xx: capture4xx === true,
+    },
+  }
+}
+
+function applyDevModeConfig(
+  next: AppConfig,
+  value: unknown,
+): string | undefined {
+  const parsed = parseDevModeConfig(value)
+  if ("error" in parsed) return parsed.error
+  if ("clear" in parsed) {
+    next.devMode = { enabled: false, capture4xx: false }
+    return undefined
+  }
+  next.devMode = parsed.value
+  return undefined
+}
+
 type ConfigPatchHandler = (
   next: AppConfig,
   value: unknown,
@@ -1028,6 +1073,7 @@ const CONFIG_PATCH_HANDLERS: Partial<Record<string, ConfigPatchHandler>> = {
     applyOptionalBoolean(next, "useMessagesApi", value),
   useResponsesApiWebSearch: (next, value) =>
     applyOptionalBoolean(next, "useResponsesApiWebSearch", value),
+  devMode: applyDevModeConfig,
 }
 
 function applyConfigPatch(
