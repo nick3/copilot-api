@@ -3,29 +3,31 @@ import { Hono } from "hono"
 import fs from "node:fs/promises"
 import path from "node:path"
 
-import type { RequestLogRow } from "~/lib/request-history"
+import "./shared-admin-db-test-home"
+
 import type { OutboundCaptureRow } from "~/lib/request-outbound"
 
+import { getAdminDb } from "~/lib/admin-db"
 import { mergeConfigWithDefaults } from "~/lib/config"
 import { PATHS } from "~/lib/paths"
+import { getRequestHistoryStore } from "~/lib/request-history"
 
 type TestConfig = Record<string, unknown>
 
 let outboundRow: OutboundCaptureRow | null = null
-let historyRow: RequestLogRow | null = null
+
+const realOutbound = await import("~/lib/request-outbound")
 
 await mock.module("~/lib/request-outbound", () => ({
+  ...realOutbound,
   getRequestOutboundStore: () => ({
+    insert: () => {},
     getByRequestId: () => outboundRow,
+    cleanupOrphans: () => {},
+    meta: () => ({ dbPath: "", userVersion: 0 }),
   }),
   getRedactedHeaderKeys: (headers: Record<string, string>) =>
     Object.keys(headers).filter((key) => key.toLowerCase() === "authorization"),
-}))
-
-await mock.module("~/lib/request-history", () => ({
-  getRequestHistoryStore: () => ({
-    getByRequestId: () => historyRow,
-  }),
 }))
 
 const { replayRoutes } = await import("../src/routes/admin-api/replay")
@@ -63,7 +65,7 @@ function createApp() {
 
 afterEach(() => {
   outboundRow = null
-  historyRow = null
+  getAdminDb().run("DELETE FROM request_log;")
 })
 
 test("GET /requests/:id/outbound returns 403 when dev mode is disabled", async () => {
@@ -127,68 +129,19 @@ test("GET /requests/:id/outbound returns blob data, redacted headers, and origin
     responseBodyKind: "json",
   }
 
-  historyRow = {
-    id: 1,
-    request_id: "req-blob",
-    started_at_ms: 1,
-    finished_at_ms: null,
+  // Insert a real request_log row so getRequestHistoryStore().getByRequestId works
+  getRequestHistoryStore().insert({
+    requestId: "req-blob",
+    startedAtMs: 1,
     method: "POST",
     path: "/v1/messages",
-    upstream_endpoint: "/v1/messages",
-    stream: 0,
-    account_id: "acc-1",
-    account_type: null,
-    cost_units: 0,
-    client_model: "claude-3-7-sonnet",
-    upstream_model: "claude-sonnet-4.5",
-    client_ip: null,
-    client_ip_source: null,
-    user_agent: null,
-    user_id: null,
-    safety_identifier: null,
-    prompt_cache_key: null,
-    initiator: null,
-    is_subagent: null,
-    upstream_request_id: null,
-    outbound_x_request_id: null,
-    outbound_x_agent_task_id: null,
-    outbound_x_interaction_type: null,
-    outbound_openai_intent: null,
-    outbound_user_agent: null,
-    affinity_key_used: null,
-    affinity_key_source: null,
-    selection_reason: null,
-    tokens_input: null,
-    tokens_output: null,
-    tokens_total: null,
-    tokens_cached_input: null,
-    usage_json: null,
-    premium_remaining_before: null,
-    premium_remaining_after: null,
-    premium_remaining_diff: null,
-    premium_unlimited_before: null,
-    premium_unlimited_after: null,
-    status: "error",
-    http_status: 400,
-    duration_ms: null,
-    ttfb_ms: null,
-    model: null,
-    provider: null,
-    service_tier: null,
-    endpoint: null,
-    error_name: null,
-    error_status: null,
-    error_message: null,
-    upstream_error_message_raw: null,
-    selection_failure_reason: null,
-    affinity_hit: null,
-    affinity_cache_key: null,
-    input_tokens: null,
-    output_tokens: null,
-    cache_creation_input_tokens: null,
-    cache_read_input_tokens: null,
-    account_label: null,
-  } as RequestLogRow
+    upstreamEndpoint: "/v1/messages",
+    stream: false,
+    accountId: "acc-1",
+    clientModel: "claude-3-7-sonnet",
+    upstreamModel: "claude-sonnet-4.5",
+    httpStatus: 400,
+  })
 
   await withConfig(
     { devMode: { enabled: true, capture4xx: false } },

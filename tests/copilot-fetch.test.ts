@@ -3,13 +3,21 @@ import { afterEach, expect, mock, test } from "bun:test"
 let capture4xxEnabled = true
 const insertSpy = mock(() => {})
 
+const realDevMode = await import("~/lib/dev-mode")
+const realOutbound = await import("~/lib/request-outbound")
+
 await mock.module("~/lib/dev-mode", () => ({
+  ...realDevMode,
   isCapture4xxEnabled: () => capture4xxEnabled,
 }))
 
 await mock.module("~/lib/request-outbound", () => ({
+  ...realOutbound,
   getRequestOutboundStore: () => ({
     insert: insertSpy,
+    getByRequestId: () => null,
+    cleanupOrphans: () => {},
+    meta: () => ({ dbPath: "", userVersion: 0 }),
   }),
 }))
 
