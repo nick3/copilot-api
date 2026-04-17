@@ -352,6 +352,21 @@
       "diff": "变化"
     }
   },
+  "replayPage": {
+    "title": "请求重放",
+    "back": "返回详情",
+    "reset": "重置",
+    "noBlob": "此请求没有捕获到出站数据。",
+    "noBlobHint": "该请求未触发 4xx 捕获，或发生在开发者模式启用之前。",
+    "devModeDisabled": "开发者模式未启用。",
+    "devModeDisabledHint": "请在设置中启用开发者模式以使用请求重放。",
+    "loadError": "加载重放数据失败。",
+    "contextTitle": "原始请求",
+    "placeholderAccount": "账号选择（即将推出）",
+    "placeholderHeaders": "请求头编辑器（即将推出）",
+    "placeholderBody": "请求体编辑器（即将推出）",
+    "placeholderResponse": "响应面板（即将推出）"
+  },
   "jsonViewer": {
     "expand": "展开",
     "collapse": "折叠",
@@ -377,6 +392,7 @@
       "aliases": "别名",
       "prompts": "提示词",
       "advanced": "高级",
+      "devMode": "开发者模式",
       "providers": "上游提供方"
     },
     "navigation": {
@@ -390,7 +406,9 @@
       "loadModelsFailed": "加载模型失败",
       "loadConfigFailed": "加载配置失败",
       "configSaved": "配置已保存",
-      "saveConfigFailed": "保存配置失败"
+      "saveConfigFailed": "保存配置失败",
+      "devModeSaved": "开发者模式已更新",
+      "saveDevModeFailed": "更新开发者模式失败"
     },
     "common": {
       "defaultOption": "(默认)",
@@ -461,6 +479,15 @@
       "blockOriginal": "阻止原始模型 ID",
       "emptyState": "未配置模型别名。",
       "addButton": "添加别名"
+    },
+    "devMode": {
+      "title": "开发者模式",
+      "description": "启用请求重放和 4xx 上游请求捕获，用于调试。",
+      "enable": "启用开发者模式",
+      "enableHint": "启用后才能访问重放页面。后端强制校验此开关。",
+      "capture": "捕获 4xx 上游请求",
+      "captureHint": "当上游返回 4xx 时，将完整的出站请求体和脱敏后的请求头持久化到 admin.sqlite。随请求历史一起清理（35 天）。",
+      "captureDisabled": "请先启用开发者模式。"
     },
     "advanced": {
       "title": "高级",

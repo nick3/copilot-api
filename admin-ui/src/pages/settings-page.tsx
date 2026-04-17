@@ -14,12 +14,15 @@ import {
   AdminApiError,
   type AdminConfig,
   type AdminConfigResponse,
+  type DevModeState,
   type ModelAliasSpec,
   type ProviderConfig,
   type ProviderModelConfig,
   type ReasoningEffort,
   getAdminConfig,
   getAdminModels,
+  getDevMode,
+  setDevMode,
   updateAdminConfig,
 } from "@/lib/admin-api"
 import { i18n } from "@/lib/i18n"
@@ -57,6 +60,7 @@ const SETTINGS_SECTION_IDS = [
   "aliases",
   "prompts",
   "advanced",
+  "devMode",
   "providers",
 ] as const
 
@@ -1824,6 +1828,78 @@ function ModelAliasesCard({
   )
 }
 
+type DeveloperModeCardProps = {
+  devMode: DevModeState
+  saving: boolean
+  onToggleEnabled: (value: boolean) => void
+  onToggleCapture4xx: (value: boolean) => void
+}
+
+function DeveloperModeCard({
+  devMode,
+  saving,
+  onToggleEnabled,
+  onToggleCapture4xx,
+}: DeveloperModeCardProps): React.JSX.Element {
+  const { t } = useTranslation()
+
+  return (
+    <Card className="gap-4 py-4">
+      <CardHeader className="px-4">
+        <CardTitle>{t("settingsPage.devMode.title")}</CardTitle>
+        <CardDescription className="hidden sm:block">
+          {t("settingsPage.devMode.description")}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 px-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="text-sm font-medium">
+              {t("settingsPage.devMode.enable")}
+            </div>
+            <div className="text-muted-foreground text-xs">
+              {t("settingsPage.devMode.enableHint")}
+            </div>
+          </div>
+          <Switch
+            checked={devMode.enabled}
+            disabled={saving}
+            onCheckedChange={onToggleEnabled}
+          />
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="text-sm font-medium">
+              {t("settingsPage.devMode.capture")}
+            </div>
+            <div className="text-muted-foreground text-xs">
+              {t(
+                devMode.enabled
+                  ? "settingsPage.devMode.captureHint"
+                  : "settingsPage.devMode.captureDisabled",
+              )}
+            </div>
+          </div>
+          <Switch
+            checked={devMode.capture4xx}
+            disabled={!devMode.enabled || saving}
+            onCheckedChange={onToggleCapture4xx}
+          />
+        </div>
+
+        {devMode.enabled && devMode.capture4xx ? (
+          <InlineAlert
+            variant="warning"
+            title={t("settingsPage.devMode.capture")}
+            description={t("settingsPage.devMode.captureHint")}
+          />
+        ) : null}
+      </CardContent>
+    </Card>
+  )
+}
+
 type AdvancedSettingsCardProps = {
   accountAffinityEnabled: boolean
   modelRefreshIntervalInput: string
@@ -2443,6 +2519,9 @@ type SettingsPageViewProps = {
   isDirty: boolean
   onReload: () => void
   onSave: () => void
+  devMode: DevModeState
+  onDevModeEnabledToggle: (value: boolean) => void
+  onDevModeCapture4xxToggle: (value: boolean) => void
   hasModels: boolean
   smallModelLabel: string
   smallModelValue: string
@@ -2530,6 +2609,10 @@ function useSettingsPageState(): SettingsPageViewProps {
   const [configPath, setConfigPath] = useState<string | null>(null)
 
   const [models, setModels] = useState<Array<string>>([])
+  const [devMode, setDevModeState] = useState<DevModeState>({
+    enabled: false,
+    capture4xx: false,
+  })
   const [draft, setDraft] = useState<AdminConfig>({})
   const [initialDraftJson, setInitialDraftJson] = useState<string>("{}")
   const [modelRefreshIntervalInput, setModelRefreshIntervalInput] =
@@ -2661,9 +2744,10 @@ function useSettingsPageState(): SettingsPageViewProps {
     setError(null)
 
     try {
-      const [configRes, modelsRes] = await Promise.allSettled([
+      const [configRes, modelsRes, devModeRes] = await Promise.allSettled([
         getAdminConfig(),
         getAdminModels(),
+        getDevMode(),
       ])
 
       if (configRes.status === "fulfilled") {
@@ -2680,6 +2764,12 @@ function useSettingsPageState(): SettingsPageViewProps {
           description:
             modelsRes.reason instanceof Error ? modelsRes.reason.message : String(modelsRes.reason),
         })
+      }
+
+      if (devModeRes.status === "fulfilled") {
+        setDevModeState(devModeRes.value)
+      } else {
+        throw devModeRes.reason
       }
     } catch (err) {
       const msg = err instanceof AdminApiError ? err.message : String(err)
@@ -2893,6 +2983,50 @@ function useSettingsPageState(): SettingsPageViewProps {
   const accountAffinityEnabled = draft.accountAffinity ?? true
   const allowOriginalModelNamesForAliases =
     draft.allowOriginalModelNamesForAliases ?? false
+
+  const persistDevMode = useCallback(
+    async (next: DevModeState) => {
+      setSaving(true)
+      setError(null)
+
+      try {
+        const updated = await setDevMode(next)
+        setDevModeState(updated)
+        toast.success(i18n.t("settingsPage.toast.devModeSaved"))
+      } catch (err) {
+        const msg = err instanceof AdminApiError ? err.message : String(err)
+        setError(msg)
+        toast.error(i18n.t("settingsPage.toast.saveDevModeFailed"), {
+          description: msg,
+        })
+      } finally {
+        setSaving(false)
+      }
+    },
+    [],
+  )
+
+  const handleDevModeEnabledToggle = useCallback(
+    (value: boolean) => {
+      const next = {
+        enabled: value,
+        capture4xx: value ? devMode.capture4xx : false,
+      }
+      void persistDevMode(next)
+    },
+    [devMode.capture4xx, persistDevMode],
+  )
+
+  const handleDevModeCapture4xxToggle = useCallback(
+    (value: boolean) => {
+      const next = {
+        enabled: devMode.enabled,
+        capture4xx: value,
+      }
+      void persistDevMode(next)
+    },
+    [devMode.enabled, persistDevMode],
+  )
   const useFunctionApplyPatch = draft.useFunctionApplyPatch ?? true
   const forceAgent = draft.forceAgent ?? false
   const compactUseSmallModel = draft.compactUseSmallModel ?? true
@@ -2910,6 +3044,9 @@ function useSettingsPageState(): SettingsPageViewProps {
     isDirty,
     onReload,
     onSave,
+    devMode,
+    onDevModeEnabledToggle: handleDevModeEnabledToggle,
+    onDevModeCapture4xxToggle: handleDevModeCapture4xxToggle,
     hasModels,
     smallModelLabel,
     smallModelValue,
@@ -2997,6 +3134,9 @@ function SettingsPageView({
   isDirty,
   onReload,
   onSave,
+  devMode,
+  onDevModeEnabledToggle,
+  onDevModeCapture4xxToggle,
   hasModels,
   smallModelLabel,
   smallModelValue,
@@ -3079,6 +3219,7 @@ function SettingsPageView({
       { id: "aliases", label: t("settingsPage.sections.aliases") },
       { id: "prompts", label: t("settingsPage.sections.prompts") },
       { id: "advanced", label: t("settingsPage.sections.advanced") },
+      { id: "devMode", label: t("settingsPage.sections.devMode") },
       { id: "providers", label: t("settingsPage.sections.providers") },
     ]
   }, [t])
@@ -3320,12 +3461,27 @@ function SettingsPageView({
             />
           </SettingsSectionCard>
 
+          {/* Developer Mode */}
+          <SettingsSectionCard
+            id="devMode"
+            isActive={activeSection === "devMode"}
+            ref={(el) => registerSection("devMode", el)}
+            style={{ animationDelay: "300ms" }}
+          >
+            <DeveloperModeCard
+              devMode={devMode}
+              saving={saving}
+              onToggleEnabled={onDevModeEnabledToggle}
+              onToggleCapture4xx={onDevModeCapture4xxToggle}
+            />
+          </SettingsSectionCard>
+
           {/* Providers */}
           <SettingsSectionCard
             id="providers"
             isActive={activeSection === "providers"}
             ref={(el) => registerSection("providers", el)}
-            style={{ animationDelay: "300ms" }}
+            style={{ animationDelay: "360ms" }}
           >
             <ProvidersSettingsCard
               items={providersItems}

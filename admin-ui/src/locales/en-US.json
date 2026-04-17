@@ -352,6 +352,21 @@
       "diff": "Change"
     }
   },
+  "replayPage": {
+    "title": "Request Replay",
+    "back": "Back to detail",
+    "reset": "Reset",
+    "noBlob": "No outbound data captured for this request.",
+    "noBlobHint": "This request did not trigger 4xx capture or predates Developer Mode.",
+    "devModeDisabled": "Developer Mode is disabled.",
+    "devModeDisabledHint": "Enable Developer Mode in Settings to use request replay.",
+    "loadError": "Failed to load replay data.",
+    "contextTitle": "Original Request",
+    "placeholderAccount": "Account selection (coming soon)",
+    "placeholderHeaders": "Headers editor (coming soon)",
+    "placeholderBody": "Body editor (coming soon)",
+    "placeholderResponse": "Response panel (coming soon)"
+  },
   "jsonViewer": {
     "expand": "Expand",
     "collapse": "Collapse",
@@ -377,6 +392,7 @@
       "aliases": "Aliases",
       "prompts": "Prompts",
       "advanced": "Advanced",
+      "devMode": "Developer Mode",
       "providers": "Providers"
     },
     "navigation": {
@@ -390,7 +406,9 @@
       "loadModelsFailed": "Failed to load models",
       "loadConfigFailed": "Failed to load config",
       "configSaved": "Config saved",
-      "saveConfigFailed": "Failed to save config"
+      "saveConfigFailed": "Failed to save config",
+      "devModeSaved": "Developer mode updated",
+      "saveDevModeFailed": "Failed to update developer mode"
     },
     "common": {
       "defaultOption": "(default)",
@@ -461,6 +479,15 @@
       "blockOriginal": "Block original model ID",
       "emptyState": "No model aliases configured.",
       "addButton": "Add alias"
+    },
+    "devMode": {
+      "title": "Developer Mode",
+      "description": "Enable in-app request replay and 4xx outbound capture for debugging.",
+      "enable": "Enable Developer Mode",
+      "enableHint": "Required to access the Replay page. Backend enforces this flag.",
+      "capture": "Capture 4xx upstream payloads",
+      "captureHint": "Persists full outbound body + redacted headers to admin.sqlite when upstream returns 4xx. Cleaned up with request history (35 days).",
+      "captureDisabled": "Enable Developer Mode first."
     },
     "advanced": {
       "title": "Advanced",
