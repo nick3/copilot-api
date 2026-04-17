@@ -994,9 +994,7 @@ function applyProvidersConfig(
   return undefined
 }
 
-function parseDevModeConfig(
-  value: unknown,
-): ParseFieldResult<DevModeConfig> {
+function parseDevModeConfig(value: unknown): ParseFieldResult<DevModeConfig> {
   if (value === null || value === undefined) return { clear: true }
   if (!isPlainObject(value)) return { error: "devMode must be an object" }
 
