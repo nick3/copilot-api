@@ -13,8 +13,11 @@ export function translateForReplay(input: TranslateForReplayInput): unknown {
 
   // /chat/completions + json → translate OpenAI → Anthropic
   if (upstreamEndpoint.includes("/chat/completions") && rawKind === "json") {
-    const parsed = JSON.parse(rawText) as ChatCompletionResponse
-    return translateToAnthropic(parsed)
+    const parsed = JSON.parse(rawText) as Partial<ChatCompletionResponse>
+    if (!Array.isArray(parsed.choices)) {
+      return parsed
+    }
+    return translateToAnthropic(parsed as ChatCompletionResponse)
   }
 
   // /chat/completions + sse → return raw (full SSE translation is complex, defer)

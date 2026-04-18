@@ -12,7 +12,7 @@ export async function writeConfigFile(config: AppConfig): Promise<void> {
   const tmpPath = `${PATHS.CONFIG_PATH}.tmp-${randomUUID()}`
 
   try {
-    await fs.writeFile(tmpPath, content, "utf8")
+    await fs.writeFile(tmpPath, content, { encoding: "utf8", mode: 0o600 })
     try {
       await fs.chmod(tmpPath, 0o600)
     } catch {

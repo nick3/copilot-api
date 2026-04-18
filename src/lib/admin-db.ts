@@ -330,6 +330,7 @@ function migrateV8ToV11(db: Database, current: number): void {
   }
 }
 
+// eslint-disable-next-line complexity -- migration chain grows with each version
 function migrateAdminDb(db: Database): void {
   const row = db.query("PRAGMA user_version;").get() as {
     user_version?: number
@@ -337,7 +338,7 @@ function migrateAdminDb(db: Database): void {
   const current = row?.user_version ?? 0
 
   if (current >= 11) {
-    migrateV11(db)
+    if (current === 11) migrateV11(db)
     return
   }
 

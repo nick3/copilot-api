@@ -31,4 +31,5 @@ export async function parseSSEStream(
       boundary = buffer.indexOf("\n\n")
     }
   }
+  buffer += decoder.decode()
 }

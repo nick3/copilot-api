@@ -71,6 +71,10 @@ export function ReplayAccountSelect({
           (item) => item.runtime?.enabled !== false,
         )
         setAccounts(sortAccounts(enabledAccounts, originalAccountId))
+      } catch {
+        if (!cancelled) {
+          setAccounts([])
+        }
       } finally {
         if (!cancelled) {
           setLoading(false)
@@ -135,22 +139,20 @@ export function ReplayAccountSelect({
                 const isOriginal = account.account_id === originalAccountId
                 const reason = account.runtime?.failureReason || t("common.failed")
                 return (
-                  <Tooltip key={account.account_id}>
-                    <TooltipTrigger asChild>
-                      <div>
-                        <SelectItem value={account.account_id} disabled>
-                          <span className="flex min-w-0 items-center gap-2">
-                            <span className="truncate font-mono text-xs">{account.account_id}</span>
-                            {isOriginal ? (
-                              <Badge variant="secondary">{t("replayPage.account.original")}</Badge>
-                            ) : null}
-                            <AlertCircleIcon className="text-destructive size-3.5" />
-                          </span>
-                        </SelectItem>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent>{reason}</TooltipContent>
-                  </Tooltip>
+                  <SelectItem key={account.account_id} value={account.account_id} disabled>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="truncate font-mono text-xs">{account.account_id}</span>
+                          {isOriginal ? (
+                            <Badge variant="secondary">{t("replayPage.account.original")}</Badge>
+                          ) : null}
+                          <AlertCircleIcon className="text-destructive size-3.5" />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>{reason}</TooltipContent>
+                    </Tooltip>
+                  </SelectItem>
                 )
               })}
             </SelectContent>

@@ -198,29 +198,6 @@ function headersToRecord(headers: Headers): Record<string, string> {
   return out
 }
 
-async function readReplayChunks(
-  body: ReadableStream<Uint8Array> | null,
-): Promise<Array<string>> {
-  if (!body) {
-    return []
-  }
-
-  const reader = body.getReader()
-  const decoder = new TextDecoder()
-  const rawChunks: Array<string> = []
-
-  for (;;) {
-    const readResult = await reader.read()
-    if (readResult.done) {
-      break
-    }
-
-    rawChunks.push(decoder.decode(readResult.value, { stream: true }))
-  }
-
-  return rawChunks
-}
-
 function tryTranslate(
   upstreamEndpoint: string,
   rawText: string,
@@ -416,12 +393,34 @@ function streamAndRespond(c: Context, input: StreamInput): Response {
       }),
     })
 
-    const rawChunks = await readReplayChunks(upstreamRes.body)
-    for (const chunk of rawChunks) {
-      await sse.writeSSE({
-        event: "upstream-chunk",
-        data: JSON.stringify({ raw: chunk }),
-      })
+    const rawChunks: Array<string> = []
+
+    if (upstreamRes.body) {
+      const reader = (
+        upstreamRes.body as ReadableStream<Uint8Array>
+      ).getReader()
+      const decoder = new TextDecoder()
+
+      for (;;) {
+        const readResult = await reader.read()
+        if (readResult.done) break
+
+        const chunk = decoder.decode(readResult.value, { stream: true })
+        rawChunks.push(chunk)
+        await sse.writeSSE({
+          event: "upstream-chunk",
+          data: JSON.stringify({ raw: chunk }),
+        })
+      }
+
+      const trailing = decoder.decode()
+      if (trailing) {
+        rawChunks.push(trailing)
+        await sse.writeSSE({
+          event: "upstream-chunk",
+          data: JSON.stringify({ raw: trailing }),
+        })
+      }
     }
 
     await sse.writeSSE({

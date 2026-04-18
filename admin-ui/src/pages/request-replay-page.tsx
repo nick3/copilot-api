@@ -5,7 +5,7 @@ import {
   SendIcon,
   SquareIcon,
 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Link, useParams } from "react-router-dom"
 import { toast } from "sonner"
@@ -86,11 +86,7 @@ export function RequestReplayPage(): React.JSX.Element {
       setErrorDescription(null)
 
       try {
-        const [devMode, outboundBlob] = await Promise.all([
-          getDevMode(),
-          getRequestOutbound(requestId),
-        ])
-
+        const devMode = await getDevMode()
         if (cancelled) return
 
         if (!devMode.enabled) {
@@ -99,6 +95,9 @@ export function RequestReplayPage(): React.JSX.Element {
           setErrorDescription(t("replayPage.devModeDisabledHint"))
           return
         }
+
+        const outboundBlob = await getRequestOutbound(requestId)
+        if (cancelled) return
 
         const nextForm = buildReplayForm(outboundBlob)
         setBlob(outboundBlob)
@@ -166,7 +165,7 @@ export function RequestReplayPage(): React.JSX.Element {
     }
   }
 
-  const handleSend = useCallback(async () => {
+  async function handleSend(): Promise<void> {
     if (!form || !requestId) return
 
     const overrides = buildOverrides()
@@ -205,8 +204,7 @@ export function RequestReplayPage(): React.JSX.Element {
         abortRef.current = null
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form, requestId])
+  }
 
   function handleCancel(): void {
     abortRef.current?.abort()
