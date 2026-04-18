@@ -166,9 +166,9 @@ test("drops interleaved thinking beta for adaptive thinking requests", async () 
 
   const betas = anthropicBeta.split(",").map((item) => item.trim())
 
-  expect(betas).toContain("advanced-tool-use-2025-11-20")
   expect(betas).toContain("context-management-2025-06-27")
   expect(betas).not.toContain("interleaved-thinking-2025-05-14")
+  expect(betas).not.toContain("advanced-tool-use-2025-11-20")
 })
 
 test("enables vision headers for images nested inside tool results", async () => {
