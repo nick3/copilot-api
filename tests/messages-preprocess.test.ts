@@ -547,7 +547,7 @@ describe("mergeToolResultForClaude attachments fallback", () => {
           content: [
             {
               type: "text",
-              text: "second",
+              text: "second\n\nsecond detail",
             },
             {
               type: "image",
@@ -556,10 +556,6 @@ describe("mergeToolResultForClaude attachments fallback", () => {
                 media_type: "image/png",
                 data: "image-data",
               },
-            },
-            {
-              type: "text",
-              text: "second detail",
             },
           ],
         },
