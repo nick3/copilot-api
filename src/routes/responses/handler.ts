@@ -33,6 +33,7 @@ import {
   resolveAffinityKey,
   type AffinityKeySource,
 } from "~/lib/utils"
+import { flushPendingCapture } from "~/services/copilot/copilot-fetch"
 import {
   createResponses,
   type ResponsesPayload,
@@ -352,6 +353,7 @@ function insertRequestLog(
     affinityCacheKey: request.affinityCacheKey,
     ...record,
   })
+  flushPendingCapture(request.requestId)
 }
 
 function recordSelectionFailure(

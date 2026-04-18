@@ -63,6 +63,7 @@ import {
   compactInputByLatestCompaction,
   getResponsesRequestOptions,
 } from "~/routes/responses/utils"
+import { flushPendingCapture } from "~/services/copilot/copilot-fetch"
 import {
   createChatCompletions,
   getChatInitiator,
@@ -689,6 +690,7 @@ function insertRequestLog(
     premiumUnlimitedBefore,
     ...record,
   })
+  flushPendingCapture(requestId)
 }
 
 async function finalizeQuotaAndGetPremiumSnapshot(

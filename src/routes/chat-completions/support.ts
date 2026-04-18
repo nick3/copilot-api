@@ -9,6 +9,7 @@ import type {
 import type { AffinityKeySource } from "~/lib/utils"
 
 import { getClientIpInfo, getRequestHistoryStore } from "~/lib/request-history"
+import { flushPendingCapture } from "~/services/copilot/copilot-fetch"
 
 export const CHAT_COMPLETIONS_ENDPOINT = "/chat/completions"
 export const GPT_5_4_MODEL_ID = "gpt-5.4"
@@ -101,6 +102,7 @@ export function insertRequestLog(
     affinityCacheKey: request.affinityCacheKey,
     ...record,
   })
+  flushPendingCapture(request.requestId)
 }
 
 export function recordUnsupportedChatCompletionsModel(

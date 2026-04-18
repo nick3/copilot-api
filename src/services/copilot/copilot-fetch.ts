@@ -13,6 +13,30 @@ export type CopilotFetchCtx = {
   callSite: string
 }
 
+const pendingCaptures = new Map<string, PersistInput>()
+const pendingCapturePromises = new Map<string, Promise<void>>()
+
+export function flushPendingCapture(requestId: string): void {
+  const pending = pendingCaptures.get(requestId)
+  if (pending) {
+    pendingCaptures.delete(requestId)
+    pendingCapturePromises.delete(requestId)
+    persistNow(pending)
+    return
+  }
+  const promise = pendingCapturePromises.get(requestId)
+  if (promise) {
+    void promise.then(() => {
+      const deferred = pendingCaptures.get(requestId)
+      if (deferred) {
+        pendingCaptures.delete(requestId)
+        persistNow(deferred)
+      }
+      pendingCapturePromises.delete(requestId)
+    })
+  }
+}
+
 type RequestSnapshot = {
   url: string
   method: string
@@ -119,7 +143,7 @@ export async function copilotFetch(
   }
 
   if (!response.body) {
-    persist({
+    storePending({
       requestSnapshot,
       status: response.status,
       responseBody: "",
@@ -132,7 +156,7 @@ export async function copilotFetch(
 
   const [forClient, forCapture] = response.body.tee()
 
-  void (async () => {
+  const capturePromise = (async () => {
     const chunks: Array<Uint8Array> = []
     const reader =
       forCapture.getReader() as ReadableStreamDefaultReader<Uint8Array>
@@ -160,7 +184,7 @@ export async function copilotFetch(
         responseBodyKind = "json"
       }
 
-      persist({
+      storePending({
         requestSnapshot,
         status: response.status,
         responseBody: text,
@@ -172,6 +196,10 @@ export async function copilotFetch(
       consola.debug("copilotFetch capture stream failed", error)
     }
   })()
+
+  if (ctx.requestId) {
+    pendingCapturePromises.set(ctx.requestId, capturePromise)
+  }
 
   return new Response(forClient, {
     status: response.status,
@@ -189,7 +217,13 @@ type PersistInput = {
   ctx: CopilotFetchCtx
 }
 
-function persist({
+function storePending(input: PersistInput): void {
+  const id = input.ctx.requestId
+  if (!id) return
+  pendingCaptures.set(id, input)
+}
+
+function persistNow({
   requestSnapshot,
   status,
   responseBody,

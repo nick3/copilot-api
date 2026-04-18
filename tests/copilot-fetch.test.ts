@@ -82,7 +82,8 @@ test("4xx JSON response is captured", async () => {
     }),
   )
 
-  const { copilotFetch } = await import("~/services/copilot/copilot-fetch")
+  const { copilotFetch, flushPendingCapture } =
+    await import("~/services/copilot/copilot-fetch")
 
   const response = await copilotFetch(
     "https://example.com/v1/messages",
@@ -99,6 +100,7 @@ test("4xx JSON response is captured", async () => {
 
   expect(response.status).toBe(400)
   await new Promise((resolve) => setTimeout(resolve, 50))
+  flushPendingCapture("req-4xx")
   expect(insertSpy).toHaveBeenCalledTimes(1)
   expect(insertSpy).toHaveBeenCalledWith({
     requestId: "req-4xx",
@@ -225,7 +227,8 @@ test("tee() does not corrupt the caller-facing body", async () => {
     }),
   )
 
-  const { copilotFetch } = await import("~/services/copilot/copilot-fetch")
+  const { copilotFetch, flushPendingCapture } =
+    await import("~/services/copilot/copilot-fetch")
 
   const response = await copilotFetch(
     "https://example.com/v1/messages",
@@ -242,6 +245,7 @@ test("tee() does not corrupt the caller-facing body", async () => {
   )
 
   await new Promise((resolve) => setTimeout(resolve, 50))
+  flushPendingCapture("req-tee")
   expect(insertSpy).toHaveBeenCalledTimes(1)
   expect(insertSpy).toHaveBeenCalledWith(
     expect.objectContaining({
