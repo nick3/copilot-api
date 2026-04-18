@@ -17,6 +17,8 @@ import { captureOutboundHeadersSnapshot } from "~/lib/request-context"
 import { resolveEffectiveInitiator } from "~/lib/request-initiator"
 import { accountFromState } from "~/lib/state"
 
+import { copilotFetch } from "./copilot-fetch"
+
 function isGpt5MiniFamily(modelId: string): boolean {
   return modelId === "gpt-5-mini" || modelId.startsWith("gpt-5-mini-")
 }
@@ -64,6 +66,7 @@ export const createChatCompletions = async (
     subagentMarker?: SubagentMarker | null
     sessionId?: string
     compactType?: CompactType
+    requestId?: string
   },
 ) => {
   const ctx = account ?? accountFromState()
@@ -100,11 +103,18 @@ export const createChatCompletions = async (
   prepareForCompact(headers, options?.compactType)
   captureOutboundHeadersSnapshot(headers)
 
-  const response = await fetch(`${copilotBaseUrl(ctx)}/chat/completions`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(upstreamPayload),
-  })
+  const response = await copilotFetch(
+    `${copilotBaseUrl(ctx)}/chat/completions`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify(upstreamPayload),
+    },
+    {
+      requestId: options?.requestId,
+      callSite: "chat-completions",
+    },
+  )
 
   if (!response.ok) {
     consola.error("Failed to create chat completions", response)

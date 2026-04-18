@@ -744,6 +744,10 @@ export class RequestHistoryStore {
     } catch (error) {
       consola.debug("Failed to cleanup request_log retention", error)
     }
+
+    import("./request-outbound")
+      .then((m) => m.getRequestOutboundStore().cleanupOrphans())
+      .catch(() => {})
   }
 
   meta(): {

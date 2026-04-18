@@ -14,12 +14,15 @@ import {
   AdminApiError,
   type AdminConfig,
   type AdminConfigResponse,
+  type DevModeState,
   type ModelAliasSpec,
   type ProviderConfig,
   type ProviderModelConfig,
   type ReasoningEffort,
   getAdminConfig,
   getAdminModels,
+  getDevMode,
+  setDevMode,
   updateAdminConfig,
 } from "@/lib/admin-api"
 import { i18n } from "@/lib/i18n"
@@ -58,6 +61,7 @@ const SETTINGS_SECTION_IDS = [
   "prompts",
   "advanced",
   "providers",
+  "devMode",
 ] as const
 
 const REASONING_EFFORTS: Array<ReasoningEffort> = [
@@ -1824,6 +1828,104 @@ function ModelAliasesCard({
   )
 }
 
+type DeveloperModeCardProps = {
+  devMode: DevModeState
+  saving: boolean
+  onToggleEnabled: (value: boolean) => void
+  onCaptureChange: (field: "capture4xx" | "capture5xx" | "captureOther", value: boolean) => void
+}
+
+function DeveloperModeCard({
+  devMode,
+  saving,
+  onToggleEnabled,
+  onCaptureChange,
+}: DeveloperModeCardProps): React.JSX.Element {
+  const { t } = useTranslation()
+
+  const anyCaptureEnabled = devMode.capture4xx || devMode.capture5xx || devMode.captureOther
+
+  return (
+    <Card className="gap-4 py-4">
+      <CardHeader className="px-4">
+        <CardTitle>{t("settingsPage.devMode.title")}</CardTitle>
+        <CardDescription className="hidden sm:block">
+          {t("settingsPage.devMode.description")}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 px-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="text-sm font-medium">
+              {t("settingsPage.devMode.enable")}
+            </div>
+            <div className="text-muted-foreground text-xs">
+              {t("settingsPage.devMode.enableHint")}
+            </div>
+          </div>
+          <Switch
+            checked={devMode.enabled}
+            disabled={saving}
+            onCheckedChange={onToggleEnabled}
+          />
+        </div>
+
+        {devMode.enabled ? (
+          <div className="space-y-2">
+            <div className="text-sm font-medium">
+              {t("settingsPage.devMode.captureLabel")}
+            </div>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-1.5 text-sm">
+                <Switch
+                  checked={devMode.capture4xx}
+                  disabled={saving}
+                  onCheckedChange={(v) => onCaptureChange("capture4xx", v)}
+                  className="scale-75"
+                />
+                {t("settingsPage.devMode.capture4xx")}
+              </label>
+              <label className="flex items-center gap-1.5 text-sm">
+                <Switch
+                  checked={devMode.capture5xx}
+                  disabled={saving}
+                  onCheckedChange={(v) => onCaptureChange("capture5xx", v)}
+                  className="scale-75"
+                />
+                {t("settingsPage.devMode.capture5xx")}
+              </label>
+              <label className="flex items-center gap-1.5 text-sm">
+                <Switch
+                  checked={devMode.captureOther}
+                  disabled={saving}
+                  onCheckedChange={(v) => onCaptureChange("captureOther", v)}
+                  className="scale-75"
+                />
+                {t("settingsPage.devMode.captureOther")}
+              </label>
+            </div>
+            <div className="text-muted-foreground text-xs">
+              {t("settingsPage.devMode.captureHint")}
+            </div>
+          </div>
+        ) : (
+          <div className="text-muted-foreground text-xs">
+            {t("settingsPage.devMode.captureDisabled")}
+          </div>
+        )}
+
+        {devMode.enabled && anyCaptureEnabled ? (
+          <InlineAlert
+            variant="warning"
+            title={t("settingsPage.devMode.captureLabel")}
+            description={t("settingsPage.devMode.captureHint")}
+          />
+        ) : null}
+      </CardContent>
+    </Card>
+  )
+}
+
 type AdvancedSettingsCardProps = {
   accountAffinityEnabled: boolean
   modelRefreshIntervalInput: string
@@ -2443,6 +2545,9 @@ type SettingsPageViewProps = {
   isDirty: boolean
   onReload: () => void
   onSave: () => void
+  devMode: DevModeState
+  onDevModeEnabledToggle: (value: boolean) => void
+  onDevModeCaptureChange: (field: "capture4xx" | "capture5xx" | "captureOther", value: boolean) => void
   hasModels: boolean
   smallModelLabel: string
   smallModelValue: string
@@ -2530,6 +2635,12 @@ function useSettingsPageState(): SettingsPageViewProps {
   const [configPath, setConfigPath] = useState<string | null>(null)
 
   const [models, setModels] = useState<Array<string>>([])
+  const [devMode, setDevModeState] = useState<DevModeState>({
+    enabled: false,
+    capture4xx: false,
+    capture5xx: false,
+    captureOther: false,
+  })
   const [draft, setDraft] = useState<AdminConfig>({})
   const [initialDraftJson, setInitialDraftJson] = useState<string>("{}")
   const [modelRefreshIntervalInput, setModelRefreshIntervalInput] =
@@ -2661,9 +2772,10 @@ function useSettingsPageState(): SettingsPageViewProps {
     setError(null)
 
     try {
-      const [configRes, modelsRes] = await Promise.allSettled([
+      const [configRes, modelsRes, devModeRes] = await Promise.allSettled([
         getAdminConfig(),
         getAdminModels(),
+        getDevMode(),
       ])
 
       if (configRes.status === "fulfilled") {
@@ -2679,6 +2791,18 @@ function useSettingsPageState(): SettingsPageViewProps {
         toast.error(i18n.t("settingsPage.toast.loadModelsFailed"), {
           description:
             modelsRes.reason instanceof Error ? modelsRes.reason.message : String(modelsRes.reason),
+        })
+      }
+
+      if (devModeRes.status === "fulfilled") {
+        setDevModeState(devModeRes.value)
+      } else {
+        setDevModeState({ enabled: false, capture4xx: false, capture5xx: false, captureOther: false })
+        toast.error(i18n.t("settingsPage.toast.loadDevModeFailed"), {
+          description:
+            devModeRes.reason instanceof Error
+              ? devModeRes.reason.message
+              : String(devModeRes.reason),
         })
       }
     } catch (err) {
@@ -2893,6 +3017,55 @@ function useSettingsPageState(): SettingsPageViewProps {
   const accountAffinityEnabled = draft.accountAffinity ?? true
   const allowOriginalModelNamesForAliases =
     draft.allowOriginalModelNamesForAliases ?? false
+
+  const persistDevMode = useCallback(
+    async (next: DevModeState) => {
+      setSaving(true)
+      setError(null)
+
+      try {
+        const updated = await setDevMode(next)
+        setDevModeState(updated)
+        toast.success(i18n.t("settingsPage.toast.devModeSaved"))
+      } catch (err) {
+        const msg = err instanceof AdminApiError ? err.message : String(err)
+        setError(msg)
+        toast.error(i18n.t("settingsPage.toast.saveDevModeFailed"), {
+          description: msg,
+        })
+      } finally {
+        setSaving(false)
+      }
+    },
+    [],
+  )
+
+  const handleDevModeEnabledToggle = useCallback(
+    (value: boolean) => {
+      const next = {
+        enabled: value,
+        capture4xx: value ? devMode.capture4xx : false,
+        capture5xx: value ? devMode.capture5xx : false,
+        captureOther: value ? devMode.captureOther : false,
+      }
+      void persistDevMode(next)
+    },
+    [devMode.capture4xx, devMode.capture5xx, devMode.captureOther, persistDevMode],
+  )
+
+  const handleDevModeCaptureChange = useCallback(
+    (field: "capture4xx" | "capture5xx" | "captureOther", value: boolean) => {
+      const next = {
+        enabled: devMode.enabled,
+        capture4xx: devMode.capture4xx,
+        capture5xx: devMode.capture5xx,
+        captureOther: devMode.captureOther,
+        [field]: value,
+      }
+      void persistDevMode(next)
+    },
+    [devMode.enabled, devMode.capture4xx, devMode.capture5xx, devMode.captureOther, persistDevMode],
+  )
   const useFunctionApplyPatch = draft.useFunctionApplyPatch ?? true
   const forceAgent = draft.forceAgent ?? false
   const compactUseSmallModel = draft.compactUseSmallModel ?? true
@@ -2910,6 +3083,9 @@ function useSettingsPageState(): SettingsPageViewProps {
     isDirty,
     onReload,
     onSave,
+    devMode,
+    onDevModeEnabledToggle: handleDevModeEnabledToggle,
+    onDevModeCaptureChange: handleDevModeCaptureChange,
     hasModels,
     smallModelLabel,
     smallModelValue,
@@ -2997,6 +3173,9 @@ function SettingsPageView({
   isDirty,
   onReload,
   onSave,
+  devMode,
+  onDevModeEnabledToggle,
+  onDevModeCaptureChange,
   hasModels,
   smallModelLabel,
   smallModelValue,
@@ -3080,6 +3259,7 @@ function SettingsPageView({
       { id: "prompts", label: t("settingsPage.sections.prompts") },
       { id: "advanced", label: t("settingsPage.sections.advanced") },
       { id: "providers", label: t("settingsPage.sections.providers") },
+      { id: "devMode", label: t("settingsPage.sections.devMode") },
     ]
   }, [t])
 
@@ -3336,6 +3516,21 @@ function SettingsPageView({
               onAddModel={onProvidersAddModel}
               onRemoveModel={onProvidersRemoveModel}
               onUpdateModel={onProvidersUpdateModel}
+            />
+          </SettingsSectionCard>
+
+          {/* Developer Mode */}
+          <SettingsSectionCard
+            id="devMode"
+            isActive={activeSection === "devMode"}
+            ref={(el) => registerSection("devMode", el)}
+            style={{ animationDelay: "360ms" }}
+          >
+            <DeveloperModeCard
+              devMode={devMode}
+              saving={saving}
+              onToggleEnabled={onDevModeEnabledToggle}
+              onCaptureChange={onDevModeCaptureChange}
             />
           </SettingsSectionCard>
         </main>

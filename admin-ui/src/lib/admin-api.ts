@@ -1,5 +1,7 @@
 import { readAdminToken } from "@/lib/admin-token"
 
+import type { SSEEvent } from "./sse"
+
 export const ADMIN_TOKEN_REQUIRED_EVENT = "admin-ui:admin-token-required"
 
 // Wire types from backend (SQLite 0/1/null)
@@ -48,6 +50,8 @@ type AdminRequestItemWire = {
   affinity_key_source?: string | null
   selection_reason?: string | null
   upstream_error_message_raw?: string | null
+
+  has_outbound?: boolean
 
   error?: unknown
 }
@@ -113,6 +117,7 @@ export type AdminRequestsResponse = {
 
 export type AdminRequestDetailResponse = {
   item: AdminRequestItem | null
+  has_outbound?: boolean
 }
 
 export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
@@ -219,6 +224,55 @@ export type PremiumStatsResponse = {
   range: { from: string; to: string; granularity: "day" | "hour" }
 }
 
+export type DevModeState = {
+  enabled: boolean
+  capture4xx: boolean
+  capture5xx: boolean
+  captureOther: boolean
+}
+
+export type OutboundBlob = {
+  request_id: string
+  captured_at_ms: number
+  http_status: number
+  upstream_url: string
+  upstream_method: string
+  request_headers: Record<string, string>
+  request_body: string | null
+  request_body_kind: "json" | "text" | "binary"
+  response_status: number
+  response_headers: Record<string, string>
+  response_body: string | null
+  response_body_kind: "json" | "sse" | "text"
+  redacted_header_keys: Array<string>
+  original: {
+    path: string
+    upstream_endpoint: string | null
+    upstream_model: string | null
+    account_id: string | null
+    client_model: string | null
+  } | null
+}
+
+export type ReplayRequest = {
+  accountId: string
+  overrides?: {
+    body?: string
+    headers?: Record<string, string>
+  }
+  mode: "collect" | "live"
+}
+
+export type ReplayCollectResult = {
+  status: number
+  statusText: string
+  headers: Record<string, string>
+  raw: { body: string; kind: "json" | "sse" | "text" }
+  translated: unknown
+  durationMs: number
+  replayedAt: number
+}
+
 export class AdminApiError extends Error {
   readonly status: number
   readonly responseText: string
@@ -235,11 +289,10 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-async function fetchAdminJson<T>(
-  path: string,
+function buildAdminHeaders(
   init?: RequestInit,
   overrideToken?: string,
-): Promise<T> {
+): Headers {
   const token = overrideToken?.trim() ?? readAdminToken()
   const headers = new Headers(init?.headers ?? undefined)
 
@@ -251,31 +304,44 @@ async function fetchAdminJson<T>(
     headers.set("content-type", "application/json")
   }
 
+  return headers
+}
+
+async function readAdminError(res: Response): Promise<string> {
+  const txt = await res.text().catch(() => "")
+  let message = txt
+
+  try {
+    const parsed = JSON.parse(txt) as unknown
+    if (isPlainObject(parsed) && "error" in parsed) {
+      const err = (parsed as { error?: unknown }).error
+      if (isPlainObject(err) && typeof (err as { message?: unknown }).message === "string") {
+        message = (err as { message: string }).message
+      }
+    }
+  } catch {
+    // ignore JSON parsing errors and keep raw text
+  }
+
+  if (res.status === 401 || res.status === 403) {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event(ADMIN_TOKEN_REQUIRED_EVENT))
+    }
+  }
+
+  return message
+}
+
+async function fetchAdminJson<T>(
+  path: string,
+  init?: RequestInit,
+  overrideToken?: string,
+): Promise<T> {
+  const headers = buildAdminHeaders(init, overrideToken)
   const res = await fetch(path, { ...init, headers })
 
   if (!res.ok) {
-    const txt = await res.text().catch(() => "")
-    let message = txt
-
-    try {
-      const parsed = JSON.parse(txt) as unknown
-      if (isPlainObject(parsed) && "error" in parsed) {
-        const err = (parsed as { error?: unknown }).error
-        if (isPlainObject(err) && typeof (err as { message?: unknown }).message === "string") {
-          message = (err as { message: string }).message
-        }
-      }
-    } catch {
-      // ignore JSON parsing errors and keep raw text
-    }
-
-    if (res.status === 401 || res.status === 403) {
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new Event(ADMIN_TOKEN_REQUIRED_EVENT))
-      }
-    }
-
-    throw new AdminApiError(res.status, message)
+    throw new AdminApiError(res.status, await readAdminError(res))
   }
 
   return (await res.json()) as T
@@ -335,12 +401,14 @@ export async function queryAdminRequests(params: {
 export async function getAdminRequestDetail(
   requestId: string
 ): Promise<AdminRequestDetailResponse> {
-  const response = await fetchAdminJson<{ item: AdminRequestItemWire | null }>(
-    `/api/admin/requests/${encodeURIComponent(requestId)}`
-  )
+  const response = await fetchAdminJson<{
+    item: AdminRequestItemWire | null
+    has_outbound?: boolean
+  }>(`/api/admin/requests/${encodeURIComponent(requestId)}`)
 
   return {
     item: response.item ? normalizeAdminRequestItem(response.item) : null,
+    has_outbound: response.has_outbound,
   }
 }
 
@@ -383,6 +451,73 @@ export async function getAdminPremiumStats(params: {
   return fetchAdminJson<PremiumStatsResponse>(
     `/api/admin/stats/premium-daily?${q.toString()}`,
   )
+}
+
+export async function getDevMode(): Promise<DevModeState> {
+  return fetchAdminJson<DevModeState>("/api/admin/dev-mode")
+}
+
+export async function setDevMode(
+  patch: Partial<DevModeState>,
+): Promise<DevModeState> {
+  return fetchAdminJson<DevModeState>("/api/admin/dev-mode", {
+    method: "POST",
+    body: JSON.stringify(patch),
+  })
+}
+
+export async function getRequestOutbound(
+  requestId: string,
+): Promise<OutboundBlob> {
+  return fetchAdminJson<OutboundBlob>(
+    `/api/admin/requests/${encodeURIComponent(requestId)}/outbound`,
+  )
+}
+
+export async function replayCollect(
+  requestId: string,
+  req: Omit<ReplayRequest, "mode">,
+): Promise<ReplayCollectResult> {
+  return fetchAdminJson<ReplayCollectResult>(
+    `/api/admin/requests/${encodeURIComponent(requestId)}/replay`,
+    {
+      method: "POST",
+      body: JSON.stringify({ ...req, mode: "collect" }),
+    },
+  )
+}
+
+export async function replayLive(
+  requestId: string,
+  req: Omit<ReplayRequest, "mode">,
+  onEvent: (event: SSEEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const headers = buildAdminHeaders(
+    {
+      body: JSON.stringify({ ...req, mode: "live" }),
+      headers: { "content-type": "application/json" },
+    },
+  )
+  const res = await fetch(
+    `/api/admin/requests/${encodeURIComponent(requestId)}/replay`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ ...req, mode: "live" }),
+      signal,
+    },
+  )
+
+  if (!res.ok || !res.body) {
+    throw new AdminApiError(
+      res.status,
+      !res.ok ? await readAdminError(res) : "Response body is missing",
+    )
+  }
+
+  const { parseSSEStream } = await import("./sse")
+  await parseSSEStream(res.body.getReader(), onEvent, signal)
 }
 
 // --- Account Management Types ---

@@ -76,6 +76,7 @@ export const handleWithChatCompletions = async (
     upstreamRequestId: requestId,
     sessionId,
     compactType,
+    requestId,
   })
 
   if (isNonStreaming(response)) {
@@ -154,6 +155,7 @@ export const handleWithResponsesApi = async (
     upstreamRequestId: requestId,
     sessionId,
     compactType,
+    requestId,
   })
 
   if (responsesPayload.stream && isAsyncIterable(response)) {
@@ -245,6 +247,7 @@ export const handleWithMessagesApi = async (
     upstreamRequestId: requestId,
     sessionId,
     compactType,
+    requestId,
   })
 
   if (isAsyncIterable(response)) {

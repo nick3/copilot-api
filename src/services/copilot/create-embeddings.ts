@@ -5,9 +5,14 @@ import { HTTPError } from "~/lib/error"
 import { captureOutboundHeadersSnapshot } from "~/lib/request-context"
 import { accountFromState } from "~/lib/state"
 
+import { copilotFetch } from "./copilot-fetch"
+
 export const createEmbeddings = async (
   payload: EmbeddingRequest,
   account?: AccountContext,
+  options?: {
+    requestId?: string
+  },
 ) => {
   const ctx = account ?? accountFromState()
   if (!ctx.copilotToken) throw new Error("Copilot token not found")
@@ -15,11 +20,19 @@ export const createEmbeddings = async (
   const headers = copilotHeaders(ctx)
   captureOutboundHeadersSnapshot(headers)
 
-  const response = await fetch(`${copilotBaseUrl(ctx)}/embeddings`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-  })
+  const response = await copilotFetch(
+    `${copilotBaseUrl(ctx)}/embeddings`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    },
+    {
+      requestId: options?.requestId,
+      callSite: "embeddings",
+      capturable: false,
+    },
+  )
 
   if (!response.ok) throw new HTTPError("Failed to create embeddings", response)
 

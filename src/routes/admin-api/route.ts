@@ -1,7 +1,5 @@
 /* eslint-disable max-lines */
 import { Hono, type Context } from "hono"
-import { randomUUID } from "node:crypto"
-import fs from "node:fs/promises"
 
 import {
   DEFAULT_IDENTITY_ENTERPRISE_DOMAIN,
@@ -25,6 +23,7 @@ import {
   mergeConfigWithDefaults,
   PROVIDER_TYPE_ANTHROPIC,
   type AppConfig,
+  type DevModeConfig,
   type LogLevel,
   type ModelConfig,
   type ProviderConfig,
@@ -35,12 +34,14 @@ import {
   getStatsStore,
   type AccountStatsRow,
 } from "~/lib/request-history"
+import { getRequestOutboundStore } from "~/lib/request-outbound"
 import { applySharedSessionAffinityRetention } from "~/lib/session-affinity-store"
 import { toLocalDateString } from "~/lib/stats-store"
 import { isAccountType } from "~/lib/types/account"
 
 import { authSessionManager } from "./auth-sessions"
-
+import { writeConfigFile } from "./config-writer"
+import { replayRoutes } from "./replay"
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN?.trim() || undefined
 
 type AdminAccessDecision =
@@ -193,6 +194,7 @@ const CONFIG_KEYS = new Set<keyof AppConfig>([
   "sessionAffinityRetentionDays",
   "useMessagesApi",
   "useResponsesApiWebSearch",
+  "devMode",
 ])
 
 const REASONING_EFFORTS = new Set<ReasoningEffort>([
@@ -992,6 +994,59 @@ function applyProvidersConfig(
   return undefined
 }
 
+const DEV_MODE_KEYS = new Set([
+  "enabled",
+  "capture4xx",
+  "capture5xx",
+  "captureOther",
+])
+
+function parseDevModeConfig(value: unknown): ParseFieldResult<DevModeConfig> {
+  if (value === null || value === undefined) return { clear: true }
+  if (!isPlainObject(value)) return { error: "devMode must be an object" }
+
+  for (const key of Object.keys(value)) {
+    if (!DEV_MODE_KEYS.has(key)) {
+      return { error: `devMode.${key} is not supported` }
+    }
+  }
+
+  for (const key of DEV_MODE_KEYS) {
+    const v = value[key]
+    if (v !== undefined && typeof v !== "boolean") {
+      return { error: `devMode.${key} must be a boolean` }
+    }
+  }
+
+  return {
+    value: {
+      enabled: value.enabled === true,
+      capture4xx: value.capture4xx === true,
+      capture5xx: value.capture5xx === true,
+      captureOther: value.captureOther === true,
+    },
+  }
+}
+
+function applyDevModeConfig(
+  next: AppConfig,
+  value: unknown,
+): string | undefined {
+  const parsed = parseDevModeConfig(value)
+  if ("error" in parsed) return parsed.error
+  if ("clear" in parsed) {
+    next.devMode = {
+      enabled: false,
+      capture4xx: false,
+      capture5xx: false,
+      captureOther: false,
+    }
+    return undefined
+  }
+  next.devMode = parsed.value
+  return undefined
+}
+
 type ConfigPatchHandler = (
   next: AppConfig,
   value: unknown,
@@ -1028,6 +1083,7 @@ const CONFIG_PATCH_HANDLERS: Partial<Record<string, ConfigPatchHandler>> = {
     applyOptionalBoolean(next, "useMessagesApi", value),
   useResponsesApiWebSearch: (next, value) =>
     applyOptionalBoolean(next, "useResponsesApiWebSearch", value),
+  devMode: applyDevModeConfig,
 }
 
 function applyConfigPatch(
@@ -1052,26 +1108,6 @@ function applyConfigPatch(
   }
 
   return { config: next }
-}
-
-async function writeConfigFile(config: AppConfig): Promise<void> {
-  await fs.mkdir(PATHS.APP_DIR, { recursive: true })
-
-  const content = `${JSON.stringify(config, null, 2)}\n`
-  const tmpPath = `${PATHS.CONFIG_PATH}.tmp-${randomUUID()}`
-
-  try {
-    await fs.writeFile(tmpPath, content, "utf8")
-    try {
-      await fs.chmod(tmpPath, 0o600)
-    } catch {
-      // Ignore chmod errors (e.g. unsupported filesystem).
-    }
-    await fs.rename(tmpPath, PATHS.CONFIG_PATH)
-  } catch (error) {
-    await fs.rm(tmpPath, { force: true }).catch(() => {})
-    throw error
-  }
 }
 
 export const adminApiRoutes = new Hono()
@@ -1426,8 +1462,16 @@ adminApiRoutes.get("/requests", (c) => {
     toMs,
   })
 
+  const outboundIds = getRequestOutboundStore().hasOutboundForIds(
+    result.items.map((i) => i.request_id),
+  )
+  const itemsWithOutbound = result.items.map((item) => ({
+    ...item,
+    has_outbound: outboundIds.has(item.request_id),
+  }))
+
   return c.json({
-    items: result.items,
+    items: itemsWithOutbound,
     next_cursor_id: result.nextCursorId,
     has_more: result.hasMore,
   })
@@ -1437,7 +1481,10 @@ adminApiRoutes.get("/requests/:requestId", (c) => {
   const requestId = c.req.param("requestId")
   const store = getRequestHistoryStore()
   const item = store.getByRequestId(requestId)
-  return c.json({ item })
+  const hasOutbound =
+    item !== null
+    && getRequestOutboundStore().getByRequestId(requestId) !== null
+  return c.json({ item, has_outbound: hasOutbound })
 })
 
 adminApiRoutes.post("/accounts/auth/start", async (c) => {
@@ -1744,3 +1791,5 @@ adminApiRoutes.get("/stats/premium-daily", (c) => {
     range: { from: resolvedFrom, to: resolvedTo, granularity },
   })
 })
+
+adminApiRoutes.route("/", replayRoutes)

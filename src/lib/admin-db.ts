@@ -284,7 +284,32 @@ function migrateV11(db: Database): void {
     }
   }
 
-  db.run("PRAGMA user_version = 11;")
+  db.run(`
+    CREATE TABLE IF NOT EXISTS request_outbound (
+      request_id         TEXT PRIMARY KEY,
+      captured_at_ms     INTEGER NOT NULL,
+      http_status        INTEGER NOT NULL,
+
+      upstream_url       TEXT NOT NULL,
+      upstream_method    TEXT NOT NULL,
+
+      request_headers    TEXT NOT NULL,
+      request_body       TEXT,
+      request_body_kind  TEXT NOT NULL,
+
+      response_status    INTEGER NOT NULL,
+      response_headers   TEXT NOT NULL,
+      response_body      TEXT,
+      response_body_kind TEXT NOT NULL,
+
+      FOREIGN KEY (request_id) REFERENCES request_log(request_id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_request_outbound_captured_at
+      ON request_outbound(captured_at_ms DESC);
+
+    PRAGMA user_version = 11;
+  `)
 }
 
 function migrateV8ToV11(db: Database, current: number): void {
@@ -305,6 +330,7 @@ function migrateV8ToV11(db: Database, current: number): void {
   }
 }
 
+// eslint-disable-next-line complexity -- migration chain grows with each version
 function migrateAdminDb(db: Database): void {
   const row = db.query("PRAGMA user_version;").get() as {
     user_version?: number
@@ -312,6 +338,7 @@ function migrateAdminDb(db: Database): void {
   const current = row?.user_version ?? 0
 
   if (current >= 11) {
+    if (current === 11) migrateV11(db)
     return
   }
 

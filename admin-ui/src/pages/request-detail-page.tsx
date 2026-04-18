@@ -2,6 +2,7 @@ import {
   ArrowLeftIcon,
   DownloadIcon,
   LoaderCircleIcon,
+  PlayIcon,
   RefreshCwIcon,
 } from "lucide-react"
 import { useEffect, useState } from "react"
@@ -13,6 +14,7 @@ import {
   AdminApiError,
   type AdminRequestItem,
   getAdminRequestDetail,
+  getDevMode,
 } from "@/lib/admin-api"
 import { fmtDurationSeconds, fmtLocalDateTime, fmtNum } from "@/lib/format"
 import { i18n } from "@/lib/i18n"
@@ -120,6 +122,8 @@ export function RequestDetailPage(): React.JSX.Element {
   const [item, setItem] = useState<AdminRequestItem | null>(null)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [search, setSearch] = useState("")
+  const [devModeEnabled, setDevModeEnabled] = useState(false)
+  const [hasOutbound, setHasOutbound] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -128,14 +132,20 @@ export function RequestDetailPage(): React.JSX.Element {
       setLoading(true)
       setFetchError(null)
       try {
-        const data = await getAdminRequestDetail(requestId)
+        const [detailData, devModeData] = await Promise.all([
+          getAdminRequestDetail(requestId),
+          getDevMode().catch(() => ({ enabled: false, capture4xx: false })),
+        ])
         if (cancelled) return
-        setItem(data.item)
+        setItem(detailData.item)
+        setDevModeEnabled(devModeData.enabled)
+        setHasOutbound(detailData.has_outbound === true)
       } catch (err) {
         if (cancelled) return
         const msg = err instanceof AdminApiError ? err.message : String(err)
         setFetchError(msg)
         setItem(null)
+        setHasOutbound(false)
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -150,9 +160,14 @@ export function RequestDetailPage(): React.JSX.Element {
 
   function refresh(): void {
     setRefreshing(true)
-    getAdminRequestDetail(requestId)
-      .then((data) => {
-        setItem(data.item)
+    Promise.all([
+      getAdminRequestDetail(requestId),
+      getDevMode().catch(() => ({ enabled: false, capture4xx: false })),
+    ])
+      .then(([detailData, devModeData]) => {
+        setItem(detailData.item)
+        setDevModeEnabled(devModeData.enabled)
+        setHasOutbound(detailData.has_outbound === true)
         setFetchError(null)
       })
       .catch((err: unknown) => {
@@ -167,14 +182,20 @@ export function RequestDetailPage(): React.JSX.Element {
   function retry(): void {
     setLoading(true)
     setFetchError(null)
-    getAdminRequestDetail(requestId)
-      .then((data) => {
-        setItem(data.item)
+    Promise.all([
+      getAdminRequestDetail(requestId),
+      getDevMode().catch(() => ({ enabled: false, capture4xx: false })),
+    ])
+      .then(([detailData, devModeData]) => {
+        setItem(detailData.item)
+        setDevModeEnabled(devModeData.enabled)
+        setHasOutbound(detailData.has_outbound === true)
       })
       .catch((err: unknown) => {
         const msg = err instanceof AdminApiError ? err.message : String(err)
         setFetchError(msg)
         setItem(null)
+        setHasOutbound(false)
       })
       .finally(() => setLoading(false))
   }
@@ -287,20 +308,43 @@ export function RequestDetailPage(): React.JSX.Element {
             {t("common.back")}
           </Link>
         </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="ml-auto"
-          disabled={refreshing}
-          onClick={refresh}
-        >
-          {refreshing ? (
-            <LoaderCircleIcon className="size-4 animate-spin" />
-          ) : (
-            <RefreshCwIcon className="size-4" />
+        <div className="ml-auto flex items-center gap-2">
+          {devModeEnabled && (
+            hasOutbound ? (
+              <Button variant="outline" size="sm" asChild>
+                <Link to={`/requests/${item.request_id}/replay`}>
+                  <PlayIcon className="size-4" />
+                  {t("requestDetailPage.replay.button")}
+                </Link>
+              </Button>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="outline" size="sm" disabled>
+                    <PlayIcon className="size-4" />
+                    {t("requestDetailPage.replay.button")}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {t("requestDetailPage.replay.noBlob")}
+                </TooltipContent>
+              </Tooltip>
+            )
           )}
-          {t("common.refresh")}
-        </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={refreshing}
+            onClick={refresh}
+          >
+            {refreshing ? (
+              <LoaderCircleIcon className="size-4 animate-spin" />
+            ) : (
+              <RefreshCwIcon className="size-4" />
+            )}
+            {t("common.refresh")}
+          </Button>
+        </div>
       </div>
 
       {/* Header card */}
@@ -328,8 +372,8 @@ export function RequestDetailPage(): React.JSX.Element {
           <CardHeader>
             <CardTitle>{t("requestDetailPage.summaryTitle")}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Table>
+          <CardContent className="overflow-hidden">
+            <Table className="table-fixed">
               <TableBody>
                 {/* ── Request ── */}
                 <SectionHeader

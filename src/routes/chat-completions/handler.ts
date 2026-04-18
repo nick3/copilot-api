@@ -389,6 +389,7 @@ async function handleStreamingRequest(params: {
     response = await createChatCompletions(payload, accountCtx, {
       upstreamRequestId: request.upstreamRequestId,
       sessionId: request.upstreamSessionId,
+      requestId: request.requestId,
     })
     selection.confirmAffinity?.()
   } catch (error) {
@@ -738,6 +739,7 @@ async function handleNonStreamingRequest(params: {
     const response = await createChatCompletions(payload, accountCtx, {
       upstreamRequestId: request.upstreamRequestId,
       sessionId: request.upstreamSessionId,
+      requestId: request.requestId,
     })
     if (!isNonStreaming(response)) {
       throw new Error("Upstream returned a stream unexpectedly")

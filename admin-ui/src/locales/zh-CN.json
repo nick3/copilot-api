@@ -77,6 +77,7 @@
     "back": "返回",
     "download": "下载",
     "copyJson": "复制 JSON",
+    "copy": "复制",
     "actions": "操作",
     "enabled": "启用"
   },
@@ -208,7 +209,8 @@
       "quota": "此请求完成后剩余的 Premium 交互额度。",
       "duration": "总响应时间（秒）。",
       "tokens": "消耗的总 token 数（输入 + 输出）。"
-    }
+    },
+    "replayAvailable": "可重放"
   },
   "modelsPage": {
     "title": "模型",
@@ -350,6 +352,69 @@
       "before": "之前",
       "after": "之后",
       "diff": "变化"
+    },
+    "replay": {
+      "button": "重放",
+      "noBlob": "未捕获出站数据。该请求未触发 4xx 捕获，或发生在开发者模式启用之前。"
+    }
+  },
+  "replayPage": {
+    "title": "请求重放",
+    "back": "返回详情",
+    "reset": "重置",
+    "noBlob": "此请求没有捕获到出站数据。",
+    "noBlobHint": "该请求未触发 4xx 捕获，或发生在开发者模式启用之前。",
+    "devModeDisabled": "开发者模式未启用。",
+    "devModeDisabledHint": "请在设置中启用开发者模式以使用请求重放。",
+    "loadError": "加载重放数据失败。",
+    "contextTitle": "原始请求",
+    "placeholderResponse": "响应面板（即将推出）",
+    "body": {
+      "title": "请求体",
+      "format": "格式化",
+      "reset": "重置",
+      "valid": "有效 JSON",
+      "invalid": "无效 JSON",
+      "binaryReadOnly": "二进制请求体 — 内容为只读。",
+      "formatError": "无法格式化：无效的 JSON"
+    },
+    "account": {
+      "label": "账号",
+      "original": "原始",
+      "noAccounts": "没有可用账号"
+    },
+    "headers": {
+      "title": "请求头",
+      "authTitle": "认证头（只读）",
+      "addHeader": "添加请求头",
+      "keyPlaceholder": "请求头名称",
+      "valuePlaceholder": "请求头值",
+      "invalidKey": "无效的请求头名称",
+      "sensitiveKey": "无法添加敏感请求头 — 认证头由系统自动管理。"
+    },
+    "send": {
+      "button": "发送",
+      "cancel": "取消",
+      "sending": "发送中...",
+      "streaming": "流式传输中...",
+      "modeCollect": "收集",
+      "modeLive": "实时",
+      "modeHint": "收集模式缓冲完整响应；实时模式逐块流式传输。",
+      "quotaWarning": "重放会向 GitHub 发送真实请求并消耗上游配额。"
+    },
+    "response": {
+      "title": "响应",
+      "tabRaw": "原始",
+      "tabTranslated": "转换后",
+      "tabHeaders": "响应头",
+      "empty": "发送请求以查看响应。",
+      "translationUnavailable": "转换仅适用于 /v1/messages 请求。",
+      "translationError": "转换失败",
+      "streamingChunks": "流式传输中... {{count}} 个块",
+      "streamingTranslation": "等待转换结果...",
+      "status": "状态",
+      "duration": "耗时",
+      "replayedAt": "重放时间"
     }
   },
   "jsonViewer": {
@@ -377,6 +442,7 @@
       "aliases": "别名",
       "prompts": "提示词",
       "advanced": "高级",
+      "devMode": "开发者模式",
       "providers": "上游提供方"
     },
     "navigation": {
@@ -388,9 +454,12 @@
     },
     "toast": {
       "loadModelsFailed": "加载模型失败",
+      "loadDevModeFailed": "加载开发者模式设置失败",
       "loadConfigFailed": "加载配置失败",
       "configSaved": "配置已保存",
-      "saveConfigFailed": "保存配置失败"
+      "saveConfigFailed": "保存配置失败",
+      "devModeSaved": "开发者模式已更新",
+      "saveDevModeFailed": "更新开发者模式失败"
     },
     "common": {
       "defaultOption": "(默认)",
@@ -461,6 +530,18 @@
       "blockOriginal": "阻止原始模型 ID",
       "emptyState": "未配置模型别名。",
       "addButton": "添加别名"
+    },
+    "devMode": {
+      "title": "开发者模式",
+      "description": "启用请求重放和上游请求捕获，用于调试。",
+      "enable": "启用开发者模式",
+      "enableHint": "启用后才能访问重放页面。后端强制校验此开关。",
+      "captureLabel": "捕获上游响应",
+      "capture4xx": "4xx",
+      "capture5xx": "5xx",
+      "captureOther": "其它",
+      "captureHint": "将完整的出站请求体和脱敏后的请求头持久化到 admin.sqlite。随请求历史一起清理（35 天）。",
+      "captureDisabled": "请先启用开发者模式。"
     },
     "advanced": {
       "title": "高级",

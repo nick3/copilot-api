@@ -33,6 +33,7 @@ import {
   resolveAffinityKey,
   type AffinityKeySource,
 } from "~/lib/utils"
+import { flushPendingCapture } from "~/services/copilot/copilot-fetch"
 import {
   createResponses,
   type ResponsesPayload,
@@ -352,6 +353,7 @@ function insertRequestLog(
     affinityCacheKey: request.affinityCacheKey,
     ...record,
   })
+  void flushPendingCapture(request.requestId)
 }
 
 function recordSelectionFailure(
@@ -464,6 +466,7 @@ async function handleStreamingResponses(params: {
         initiator,
         upstreamRequestId: request.upstreamRequestId,
         sessionId: request.upstreamSessionId,
+        requestId: request.requestId,
       },
       accountCtx,
     )
@@ -794,6 +797,7 @@ async function handleNonStreamingResponses(params: {
         initiator,
         upstreamRequestId: request.upstreamRequestId,
         sessionId: request.upstreamSessionId,
+        requestId: request.requestId,
       },
       accountCtx,
     )

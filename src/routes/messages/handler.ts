@@ -63,6 +63,7 @@ import {
   compactInputByLatestCompaction,
   getResponsesRequestOptions,
 } from "~/routes/responses/utils"
+import { flushPendingCapture } from "~/services/copilot/copilot-fetch"
 import {
   createChatCompletions,
   getChatInitiator,
@@ -448,6 +449,7 @@ const handleWithChatCompletions = async (params: {
       subagentMarker,
       sessionId,
       compactType,
+      requestId: instr.requestId,
     })
     instr.confirmAffinity?.()
     instr.confirmOwnership?.()
@@ -551,6 +553,7 @@ const handleWithResponsesApi = async (params: {
         subagentMarker,
         sessionId,
         compactType,
+        requestId: instr.requestId,
       },
       ctx,
     )
@@ -687,6 +690,7 @@ function insertRequestLog(
     premiumUnlimitedBefore,
     ...record,
   })
+  void flushPendingCapture(requestId)
 }
 
 async function finalizeQuotaAndGetPremiumSnapshot(
@@ -1412,6 +1416,7 @@ const handleWithMessagesApi = async (params: {
       subagentMarker,
       sessionId,
       compactType,
+      requestId: instr.requestId,
     })
     instr.confirmAffinity?.()
     instr.confirmOwnership?.()

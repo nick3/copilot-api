@@ -203,7 +203,9 @@ async function runEmbeddingsWithAccount({
   try {
     const accountCtx = toAccountContext(account)
 
-    const response = await createEmbeddings(payload, accountCtx)
+    const response = await createEmbeddings(payload, accountCtx, {
+      requestId: ctx.requestId,
+    })
 
     usage = normalizeEmbeddingsUsage(response.usage)
 

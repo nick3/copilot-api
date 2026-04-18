@@ -77,6 +77,7 @@
     "back": "Back",
     "download": "Download",
     "copyJson": "Copy JSON",
+    "copy": "Copy",
     "actions": "Actions",
     "enabled": "Enabled"
   },
@@ -208,7 +209,8 @@
       "quota": "Premium interactions quota remaining after this request.",
       "duration": "Total response time in seconds.",
       "tokens": "Total tokens consumed (input + output)."
-    }
+    },
+    "replayAvailable": "Replay available"
   },
   "modelsPage": {
     "title": "Models",
@@ -350,6 +352,69 @@
       "before": "Before",
       "after": "After",
       "diff": "Change"
+    },
+    "replay": {
+      "button": "Replay",
+      "noBlob": "No outbound data captured. This request did not trigger 4xx capture or predates Developer Mode."
+    }
+  },
+  "replayPage": {
+    "title": "Request Replay",
+    "back": "Back to detail",
+    "reset": "Reset",
+    "noBlob": "No outbound data captured for this request.",
+    "noBlobHint": "This request did not trigger 4xx capture or predates Developer Mode.",
+    "devModeDisabled": "Developer Mode is disabled.",
+    "devModeDisabledHint": "Enable Developer Mode in Settings to use request replay.",
+    "loadError": "Failed to load replay data.",
+    "contextTitle": "Original Request",
+    "placeholderResponse": "Response panel (coming soon)",
+    "body": {
+      "title": "Request Body",
+      "format": "Format",
+      "reset": "Reset",
+      "valid": "Valid JSON",
+      "invalid": "Invalid JSON",
+      "binaryReadOnly": "Binary body — content is read-only.",
+      "formatError": "Cannot format: invalid JSON"
+    },
+    "account": {
+      "label": "Account",
+      "original": "original",
+      "noAccounts": "No available accounts"
+    },
+    "headers": {
+      "title": "Request Headers",
+      "authTitle": "Auth Headers (read-only)",
+      "addHeader": "Add header",
+      "keyPlaceholder": "Header name",
+      "valuePlaceholder": "Header value",
+      "invalidKey": "Invalid header name",
+      "sensitiveKey": "Cannot add sensitive header — auth headers are managed automatically."
+    },
+    "send": {
+      "button": "Send",
+      "cancel": "Cancel",
+      "sending": "Sending...",
+      "streaming": "Streaming...",
+      "modeCollect": "Collect",
+      "modeLive": "Live",
+      "modeHint": "Collect buffers the full response; Live streams chunks in real-time.",
+      "quotaWarning": "Replay sends a real request to GitHub and consumes upstream quota."
+    },
+    "response": {
+      "title": "Response",
+      "tabRaw": "Raw",
+      "tabTranslated": "Translated",
+      "tabHeaders": "Headers",
+      "empty": "Send a request to see the response.",
+      "translationUnavailable": "Translation only available for /v1/messages requests.",
+      "translationError": "Translation failed",
+      "streamingChunks": "Streaming... {{count}} chunks",
+      "streamingTranslation": "Waiting for translation...",
+      "status": "Status",
+      "duration": "Duration",
+      "replayedAt": "Replayed at"
     }
   },
   "jsonViewer": {
@@ -377,6 +442,7 @@
       "aliases": "Aliases",
       "prompts": "Prompts",
       "advanced": "Advanced",
+      "devMode": "Developer Mode",
       "providers": "Providers"
     },
     "navigation": {
@@ -388,9 +454,12 @@
     },
     "toast": {
       "loadModelsFailed": "Failed to load models",
+      "loadDevModeFailed": "Failed to load Developer Mode settings",
       "loadConfigFailed": "Failed to load config",
       "configSaved": "Config saved",
-      "saveConfigFailed": "Failed to save config"
+      "saveConfigFailed": "Failed to save config",
+      "devModeSaved": "Developer mode updated",
+      "saveDevModeFailed": "Failed to update developer mode"
     },
     "common": {
       "defaultOption": "(default)",
@@ -461,6 +530,18 @@
       "blockOriginal": "Block original model ID",
       "emptyState": "No model aliases configured.",
       "addButton": "Add alias"
+    },
+    "devMode": {
+      "title": "Developer Mode",
+      "description": "Enable in-app request replay and outbound capture for debugging.",
+      "enable": "Enable Developer Mode",
+      "enableHint": "Required to access the Replay page. Backend enforces this flag.",
+      "captureLabel": "Capture upstream responses",
+      "capture4xx": "4xx",
+      "capture5xx": "5xx",
+      "captureOther": "Other",
+      "captureHint": "Persists full outbound body + redacted headers to admin.sqlite. Cleaned up with request history (35 days).",
+      "captureDisabled": "Enable Developer Mode first."
     },
     "advanced": {
       "title": "Advanced",

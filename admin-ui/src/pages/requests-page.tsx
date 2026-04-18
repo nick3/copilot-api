@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
-import { LoaderCircleIcon } from "lucide-react"
+import { LoaderCircleIcon, PlayIcon } from "lucide-react"
 import { toast } from "sonner"
 import { useTranslation } from "react-i18next"
 
 import {
   AdminApiError,
   type AdminRequestItem,
+  getDevMode,
   queryAdminRequests,
 } from "@/lib/admin-api"
 import { fmtDurationSeconds, fmtLocalDateTime, fmtNum } from "@/lib/format"
@@ -219,6 +220,19 @@ export function RequestsPage(): React.JSX.Element {
   const [hasMore, setHasMore] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [devModeEnabled, setDevModeEnabled] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    getDevMode()
+      .then((dm) => {
+        if (!cancelled) setDevModeEnabled(dm.enabled)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const activeFilters = useMemo(() => getFiltersFromSearch(searchParams), [searchParams])
 
@@ -766,7 +780,26 @@ export function RequestsPage(): React.JSX.Element {
                     return (
                       <TableRow key={r.request_id}>
                         <TableCell className="font-mono text-xs">
-                          {fmtLocalDateTime(r.started_at_ms)}
+                          <span className="flex items-center gap-1">
+                            {devModeEnabled && r.has_outbound ? (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span
+                                    tabIndex={0}
+                                    aria-label={t("requestsPage.replayAvailable")}
+                                    className="inline-flex"
+                                  >
+                                    <PlayIcon
+                                      aria-hidden="true"
+                                      className="size-3 shrink-0 text-muted-foreground"
+                                    />
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>{t("requestsPage.replayAvailable")}</TooltipContent>
+                              </Tooltip>
+                            ) : null}
+                            {fmtLocalDateTime(r.started_at_ms)}
+                          </span>
                         </TableCell>
                         <TableCell className="font-mono text-sm whitespace-normal break-words">
                           <Link
