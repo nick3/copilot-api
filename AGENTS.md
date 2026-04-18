@@ -152,6 +152,13 @@ All stored in `~/.local/share/copilot-api/`:
 - `/v1/messages/count_tokens` forwards Claude requests to Anthropic when `anthropicApiKey` is configured.
 - Otherwise it falls back to GPT `o200k_base` estimation with the project’s compatibility multiplier.
 
+### Developer Mode (Request Replay)
+
+- Config switches: `config.devMode.enabled` (main gate, default false) + `config.devMode.capture4xx` (capture gate, default false).
+- When `capture4xx` is on, `copilotFetch` helper tee-captures 4xx upstream responses into `request_outbound` table (FK CASCADE to `request_log`, auto-cleaned with 35-day retention).
+- Admin-UI `/requests/:id/replay` page allows editing body + business headers and replaying via a different account. Replay is pure bypass: no `request_log`, no premium stats, no affinity writes.
+- Key files: `src/services/copilot/copilot-fetch.ts`, `src/lib/request-outbound.ts`, `src/lib/dev-mode.ts`, `src/routes/admin-api/replay.ts`, `src/routes/admin-api/replay-translation.ts`, `admin-ui/src/pages/request-replay-page.tsx`.
+
 ## Agent Notes
 
 - When working on `/v1/messages`, verify behavior in `tests/messages-handler.test.ts`, `tests/messages-preprocess.test.ts`, `tests/create-messages.test.ts`, and `tests/warmup-probe.test.ts`.
