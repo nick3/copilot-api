@@ -372,8 +372,8 @@ export function RequestDetailPage(): React.JSX.Element {
           <CardHeader>
             <CardTitle>{t("requestDetailPage.summaryTitle")}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Table>
+          <CardContent className="overflow-hidden">
+            <Table className="table-fixed">
               <TableBody>
                 {/* ── Request ── */}
                 <SectionHeader
