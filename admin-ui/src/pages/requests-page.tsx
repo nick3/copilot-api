@@ -223,7 +223,15 @@ export function RequestsPage(): React.JSX.Element {
   const [devModeEnabled, setDevModeEnabled] = useState(false)
 
   useEffect(() => {
-    getDevMode().then((dm) => setDevModeEnabled(dm.enabled)).catch(() => {})
+    let cancelled = false
+    getDevMode()
+      .then((dm) => {
+        if (!cancelled) setDevModeEnabled(dm.enabled)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const activeFilters = useMemo(() => getFiltersFromSearch(searchParams), [searchParams])

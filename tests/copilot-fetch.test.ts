@@ -4,6 +4,7 @@ import * as devMode from "~/lib/dev-mode"
 import * as outbound from "~/lib/request-outbound"
 
 const insertSpy = mock(() => {})
+const originalFetch = globalThis.fetch
 
 let devModeSpy: ReturnType<typeof spyOn<typeof devMode, "isCapture4xxEnabled">>
 let devMode5xxSpy: ReturnType<
@@ -42,6 +43,7 @@ afterEach(() => {
   devMode5xxSpy.mockRestore()
   devModeOtherSpy.mockRestore()
   outboundSpy.mockRestore()
+  globalThis.fetch = originalFetch
 })
 
 function setFetchResponse(response: Response): void {
@@ -99,8 +101,7 @@ test("4xx JSON response is captured", async () => {
   )
 
   expect(response.status).toBe(400)
-  await new Promise((resolve) => setTimeout(resolve, 50))
-  flushPendingCapture("req-4xx")
+  await flushPendingCapture("req-4xx")
   expect(insertSpy).toHaveBeenCalledTimes(1)
   expect(insertSpy).toHaveBeenCalledWith({
     requestId: "req-4xx",
@@ -244,8 +245,7 @@ test("tee() does not corrupt the caller-facing body", async () => {
     JSON.stringify({ error: "full body preserved" }),
   )
 
-  await new Promise((resolve) => setTimeout(resolve, 50))
-  flushPendingCapture("req-tee")
+  await flushPendingCapture("req-tee")
   expect(insertSpy).toHaveBeenCalledTimes(1)
   expect(insertSpy).toHaveBeenCalledWith(
     expect.objectContaining({

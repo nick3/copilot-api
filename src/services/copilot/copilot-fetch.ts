@@ -16,7 +16,7 @@ export type CopilotFetchCtx = {
 const pendingCaptures = new Map<string, PersistInput>()
 const pendingCapturePromises = new Map<string, Promise<void>>()
 
-export function flushPendingCapture(requestId: string): void {
+export async function flushPendingCapture(requestId: string): Promise<void> {
   const pending = pendingCaptures.get(requestId)
   if (pending) {
     pendingCaptures.delete(requestId)
@@ -26,14 +26,13 @@ export function flushPendingCapture(requestId: string): void {
   }
   const promise = pendingCapturePromises.get(requestId)
   if (promise) {
-    void promise.then(() => {
-      const deferred = pendingCaptures.get(requestId)
-      if (deferred) {
-        pendingCaptures.delete(requestId)
-        persistNow(deferred)
-      }
-      pendingCapturePromises.delete(requestId)
-    })
+    await promise
+    const deferred = pendingCaptures.get(requestId)
+    if (deferred) {
+      pendingCaptures.delete(requestId)
+      persistNow(deferred)
+    }
+    pendingCapturePromises.delete(requestId)
   }
 }
 
