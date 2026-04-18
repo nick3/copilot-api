@@ -213,7 +213,9 @@ describe("Anthropic to OpenAI translation logic", () => {
     expect(assistantMessage?.tool_calls).toHaveLength(1)
     expect(assistantMessage?.tool_calls?.[0].function.name).toBe("get_weather")
   })
+})
 
+describe("Anthropic to OpenAI tool and document content translation", () => {
   test("should map tool_reference tool results into chat tool messages", () => {
     const anthropicPayload: AnthropicMessagesPayload = {
       model: "gpt-4o",
@@ -247,6 +249,51 @@ describe("Anthropic to OpenAI translation logic", () => {
           {
             type: "text",
             text: "Tool AskUserQuestion loaded",
+          },
+        ],
+      },
+    ])
+  })
+
+  test("should replace user document inputs with fallback text parts", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Please analyze this PDF.",
+            },
+            {
+              type: "document",
+              source: {
+                type: "base64",
+                media_type: "application/pdf",
+                data: "pdf-data",
+              },
+              title: "report.pdf",
+            },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    expect(openAIPayload.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "Please analyze this PDF.",
+          },
+          {
+            type: "text",
+            text: "A PDF document was attached, but this api cannot send PDF inputs directly. Analyze using other tools.",
           },
         ],
       },

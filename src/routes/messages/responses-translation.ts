@@ -9,6 +9,7 @@ import {
   type ResponsesPayload,
   type ResponseInputCompaction,
   type ResponseInputContent,
+  type ResponseInputFile,
   type ResponseInputImage,
   type ResponseInputItem,
   type ResponseInputMessage,
@@ -33,6 +34,7 @@ import {
 import {
   type AnthropicAssistantContentBlock,
   type AnthropicAssistantMessage,
+  type AnthropicDocumentBlock,
   type AnthropicResponse,
   type AnthropicImageBlock,
   type AnthropicMessage,
@@ -170,8 +172,8 @@ const translateUserMessage = (
     }
 
     const converted = translateUserContentBlock(block)
-    if (converted) {
-      pendingContent.push(converted)
+    if (converted.length > 0) {
+      pendingContent.push(...converted)
     }
   }
 
@@ -249,16 +251,19 @@ const translateAssistantMessage = (
 
 const translateUserContentBlock = (
   block: AnthropicUserContentBlock,
-): ResponseInputContent | undefined => {
+): Array<ResponseInputContent> => {
   switch (block.type) {
     case "text": {
-      return createTextContent(block.text)
+      return [createTextContent(block.text)]
     }
     case "image": {
-      return createImageContent(block)
+      return [createImageContent(block)]
+    }
+    case "document": {
+      return [createFileContent(block)]
     }
     default: {
-      return undefined
+      return []
     }
   }
 }
@@ -349,6 +354,14 @@ const createImageContent = (
   type: "input_image",
   image_url: `data:${block.source.media_type};base64,${block.source.data}`,
   detail: "auto",
+})
+
+const createFileContent = (
+  block: AnthropicDocumentBlock,
+): ResponseInputFile => ({
+  type: "input_file",
+  file_data: `data:${block.source.media_type};base64,${block.source.data}`,
+  filename: block.title ?? "document.pdf",
 })
 
 const createReasoningContent = (
@@ -773,6 +786,10 @@ const convertToolResultContent = (
         }
         case "image": {
           result.push(createImageContent(block))
+          break
+        }
+        case "document": {
+          result.push(createFileContent(block))
           break
         }
         case "tool_reference": {

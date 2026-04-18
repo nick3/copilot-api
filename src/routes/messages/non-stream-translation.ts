@@ -247,6 +247,10 @@ function mapContent(
         })
         break
       }
+      case "document": {
+        contentParts.push(createDocumentTextPart())
+        break
+      }
       case "tool_reference": {
         contentParts.push({
           type: "text",
@@ -258,6 +262,13 @@ function mapContent(
     }
   }
   return contentParts
+}
+
+function createDocumentTextPart(): TextPart {
+  return {
+    type: "text",
+    text: "A PDF document was attached, but this api cannot send PDF inputs directly. Analyze using other tools.",
+  }
 }
 
 function translateAnthropicToolsToOpenAI(
