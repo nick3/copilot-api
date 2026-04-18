@@ -49,12 +49,16 @@ type ReplayForm = {
 }
 
 function buildReplayForm(blob: OutboundBlob): ReplayForm {
+  const redactedHeaderKeys = new Set(
+    blob.redacted_header_keys.map((key) => key.toLowerCase()),
+  )
+
   return {
     accountId: blob.original?.account_id ?? "",
     headers: Object.entries(blob.request_headers).map(([key, value]) => ({
       key,
       value,
-      editable: !blob.redacted_header_keys.includes(key),
+      editable: !redactedHeaderKeys.has(key.toLowerCase()),
     })),
     bodyText: blob.request_body ?? "",
     mode: "collect",
@@ -78,6 +82,11 @@ export function RequestReplayPage(): React.JSX.Element {
     let cancelled = false
 
     async function run(): Promise<void> {
+      abortRef.current?.abort()
+      setSending(false)
+      setStreaming(false)
+      setCollectResult(null)
+      setLiveEvents(null)
       setPhase("loading-blob")
       setBlob(null)
       setInitialForm(null)
@@ -432,7 +441,7 @@ export function RequestReplayPage(): React.JSX.Element {
           <ReplayResponsePanel
             result={collectResult}
             liveEvents={liveEvents}
-            loading={sending}
+            loading={sending || streaming}
             originalPath={blob.original?.path ?? null}
           />
         </div>

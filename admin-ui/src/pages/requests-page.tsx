@@ -776,7 +776,16 @@ export function RequestsPage(): React.JSX.Element {
                             {devModeEnabled && r.has_outbound ? (
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <PlayIcon className="size-3 shrink-0 text-muted-foreground" />
+                                  <span
+                                    tabIndex={0}
+                                    aria-label={t("requestsPage.replayAvailable")}
+                                    className="inline-flex"
+                                  >
+                                    <PlayIcon
+                                      aria-hidden="true"
+                                      className="size-3 shrink-0 text-muted-foreground"
+                                    />
+                                  </span>
                                 </TooltipTrigger>
                                 <TooltipContent>{t("requestsPage.replayAvailable")}</TooltipContent>
                               </Tooltip>
