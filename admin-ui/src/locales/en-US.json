@@ -389,6 +389,30 @@
       "valuePlaceholder": "Header value",
       "invalidKey": "Invalid header name",
       "sensitiveKey": "Cannot add sensitive header — auth headers are managed automatically."
+    },
+    "send": {
+      "button": "Send",
+      "cancel": "Cancel",
+      "sending": "Sending...",
+      "streaming": "Streaming...",
+      "modeCollect": "Collect",
+      "modeLive": "Live",
+      "modeHint": "Collect buffers the full response; Live streams chunks in real-time.",
+      "quotaWarning": "Replay sends a real request to GitHub and consumes upstream quota."
+    },
+    "response": {
+      "title": "Response",
+      "tabRaw": "Raw",
+      "tabTranslated": "Translated",
+      "tabHeaders": "Headers",
+      "empty": "Send a request to see the response.",
+      "translationUnavailable": "Translation only available for /v1/messages requests.",
+      "translationError": "Translation failed",
+      "streamingChunks": "Streaming... {{count}} chunks",
+      "streamingTranslation": "Waiting for translation...",
+      "status": "Status",
+      "duration": "Duration",
+      "replayedAt": "Replayed at"
     }
   },
   "jsonViewer": {

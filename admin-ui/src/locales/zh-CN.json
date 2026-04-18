@@ -389,6 +389,30 @@
       "valuePlaceholder": "请求头值",
       "invalidKey": "无效的请求头名称",
       "sensitiveKey": "无法添加敏感请求头 — 认证头由系统自动管理。"
+    },
+    "send": {
+      "button": "发送",
+      "cancel": "取消",
+      "sending": "发送中...",
+      "streaming": "流式传输中...",
+      "modeCollect": "收集",
+      "modeLive": "实时",
+      "modeHint": "收集模式缓冲完整响应；实时模式逐块流式传输。",
+      "quotaWarning": "重放会向 GitHub 发送真实请求并消耗上游配额。"
+    },
+    "response": {
+      "title": "响应",
+      "tabRaw": "原始",
+      "tabTranslated": "转换后",
+      "tabHeaders": "响应头",
+      "empty": "发送请求以查看响应。",
+      "translationUnavailable": "转换仅适用于 /v1/messages 请求。",
+      "translationError": "转换失败",
+      "streamingChunks": "流式传输中... {{count}} 个块",
+      "streamingTranslation": "等待转换结果...",
+      "status": "状态",
+      "duration": "耗时",
+      "replayedAt": "重放时间"
     }
   },
   "jsonViewer": {

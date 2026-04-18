@@ -1,14 +1,25 @@
-import { ArrowLeftIcon, RotateCcwIcon } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import {
+  ArrowLeftIcon,
+  LoaderCircleIcon,
+  RotateCcwIcon,
+  SendIcon,
+  SquareIcon,
+} from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Link, useParams } from "react-router-dom"
+import { toast } from "sonner"
 
 import {
   AdminApiError,
   type OutboundBlob,
+  type ReplayCollectResult,
   getDevMode,
   getRequestOutbound,
+  replayCollect,
+  replayLive,
 } from "@/lib/admin-api"
+import type { SSEEvent } from "@/lib/sse"
 import { ReplayAccountSelect } from "@/components/replay/replay-account-select"
 import {
   ReplayBodyEditor,
@@ -16,6 +27,7 @@ import {
 } from "@/components/replay/replay-body-editor"
 import { ReplayContextCard } from "@/components/replay/replay-context-card"
 import { ReplayHeadersEditor } from "@/components/replay/replay-headers-editor"
+import { ReplayResponsePanel } from "@/components/replay/replay-response-panel"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -133,6 +145,71 @@ export function RequestReplayPage(): React.JSX.Element {
   function resetForm(): void {
     if (!initialForm) return
     setForm(initialForm)
+  }
+
+  /* ---- Send / streaming state ---- */
+  const [sending, setSending] = useState(false)
+  const [streaming, setStreaming] = useState(false)
+  const [collectResult, setCollectResult] = useState<ReplayCollectResult | null>(null)
+  const [liveEvents, setLiveEvents] = useState<Array<SSEEvent> | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  const canSend = bodyValidation.ok && !sending && !streaming && Boolean(form?.accountId)
+
+  function buildOverrides(): { body?: string; headers?: Record<string, string> } {
+    if (!form) return {}
+    return {
+      body: form.bodyText,
+      headers: Object.fromEntries(
+        form.headers.filter((h) => h.editable).map((h) => [h.key, h.value]),
+      ),
+    }
+  }
+
+  const handleSend = useCallback(async () => {
+    if (!form || !requestId) return
+
+    const overrides = buildOverrides()
+
+    if (form.mode === "collect") {
+      setSending(true)
+      setCollectResult(null)
+      setLiveEvents(null)
+      try {
+        const res = await replayCollect(requestId, { accountId: form.accountId, overrides })
+        setCollectResult(res)
+      } catch (err) {
+        toast.error(err instanceof AdminApiError ? err.message : String(err))
+      } finally {
+        setSending(false)
+      }
+    } else {
+      setStreaming(true)
+      setCollectResult(null)
+      setLiveEvents([])
+      const controller = new AbortController()
+      abortRef.current = controller
+      try {
+        await replayLive(
+          requestId,
+          { accountId: form.accountId, overrides },
+          (event) => setLiveEvents((prev) => [...(prev ?? []), event]),
+          controller.signal,
+        )
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          toast.error(err instanceof AdminApiError ? err.message : String(err))
+        }
+      } finally {
+        setStreaming(false)
+        abortRef.current = null
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, requestId])
+
+  function handleCancel(): void {
+    abortRef.current?.abort()
   }
 
   if (!requestId) {
@@ -292,21 +369,69 @@ export function RequestReplayPage(): React.JSX.Element {
           />
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">{t("replayPage.placeholderResponse")}</CardTitle>
-            <CardDescription>
-              {bodyValidation.ok
-                ? t("replayPage.placeholderResponse")
-                : `${t("replayPage.body.invalid")}: ${bodyValidation.message}`}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="font-mono text-xs text-muted-foreground whitespace-pre-wrap break-words">
-              {`mode: ${form.mode}\nresponseStatus: ${blob.response_status}\ncanSend: ${String(bodyValidation.ok)}`}
-            </p>
-          </CardContent>
-        </Card>
+        <div className="space-y-3">
+          {/* Mode toggle + Send/Cancel toolbar */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-md border text-sm">
+              <button
+                type="button"
+                className={`px-3 py-1.5 rounded-l-md transition-colors ${form.mode === "collect" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                onClick={() => setForm({ ...form, mode: "collect" })}
+                disabled={sending || streaming}
+              >
+                {t("replayPage.send.modeCollect")}
+              </button>
+              <button
+                type="button"
+                className={`px-3 py-1.5 rounded-r-md transition-colors ${form.mode === "live" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                onClick={() => setForm({ ...form, mode: "live" })}
+                disabled={sending || streaming}
+              >
+                {t("replayPage.send.modeLive")}
+              </button>
+            </div>
+
+            {streaming ? (
+              <Button variant="destructive" size="sm" onClick={handleCancel}>
+                <SquareIcon className="size-4" />
+                {t("replayPage.send.cancel")}
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                disabled={!canSend}
+                onClick={() => void handleSend()}
+              >
+                {sending ? (
+                  <LoaderCircleIcon className="size-4 animate-spin" />
+                ) : (
+                  <SendIcon className="size-4" />
+                )}
+                {sending
+                  ? t("replayPage.send.sending")
+                  : streaming
+                    ? t("replayPage.send.streaming")
+                    : t("replayPage.send.button")}
+              </Button>
+            )}
+
+            <span className="text-xs text-muted-foreground hidden sm:inline">
+              {t("replayPage.send.modeHint")}
+            </span>
+          </div>
+
+          <InlineAlert
+            variant="warning"
+            title={t("replayPage.send.quotaWarning")}
+          />
+
+          <ReplayResponsePanel
+            result={collectResult}
+            liveEvents={liveEvents}
+            loading={sending}
+            originalPath={blob.original?.path ?? null}
+          />
+        </div>
       </div>
     </div>
   )
