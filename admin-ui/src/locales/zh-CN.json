@@ -209,7 +209,8 @@
       "quota": "此请求完成后剩余的 Premium 交互额度。",
       "duration": "总响应时间（秒）。",
       "tokens": "消耗的总 token 数（输入 + 输出）。"
-    }
+    },
+    "replayAvailable": "可重放"
   },
   "modelsPage": {
     "title": "模型",
@@ -531,11 +532,14 @@
     },
     "devMode": {
       "title": "开发者模式",
-      "description": "启用请求重放和 4xx 上游请求捕获，用于调试。",
+      "description": "启用请求重放和上游请求捕获，用于调试。",
       "enable": "启用开发者模式",
       "enableHint": "启用后才能访问重放页面。后端强制校验此开关。",
-      "capture": "捕获 4xx 上游请求",
-      "captureHint": "当上游返回 4xx 时，将完整的出站请求体和脱敏后的请求头持久化到 admin.sqlite。随请求历史一起清理（35 天）。",
+      "captureLabel": "捕获上游响应",
+      "capture4xx": "4xx",
+      "capture5xx": "5xx",
+      "captureOther": "其它",
+      "captureHint": "将完整的出站请求体和脱敏后的请求头持久化到 admin.sqlite。随请求历史一起清理（35 天）。",
       "captureDisabled": "请先启用开发者模式。"
     },
     "advanced": {

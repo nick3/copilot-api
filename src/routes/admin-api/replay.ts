@@ -23,10 +23,17 @@ import { translateForReplay } from "./replay-translation"
 export const replayRoutes = new Hono()
 
 replayRoutes.get("/dev-mode", (c) => {
-  const dev = getConfig().devMode ?? { enabled: false, capture4xx: false }
+  const dev = getConfig().devMode ?? {
+    enabled: false,
+    capture4xx: false,
+    capture5xx: false,
+    captureOther: false,
+  }
   return c.json({
     enabled: dev.enabled,
     capture4xx: dev.capture4xx,
+    capture5xx: dev.capture5xx,
+    captureOther: dev.captureOther,
   })
 })
 
@@ -53,7 +60,12 @@ replayRoutes.post("/dev-mode", async (c) => {
   }
 
   const patch = payload as Partial<DevModeConfig>
-  const current = getConfig().devMode ?? { enabled: false, capture4xx: false }
+  const current = getConfig().devMode ?? {
+    enabled: false,
+    capture4xx: false,
+    capture5xx: false,
+    captureOther: false,
+  }
   const next: DevModeConfig = {
     enabled:
       typeof patch.enabled === "boolean" ? patch.enabled : current.enabled,
@@ -61,6 +73,14 @@ replayRoutes.post("/dev-mode", async (c) => {
       typeof patch.capture4xx === "boolean" ?
         patch.capture4xx
       : current.capture4xx,
+    capture5xx:
+      typeof patch.capture5xx === "boolean" ?
+        patch.capture5xx
+      : current.capture5xx,
+    captureOther:
+      typeof patch.captureOther === "boolean" ?
+        patch.captureOther
+      : current.captureOther,
   }
 
   const config: AppConfig = { ...getConfig(), devMode: next }

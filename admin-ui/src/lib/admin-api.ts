@@ -51,6 +51,8 @@ type AdminRequestItemWire = {
   selection_reason?: string | null
   upstream_error_message_raw?: string | null
 
+  has_outbound?: boolean
+
   error?: unknown
 }
 
@@ -225,6 +227,8 @@ export type PremiumStatsResponse = {
 export type DevModeState = {
   enabled: boolean
   capture4xx: boolean
+  capture5xx: boolean
+  captureOther: boolean
 }
 
 export type OutboundBlob = {

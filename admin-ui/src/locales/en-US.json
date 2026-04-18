@@ -209,7 +209,8 @@
       "quota": "Premium interactions quota remaining after this request.",
       "duration": "Total response time in seconds.",
       "tokens": "Total tokens consumed (input + output)."
-    }
+    },
+    "replayAvailable": "Replay available"
   },
   "modelsPage": {
     "title": "Models",
@@ -531,11 +532,14 @@
     },
     "devMode": {
       "title": "Developer Mode",
-      "description": "Enable in-app request replay and 4xx outbound capture for debugging.",
+      "description": "Enable in-app request replay and outbound capture for debugging.",
       "enable": "Enable Developer Mode",
       "enableHint": "Required to access the Replay page. Backend enforces this flag.",
-      "capture": "Capture 4xx upstream payloads",
-      "captureHint": "Persists full outbound body + redacted headers to admin.sqlite when upstream returns 4xx. Cleaned up with request history (35 days).",
+      "captureLabel": "Capture upstream responses",
+      "capture4xx": "4xx",
+      "capture5xx": "5xx",
+      "captureOther": "Other",
+      "captureHint": "Persists full outbound body + redacted headers to admin.sqlite. Cleaned up with request history (35 days).",
       "captureDisabled": "Enable Developer Mode first."
     },
     "advanced": {

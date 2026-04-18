@@ -6,6 +6,12 @@ import * as outbound from "~/lib/request-outbound"
 const insertSpy = mock(() => {})
 
 let devModeSpy: ReturnType<typeof spyOn<typeof devMode, "isCapture4xxEnabled">>
+let devMode5xxSpy: ReturnType<
+  typeof spyOn<typeof devMode, "isCapture5xxEnabled">
+>
+let devModeOtherSpy: ReturnType<
+  typeof spyOn<typeof devMode, "isCaptureOtherEnabled">
+>
 let outboundSpy: ReturnType<
   typeof spyOn<typeof outbound, "getRequestOutboundStore">
 >
@@ -13,9 +19,14 @@ let outboundSpy: ReturnType<
 beforeEach(() => {
   insertSpy.mockClear()
   devModeSpy = spyOn(devMode, "isCapture4xxEnabled").mockReturnValue(true)
+  devMode5xxSpy = spyOn(devMode, "isCapture5xxEnabled").mockReturnValue(false)
+  devModeOtherSpy = spyOn(devMode, "isCaptureOtherEnabled").mockReturnValue(
+    false,
+  )
   outboundSpy = spyOn(outbound, "getRequestOutboundStore").mockReturnValue({
     insert: insertSpy,
     getByRequestId: () => null,
+    hasOutboundForIds: () => new Set(),
     cleanupOrphans: () => {},
     meta: () => ({
       dbPath: "",
@@ -28,6 +39,8 @@ beforeEach(() => {
 
 afterEach(() => {
   devModeSpy.mockRestore()
+  devMode5xxSpy.mockRestore()
+  devModeOtherSpy.mockRestore()
   outboundSpy.mockRestore()
 })
 

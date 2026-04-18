@@ -34,6 +34,7 @@ beforeEach(() => {
       ({
         insert: () => {},
         getByRequestId: () => outboundRow,
+        hasOutboundForIds: () => new Set(),
         cleanupOrphans: () => {},
         meta: () => ({ dbPath: "", userVersion: 0 }),
       }) as ReturnType<typeof outboundMod.getRequestOutboundStore>,

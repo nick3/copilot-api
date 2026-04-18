@@ -1,6 +1,10 @@
 import consola from "consola"
 
-import { isCapture4xxEnabled } from "~/lib/dev-mode"
+import {
+  isCapture4xxEnabled,
+  isCapture5xxEnabled,
+  isCaptureOtherEnabled,
+} from "~/lib/dev-mode"
 import { getRequestOutboundStore } from "~/lib/request-outbound"
 
 export type CopilotFetchCtx = {
@@ -76,6 +80,12 @@ function snapshotBody(init: RequestInit): {
   return { body: null, bodyKind: "text" }
 }
 
+function shouldCaptureStatus(status: number): boolean {
+  if (status >= 400 && status < 500) return isCapture4xxEnabled()
+  if (status >= 500) return isCapture5xxEnabled()
+  return isCaptureOtherEnabled()
+}
+
 export async function copilotFetch(
   input: string | URL,
   init: RequestInit,
@@ -95,9 +105,7 @@ export async function copilotFetch(
   const shouldCapture =
     ctx.requestId !== undefined
     && ctx.capturable !== false
-    && isCapture4xxEnabled()
-    && response.status >= 400
-    && response.status < 500
+    && shouldCaptureStatus(response.status)
 
   if (!shouldCapture) {
     return response

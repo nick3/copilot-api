@@ -1832,16 +1832,18 @@ type DeveloperModeCardProps = {
   devMode: DevModeState
   saving: boolean
   onToggleEnabled: (value: boolean) => void
-  onToggleCapture4xx: (value: boolean) => void
+  onCaptureChange: (field: "capture4xx" | "capture5xx" | "captureOther", value: boolean) => void
 }
 
 function DeveloperModeCard({
   devMode,
   saving,
   onToggleEnabled,
-  onToggleCapture4xx,
+  onCaptureChange,
 }: DeveloperModeCardProps): React.JSX.Element {
   const { t } = useTranslation()
+
+  const anyCaptureEnabled = devMode.capture4xx || devMode.capture5xx || devMode.captureOther
 
   return (
     <Card className="gap-4 py-4">
@@ -1868,30 +1870,54 @@ function DeveloperModeCard({
           />
         </div>
 
-        <div className="flex items-center justify-between gap-4">
-          <div className="space-y-1">
+        {devMode.enabled ? (
+          <div className="space-y-2">
             <div className="text-sm font-medium">
-              {t("settingsPage.devMode.capture")}
+              {t("settingsPage.devMode.captureLabel")}
+            </div>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-1.5 text-sm">
+                <Switch
+                  checked={devMode.capture4xx}
+                  disabled={saving}
+                  onCheckedChange={(v) => onCaptureChange("capture4xx", v)}
+                  className="scale-75"
+                />
+                {t("settingsPage.devMode.capture4xx")}
+              </label>
+              <label className="flex items-center gap-1.5 text-sm">
+                <Switch
+                  checked={devMode.capture5xx}
+                  disabled={saving}
+                  onCheckedChange={(v) => onCaptureChange("capture5xx", v)}
+                  className="scale-75"
+                />
+                {t("settingsPage.devMode.capture5xx")}
+              </label>
+              <label className="flex items-center gap-1.5 text-sm">
+                <Switch
+                  checked={devMode.captureOther}
+                  disabled={saving}
+                  onCheckedChange={(v) => onCaptureChange("captureOther", v)}
+                  className="scale-75"
+                />
+                {t("settingsPage.devMode.captureOther")}
+              </label>
             </div>
             <div className="text-muted-foreground text-xs">
-              {t(
-                devMode.enabled
-                  ? "settingsPage.devMode.captureHint"
-                  : "settingsPage.devMode.captureDisabled",
-              )}
+              {t("settingsPage.devMode.captureHint")}
             </div>
           </div>
-          <Switch
-            checked={devMode.capture4xx}
-            disabled={!devMode.enabled || saving}
-            onCheckedChange={onToggleCapture4xx}
-          />
-        </div>
+        ) : (
+          <div className="text-muted-foreground text-xs">
+            {t("settingsPage.devMode.captureDisabled")}
+          </div>
+        )}
 
-        {devMode.enabled && devMode.capture4xx ? (
+        {devMode.enabled && anyCaptureEnabled ? (
           <InlineAlert
             variant="warning"
-            title={t("settingsPage.devMode.capture")}
+            title={t("settingsPage.devMode.captureLabel")}
             description={t("settingsPage.devMode.captureHint")}
           />
         ) : null}
@@ -2521,7 +2547,7 @@ type SettingsPageViewProps = {
   onSave: () => void
   devMode: DevModeState
   onDevModeEnabledToggle: (value: boolean) => void
-  onDevModeCapture4xxToggle: (value: boolean) => void
+  onDevModeCaptureChange: (field: "capture4xx" | "capture5xx" | "captureOther", value: boolean) => void
   hasModels: boolean
   smallModelLabel: string
   smallModelValue: string
@@ -2612,6 +2638,8 @@ function useSettingsPageState(): SettingsPageViewProps {
   const [devMode, setDevModeState] = useState<DevModeState>({
     enabled: false,
     capture4xx: false,
+    capture5xx: false,
+    captureOther: false,
   })
   const [draft, setDraft] = useState<AdminConfig>({})
   const [initialDraftJson, setInitialDraftJson] = useState<string>("{}")
@@ -3011,21 +3039,26 @@ function useSettingsPageState(): SettingsPageViewProps {
       const next = {
         enabled: value,
         capture4xx: value ? devMode.capture4xx : false,
+        capture5xx: value ? devMode.capture5xx : false,
+        captureOther: value ? devMode.captureOther : false,
       }
       void persistDevMode(next)
     },
-    [devMode.capture4xx, persistDevMode],
+    [devMode.capture4xx, devMode.capture5xx, devMode.captureOther, persistDevMode],
   )
 
-  const handleDevModeCapture4xxToggle = useCallback(
-    (value: boolean) => {
+  const handleDevModeCaptureChange = useCallback(
+    (field: "capture4xx" | "capture5xx" | "captureOther", value: boolean) => {
       const next = {
         enabled: devMode.enabled,
-        capture4xx: value,
+        capture4xx: devMode.capture4xx,
+        capture5xx: devMode.capture5xx,
+        captureOther: devMode.captureOther,
+        [field]: value,
       }
       void persistDevMode(next)
     },
-    [devMode.enabled, persistDevMode],
+    [devMode.enabled, devMode.capture4xx, devMode.capture5xx, devMode.captureOther, persistDevMode],
   )
   const useFunctionApplyPatch = draft.useFunctionApplyPatch ?? true
   const forceAgent = draft.forceAgent ?? false
@@ -3046,7 +3079,7 @@ function useSettingsPageState(): SettingsPageViewProps {
     onSave,
     devMode,
     onDevModeEnabledToggle: handleDevModeEnabledToggle,
-    onDevModeCapture4xxToggle: handleDevModeCapture4xxToggle,
+    onDevModeCaptureChange: handleDevModeCaptureChange,
     hasModels,
     smallModelLabel,
     smallModelValue,
@@ -3136,7 +3169,7 @@ function SettingsPageView({
   onSave,
   devMode,
   onDevModeEnabledToggle,
-  onDevModeCapture4xxToggle,
+  onDevModeCaptureChange,
   hasModels,
   smallModelLabel,
   smallModelValue,
@@ -3491,7 +3524,7 @@ function SettingsPageView({
               devMode={devMode}
               saving={saving}
               onToggleEnabled={onDevModeEnabledToggle}
-              onToggleCapture4xx={onDevModeCapture4xxToggle}
+              onCaptureChange={onDevModeCaptureChange}
             />
           </SettingsSectionCard>
         </main>

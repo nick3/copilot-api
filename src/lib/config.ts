@@ -8,6 +8,8 @@ export type LogLevel = "error" | "warn" | "info" | "debug"
 export interface DevModeConfig {
   enabled: boolean
   capture4xx: boolean
+  capture5xx: boolean
+  captureOther: boolean
 }
 
 export interface AppConfig {
@@ -133,6 +135,8 @@ const defaultConfig: AppConfig = {
   devMode: {
     enabled: false,
     capture4xx: false,
+    capture5xx: false,
+    captureOther: false,
   },
 }
 
@@ -383,6 +387,8 @@ function mergeDefaultDevMode(config: AppConfig): ConfigMergeResult {
     current
     && typeof current.enabled === "boolean"
     && typeof current.capture4xx === "boolean"
+    && typeof current.capture5xx === "boolean"
+    && typeof current.captureOther === "boolean"
   ) {
     return { mergedConfig: config, changed: false }
   }
@@ -393,6 +399,8 @@ function mergeDefaultDevMode(config: AppConfig): ConfigMergeResult {
       devMode: {
         enabled: current?.enabled === true,
         capture4xx: current?.capture4xx === true,
+        capture5xx: current?.capture5xx === true,
+        captureOther: current?.captureOther === true,
       },
     },
     changed: true,

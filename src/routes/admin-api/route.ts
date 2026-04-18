@@ -994,29 +994,36 @@ function applyProvidersConfig(
   return undefined
 }
 
+const DEV_MODE_KEYS = new Set([
+  "enabled",
+  "capture4xx",
+  "capture5xx",
+  "captureOther",
+])
+
 function parseDevModeConfig(value: unknown): ParseFieldResult<DevModeConfig> {
   if (value === null || value === undefined) return { clear: true }
   if (!isPlainObject(value)) return { error: "devMode must be an object" }
 
   for (const key of Object.keys(value)) {
-    if (key !== "enabled" && key !== "capture4xx") {
+    if (!DEV_MODE_KEYS.has(key)) {
       return { error: `devMode.${key} is not supported` }
     }
   }
 
-  const enabled = value.enabled
-  const capture4xx = value.capture4xx
-  if (enabled !== undefined && typeof enabled !== "boolean") {
-    return { error: "devMode.enabled must be a boolean" }
-  }
-  if (capture4xx !== undefined && typeof capture4xx !== "boolean") {
-    return { error: "devMode.capture4xx must be a boolean" }
+  for (const key of DEV_MODE_KEYS) {
+    const v = value[key]
+    if (v !== undefined && typeof v !== "boolean") {
+      return { error: `devMode.${key} must be a boolean` }
+    }
   }
 
   return {
     value: {
-      enabled: enabled === true,
-      capture4xx: capture4xx === true,
+      enabled: value.enabled === true,
+      capture4xx: value.capture4xx === true,
+      capture5xx: value.capture5xx === true,
+      captureOther: value.captureOther === true,
     },
   }
 }
@@ -1028,7 +1035,12 @@ function applyDevModeConfig(
   const parsed = parseDevModeConfig(value)
   if ("error" in parsed) return parsed.error
   if ("clear" in parsed) {
-    next.devMode = { enabled: false, capture4xx: false }
+    next.devMode = {
+      enabled: false,
+      capture4xx: false,
+      capture5xx: false,
+      captureOther: false,
+    }
     return undefined
   }
   next.devMode = parsed.value
@@ -1450,8 +1462,16 @@ adminApiRoutes.get("/requests", (c) => {
     toMs,
   })
 
+  const outboundIds = getRequestOutboundStore().hasOutboundForIds(
+    result.items.map((i) => i.request_id),
+  )
+  const itemsWithOutbound = result.items.map((item) => ({
+    ...item,
+    has_outbound: outboundIds.has(item.request_id),
+  }))
+
   return c.json({
-    items: result.items,
+    items: itemsWithOutbound,
     next_cursor_id: result.nextCursorId,
     has_more: result.hasMore,
   })

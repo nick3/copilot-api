@@ -23,6 +23,7 @@ await mock.module("~/lib/request-outbound", () => ({
   getRequestOutboundStore: () => ({
     insert: () => {},
     getByRequestId: () => outboundRow,
+    hasOutboundForIds: () => new Set(),
     cleanupOrphans: () => {},
     meta: () => ({ dbPath: "", userVersion: 0 }),
   }),

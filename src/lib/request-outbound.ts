@@ -100,6 +100,7 @@ export type OutboundCaptureRow = OutboundCaptureInput & {
 export type RequestOutboundStoreApi = {
   insert(input: OutboundCaptureInput): void
   getByRequestId(requestId: string): OutboundCaptureRow | null
+  hasOutboundForIds(requestIds: Array<string>): Set<string>
   cleanupOrphans(): void
   meta(): {
     dbPath: string
@@ -224,6 +225,21 @@ class RequestOutboundStore implements RequestOutboundStoreApi {
     }
   }
 
+  hasOutboundForIds(requestIds: Array<string>): Set<string> {
+    if (requestIds.length === 0) return new Set()
+    try {
+      const placeholders = requestIds.map(() => "?").join(", ")
+      const stmt = this.db.query(
+        `SELECT request_id FROM request_outbound WHERE request_id IN (${placeholders})`,
+      )
+      const rows = stmt.all(...requestIds) as Array<{ request_id: string }>
+      return new Set(rows.map((r) => r.request_id))
+    } catch (error) {
+      consola.debug("Failed to batch-check request outbound ids", error)
+      return new Set()
+    }
+  }
+
   cleanupOrphans(): void {
     try {
       this.cleanupOrphansStmt.run()
@@ -249,6 +265,7 @@ export function createRequestOutboundStore(
 const disabledStore: RequestOutboundStoreApi = {
   insert: () => {},
   getByRequestId: () => null,
+  hasOutboundForIds: () => new Set(),
   cleanupOrphans: () => {},
   meta: () => ({
     dbPath: getAdminDbPath(),

@@ -44,6 +44,8 @@ test("GET /api/admin/dev-mode returns disabled state by default", async () => {
     expect(await response.json()).toEqual({
       enabled: false,
       capture4xx: false,
+      capture5xx: false,
+      captureOther: false,
     })
   })
 })
@@ -66,6 +68,8 @@ test("POST /api/admin/dev-mode updates enabled and preserves capture4xx", async 
     expect(await postResponse.json()).toEqual({
       enabled: true,
       capture4xx: false,
+      capture5xx: false,
+      captureOther: false,
     })
 
     const getResponse = await server.fetch(
@@ -76,6 +80,8 @@ test("POST /api/admin/dev-mode updates enabled and preserves capture4xx", async 
     expect(await getResponse.json()).toEqual({
       enabled: true,
       capture4xx: false,
+      capture5xx: false,
+      captureOther: false,
     })
   })
 })
