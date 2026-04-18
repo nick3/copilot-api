@@ -353,7 +353,7 @@ function insertRequestLog(
     affinityCacheKey: request.affinityCacheKey,
     ...record,
   })
-  flushPendingCapture(request.requestId)
+  void flushPendingCapture(request.requestId)
 }
 
 function recordSelectionFailure(

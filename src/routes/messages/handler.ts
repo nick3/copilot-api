@@ -690,7 +690,7 @@ function insertRequestLog(
     premiumUnlimitedBefore,
     ...record,
   })
-  flushPendingCapture(requestId)
+  void flushPendingCapture(requestId)
 }
 
 async function finalizeQuotaAndGetPremiumSnapshot(
