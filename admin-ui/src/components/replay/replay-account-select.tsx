@@ -71,7 +71,8 @@ export function ReplayAccountSelect({
           (item) => item.runtime?.enabled !== false,
         )
         setAccounts(sortAccounts(enabledAccounts, originalAccountId))
-      } catch {
+      } catch (error) {
+        console.error("Failed to load accounts", error)
         if (!cancelled) {
           setAccounts([])
         }

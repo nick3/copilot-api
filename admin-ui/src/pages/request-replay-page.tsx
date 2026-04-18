@@ -153,6 +153,12 @@ export function RequestReplayPage(): React.JSX.Element {
   const [liveEvents, setLiveEvents] = useState<Array<SSEEvent> | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort()
+    }
+  }, [])
+
   const canSend = bodyValidation.ok && !sending && !streaming && Boolean(form?.accountId)
 
   function buildOverrides(): { body?: string; headers?: Record<string, string> } {
@@ -348,13 +354,13 @@ export function RequestReplayPage(): React.JSX.Element {
             value={form.accountId}
             originalAccountId={blob.original?.account_id ?? null}
             onChange={(accountId) => {
-              setForm({ ...form, accountId })
+              setForm((prev) => (prev ? { ...prev, accountId } : prev))
             }}
           />
           <ReplayHeadersEditor
             headers={form.headers}
             onChange={(headers) => {
-              setForm({ ...form, headers })
+              setForm((prev) => (prev ? { ...prev, headers } : prev))
             }}
           />
           <ReplayBodyEditor
@@ -362,7 +368,7 @@ export function RequestReplayPage(): React.JSX.Element {
             kind={blob.request_body_kind}
             originalValue={blob.request_body ?? ""}
             onChange={(bodyText) => {
-              setForm({ ...form, bodyText })
+              setForm((prev) => (prev ? { ...prev, bodyText } : prev))
             }}
           />
         </div>
@@ -374,7 +380,7 @@ export function RequestReplayPage(): React.JSX.Element {
               <button
                 type="button"
                 className={`px-3 py-1.5 rounded-l-md transition-colors ${form.mode === "collect" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
-                onClick={() => setForm({ ...form, mode: "collect" })}
+                onClick={() => setForm((prev) => (prev ? { ...prev, mode: "collect" } : prev))}
                 disabled={sending || streaming}
               >
                 {t("replayPage.send.modeCollect")}
@@ -382,7 +388,7 @@ export function RequestReplayPage(): React.JSX.Element {
               <button
                 type="button"
                 className={`px-3 py-1.5 rounded-r-md transition-colors ${form.mode === "live" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
-                onClick={() => setForm({ ...form, mode: "live" })}
+                onClick={() => setForm((prev) => (prev ? { ...prev, mode: "live" } : prev))}
                 disabled={sending || streaming}
               >
                 {t("replayPage.send.modeLive")}

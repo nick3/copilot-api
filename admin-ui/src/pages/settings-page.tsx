@@ -2797,7 +2797,13 @@ function useSettingsPageState(): SettingsPageViewProps {
       if (devModeRes.status === "fulfilled") {
         setDevModeState(devModeRes.value)
       } else {
-        throw devModeRes.reason
+        setDevModeState({ enabled: false, capture4xx: false, capture5xx: false, captureOther: false })
+        toast.error(i18n.t("settingsPage.toast.loadDevModeFailed"), {
+          description:
+            devModeRes.reason instanceof Error
+              ? devModeRes.reason.message
+              : String(devModeRes.reason),
+        })
       }
     } catch (err) {
       const msg = err instanceof AdminApiError ? err.message : String(err)

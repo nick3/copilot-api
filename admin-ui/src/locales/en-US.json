@@ -454,6 +454,7 @@
     },
     "toast": {
       "loadModelsFailed": "Failed to load models",
+      "loadDevModeFailed": "Failed to load Developer Mode settings",
       "loadConfigFailed": "Failed to load config",
       "configSaved": "Config saved",
       "saveConfigFailed": "Failed to save config",

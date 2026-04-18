@@ -454,6 +454,7 @@
     },
     "toast": {
       "loadModelsFailed": "加载模型失败",
+      "loadDevModeFailed": "加载开发者模式设置失败",
       "loadConfigFailed": "加载配置失败",
       "configSaved": "配置已保存",
       "saveConfigFailed": "保存配置失败",

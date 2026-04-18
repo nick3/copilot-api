@@ -32,4 +32,14 @@ export async function parseSSEStream(
     }
   }
   buffer += decoder.decode()
+
+  if (buffer.trim()) {
+    let event: string | undefined
+    const dataLines: Array<string> = []
+    for (const line of buffer.split("\n")) {
+      if (line.startsWith("event:")) event = line.slice(6).trim()
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart())
+    }
+    if (dataLines.length > 0) onEvent({ event, data: dataLines.join("\n") })
+  }
 }
