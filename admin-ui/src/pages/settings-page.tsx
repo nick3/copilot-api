@@ -60,8 +60,8 @@ const SETTINGS_SECTION_IDS = [
   "aliases",
   "prompts",
   "advanced",
-  "devMode",
   "providers",
+  "devMode",
 ] as const
 
 const REASONING_EFFORTS: Array<ReasoningEffort> = [
@@ -3219,8 +3219,8 @@ function SettingsPageView({
       { id: "aliases", label: t("settingsPage.sections.aliases") },
       { id: "prompts", label: t("settingsPage.sections.prompts") },
       { id: "advanced", label: t("settingsPage.sections.advanced") },
-      { id: "devMode", label: t("settingsPage.sections.devMode") },
       { id: "providers", label: t("settingsPage.sections.providers") },
+      { id: "devMode", label: t("settingsPage.sections.devMode") },
     ]
   }, [t])
 
@@ -3461,27 +3461,12 @@ function SettingsPageView({
             />
           </SettingsSectionCard>
 
-          {/* Developer Mode */}
-          <SettingsSectionCard
-            id="devMode"
-            isActive={activeSection === "devMode"}
-            ref={(el) => registerSection("devMode", el)}
-            style={{ animationDelay: "300ms" }}
-          >
-            <DeveloperModeCard
-              devMode={devMode}
-              saving={saving}
-              onToggleEnabled={onDevModeEnabledToggle}
-              onToggleCapture4xx={onDevModeCapture4xxToggle}
-            />
-          </SettingsSectionCard>
-
           {/* Providers */}
           <SettingsSectionCard
             id="providers"
             isActive={activeSection === "providers"}
             ref={(el) => registerSection("providers", el)}
-            style={{ animationDelay: "360ms" }}
+            style={{ animationDelay: "300ms" }}
           >
             <ProvidersSettingsCard
               items={providersItems}
@@ -3492,6 +3477,21 @@ function SettingsPageView({
               onAddModel={onProvidersAddModel}
               onRemoveModel={onProvidersRemoveModel}
               onUpdateModel={onProvidersUpdateModel}
+            />
+          </SettingsSectionCard>
+
+          {/* Developer Mode */}
+          <SettingsSectionCard
+            id="devMode"
+            isActive={activeSection === "devMode"}
+            ref={(el) => registerSection("devMode", el)}
+            style={{ animationDelay: "360ms" }}
+          >
+            <DeveloperModeCard
+              devMode={devMode}
+              saving={saving}
+              onToggleEnabled={onDevModeEnabledToggle}
+              onToggleCapture4xx={onDevModeCapture4xxToggle}
             />
           </SettingsSectionCard>
         </main>
