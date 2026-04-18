@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test"
+import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test"
 import { Hono } from "hono"
 import fs from "node:fs/promises"
 import path from "node:path"
@@ -8,10 +8,15 @@ import "./shared-admin-db-test-home"
 import type { OutboundCaptureRow } from "~/lib/request-outbound"
 import type { AccountContext } from "~/lib/types/account"
 
+import * as accountsMod from "~/lib/accounts-manager"
 import { getAdminDb } from "~/lib/admin-db"
 import { mergeConfigWithDefaults } from "~/lib/config"
 import { PATHS } from "~/lib/paths"
 import { getRequestHistoryStore } from "~/lib/request-history"
+import * as outboundMod from "~/lib/request-outbound"
+import * as copilotFetchMod from "~/services/copilot/copilot-fetch"
+
+import { replayRoutes } from "../src/routes/admin-api/replay"
 
 type TestConfig = Record<string, unknown>
 
@@ -23,42 +28,50 @@ let mockFetchResponse: Response = new Response('{"ok":true}', {
   headers: { "content-type": "application/json" },
 })
 
-const realOutbound = await import("~/lib/request-outbound")
-await mock.module("~/lib/request-outbound", () => ({
-  ...realOutbound,
-  getRequestOutboundStore: () => ({
-    insert: () => {},
-    getByRequestId: () => outboundRow,
-    cleanupOrphans: () => {},
-    meta: () => ({ dbPath: "", userVersion: 0 }),
-  }),
-  getRedactedHeaderKeys: (headers: Record<string, string>) =>
-    Object.keys(headers).filter((k) => k.toLowerCase() === "authorization"),
-}))
+beforeEach(() => {
+  spyOn(outboundMod, "getRequestOutboundStore").mockImplementation(
+    () =>
+      ({
+        insert: () => {},
+        getByRequestId: () => outboundRow,
+        cleanupOrphans: () => {},
+        meta: () => ({ dbPath: "", userVersion: 0 }),
+      }) as ReturnType<typeof outboundMod.getRequestOutboundStore>,
+  )
 
-const realAccountsManager = await import("~/lib/accounts-manager")
-await mock.module("~/lib/accounts-manager", () => ({
-  ...realAccountsManager,
-  accountsManager: new Proxy(realAccountsManager.accountsManager, {
-    get(target, prop) {
-      if (prop === "getAccountContextById") {
-        return (_id: string) => mockAccount
-      }
-      return Reflect.get(target, prop) as unknown
+  spyOn(outboundMod, "getRedactedHeaderKeys").mockImplementation(
+    (headers: Record<string, string>) =>
+      Object.keys(headers).filter((k) => k.toLowerCase() === "authorization"),
+  )
+
+  spyOn(
+    accountsMod.accountsManager,
+    "getAccountContextById",
+  ).mockImplementation((_id: string) => mockAccount)
+
+  spyOn(copilotFetchMod, "copilotFetch").mockImplementation(
+    (_url: string | URL, init: RequestInit) => {
+      lastFetchInit = init
+      return Promise.resolve(mockFetchResponse)
     },
-  }),
-}))
+  )
+})
 
-const realCopilotFetch = await import("~/services/copilot/copilot-fetch")
-await mock.module("~/services/copilot/copilot-fetch", () => ({
-  ...realCopilotFetch,
-  copilotFetch: (_url: string | URL, init: RequestInit) => {
-    lastFetchInit = init
-    return Promise.resolve(mockFetchResponse)
-  },
-}))
-
-const { replayRoutes } = await import("../src/routes/admin-api/replay")
+afterEach(() => {
+  mock.restore()
+  outboundRow = null
+  mockAccount = null
+  lastFetchInit = null
+  mockFetchResponse = new Response('{"ok":true}', {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  })
+  try {
+    getAdminDb().run("DELETE FROM request_log;")
+  } catch {
+    // ignore
+  }
+})
 
 const withConfig = async (config: TestConfig, run: () => Promise<void>) => {
   const original = await fs
@@ -74,11 +87,11 @@ const withConfig = async (config: TestConfig, run: () => Promise<void>) => {
   try {
     await run()
   } finally {
-    const restoreConfig =
+    const rc =
       original === null ?
         fs.rm(PATHS.CONFIG_PATH, { force: true })
       : fs.writeFile(PATHS.CONFIG_PATH, original, "utf8")
-    await restoreConfig
+    await rc
     mergeConfigWithDefaults()
   }
 }
@@ -131,23 +144,6 @@ function insertRequestLog(requestId: string) {
   })
 }
 
-afterEach(() => {
-  outboundRow = null
-  mockAccount = null
-  lastFetchInit = null
-  mockFetchResponse = new Response('{"ok":true}', {
-    status: 200,
-    headers: { "content-type": "application/json" },
-  })
-  try {
-    getAdminDb().run("DELETE FROM request_log;")
-  } catch {
-    // ignore
-  }
-})
-
-// PLACEHOLDER_FOR_TESTS
-
 test("POST replay returns 403 when dev mode is disabled", async () => {
   await withConfig({}, async () => {
     const app = createApp()
@@ -191,7 +187,6 @@ test("POST replay returns 404 when request_log is missing", async () => {
     { devMode: { enabled: true, capture4xx: false } },
     async () => {
       outboundRow = { ...VALID_BLOB }
-      // Don't insert request_log
       const app = createApp()
       const response = await app.request(
         "http://localhost/requests/req-replay/replay",
@@ -325,11 +320,9 @@ test("POST replay outgoing headers do NOT contain *** values", async () => {
         ([, v]) => v === "***",
       )
       expect(starValues).toHaveLength(0)
-      // Auth header should be injected fresh
       expect(
         sentHeaders["Authorization"] ?? sentHeaders["authorization"],
       ).toBeTruthy()
-      // Custom header should be preserved
       expect(sentHeaders["x-custom"]).toBe("keep-me")
     },
   )

@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test"
+import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test"
 import { Hono } from "hono"
 import fs from "node:fs/promises"
 import path from "node:path"
@@ -8,17 +8,18 @@ import "./shared-admin-db-test-home"
 import type { OutboundCaptureRow } from "~/lib/request-outbound"
 import type { AccountContext } from "~/lib/types/account"
 
+import * as accountsMod from "~/lib/accounts-manager"
 import { getAdminDb } from "~/lib/admin-db"
 import { mergeConfigWithDefaults } from "~/lib/config"
 import { PATHS } from "~/lib/paths"
 import { getRequestHistoryStore } from "~/lib/request-history"
+import * as outboundMod from "~/lib/request-outbound"
+import * as copilotFetchMod from "~/services/copilot/copilot-fetch"
+
+import { replayRoutes } from "../src/routes/admin-api/replay"
 
 type TestConfig = Record<string, unknown>
-
-type SseEvent = {
-  event?: string
-  data: string
-}
+type SseEvent = { event?: string; data: string }
 
 let outboundRow: OutboundCaptureRow | null = null
 let mockAccount: AccountContext | null = null
@@ -27,39 +28,46 @@ let mockFetchResponse: Response = new Response('{"ok":true}', {
   headers: { "content-type": "application/json" },
 })
 
-const realOutbound = await import("~/lib/request-outbound")
-await mock.module("~/lib/request-outbound", () => ({
-  ...realOutbound,
-  getRequestOutboundStore: () => ({
-    insert: () => {},
-    getByRequestId: () => outboundRow,
-    cleanupOrphans: () => {},
-    meta: () => ({ dbPath: "", userVersion: 0 }),
-  }),
-  getRedactedHeaderKeys: (headers: Record<string, string>) =>
-    Object.keys(headers).filter((k) => k.toLowerCase() === "authorization"),
-}))
+beforeEach(() => {
+  spyOn(outboundMod, "getRequestOutboundStore").mockImplementation(
+    () =>
+      ({
+        insert: () => {},
+        getByRequestId: () => outboundRow,
+        cleanupOrphans: () => {},
+        meta: () => ({ dbPath: "", userVersion: 0 }),
+      }) as ReturnType<typeof outboundMod.getRequestOutboundStore>,
+  )
 
-const realAccountsManager = await import("~/lib/accounts-manager")
-await mock.module("~/lib/accounts-manager", () => ({
-  ...realAccountsManager,
-  accountsManager: new Proxy(realAccountsManager.accountsManager, {
-    get(target, prop) {
-      if (prop === "getAccountContextById") {
-        return (_id: string) => mockAccount
-      }
-      return Reflect.get(target, prop) as unknown
-    },
-  }),
-}))
+  spyOn(outboundMod, "getRedactedHeaderKeys").mockImplementation(
+    (headers: Record<string, string>) =>
+      Object.keys(headers).filter((k) => k.toLowerCase() === "authorization"),
+  )
 
-const realCopilotFetch = await import("~/services/copilot/copilot-fetch")
-await mock.module("~/services/copilot/copilot-fetch", () => ({
-  ...realCopilotFetch,
-  copilotFetch: () => Promise.resolve(mockFetchResponse),
-}))
+  spyOn(
+    accountsMod.accountsManager,
+    "getAccountContextById",
+  ).mockImplementation((_id: string) => mockAccount)
 
-const { replayRoutes } = await import("../src/routes/admin-api/replay")
+  spyOn(copilotFetchMod, "copilotFetch").mockImplementation(() =>
+    Promise.resolve(mockFetchResponse),
+  )
+})
+
+afterEach(() => {
+  mock.restore()
+  outboundRow = null
+  mockAccount = null
+  mockFetchResponse = new Response('{"ok":true}', {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  })
+  try {
+    getAdminDb().run("DELETE FROM request_log;")
+  } catch {
+    // ignore
+  }
+})
 
 const withConfig = async (config: TestConfig, run: () => Promise<void>) => {
   const original = await fs
@@ -75,11 +83,11 @@ const withConfig = async (config: TestConfig, run: () => Promise<void>) => {
   try {
     await run()
   } finally {
-    const restoreConfig =
+    const rc =
       original === null ?
         fs.rm(PATHS.CONFIG_PATH, { force: true })
       : fs.writeFile(PATHS.CONFIG_PATH, original, "utf8")
-    await restoreConfig
+    await rc
     mergeConfigWithDefaults()
   }
 }
@@ -93,28 +101,20 @@ function createApp() {
 function parseSse(body: string): Array<SseEvent> {
   const blocks = body
     .split("\n\n")
-    .map((block) => block.trim())
-    .filter((block) => block.length > 0)
-
+    .map((b) => b.trim())
+    .filter((b) => b.length > 0)
   return blocks.map((block) => {
     const lines = block.split("\n")
     let event: string | undefined
     const dataLines: Array<string> = []
-
     for (const line of lines) {
       if (line.startsWith("event:")) {
         event = line.slice("event:".length).trim() || undefined
-        continue
-      }
-      if (line.startsWith("data:")) {
+      } else if (line.startsWith("data:")) {
         dataLines.push(line.slice("data:".length).trim())
       }
     }
-
-    return {
-      event,
-      data: dataLines.join("\n"),
-    }
+    return { event, data: dataLines.join("\n") }
   })
 }
 
@@ -181,20 +181,6 @@ function insertRequestLog(requestId: string) {
   })
 }
 
-afterEach(() => {
-  outboundRow = null
-  mockAccount = null
-  mockFetchResponse = new Response('{"ok":true}', {
-    status: 200,
-    headers: { "content-type": "application/json" },
-  })
-  try {
-    getAdminDb().run("DELETE FROM request_log;")
-  } catch {
-    // ignore
-  }
-})
-
 test("POST replay live mode streams upstream SSE lifecycle events", async () => {
   await withConfig(
     { devMode: { enabled: true, capture4xx: false } },
@@ -223,17 +209,16 @@ test("POST replay live mode streams upstream SSE lifecycle events", async () => 
       )
 
       const events = parseSse(await response.text())
-      const eventNames = events.map((event) => event.event)
-      const startIndex = eventNames.indexOf("upstream-start")
-      const firstChunkIndex = eventNames.indexOf("upstream-chunk")
-      const doneIndex = eventNames.indexOf("upstream-done")
+      const eventNames = events.map((e) => e.event)
+      const startIdx = eventNames.indexOf("upstream-start")
+      const chunkIdx = eventNames.indexOf("upstream-chunk")
+      const doneIdx = eventNames.indexOf("upstream-done")
 
-      expect(startIndex).toBeGreaterThanOrEqual(0)
-      expect(firstChunkIndex).toBeGreaterThan(startIndex)
-      expect(doneIndex).toBeGreaterThan(firstChunkIndex)
+      expect(startIdx).toBeGreaterThanOrEqual(0)
+      expect(chunkIdx).toBeGreaterThan(startIdx)
+      expect(doneIdx).toBeGreaterThan(chunkIdx)
 
-      const startEvent = events[startIndex]
-      const startData = JSON.parse(startEvent.data) as {
+      const startData = JSON.parse(events[startIdx].data) as {
         status: number
         headers: Record<string, string>
       }
@@ -241,14 +226,11 @@ test("POST replay live mode streams upstream SSE lifecycle events", async () => 
       expect(startData.headers["content-type"]).toBe("text/event-stream")
       expect(startData.headers["x-upstream-test"]).toBe("yes")
 
-      const chunkEvents = events.filter(
-        (event) => event.event === "upstream-chunk",
-      )
+      const chunkEvents = events.filter((e) => e.event === "upstream-chunk")
       expect(chunkEvents.length).toBeGreaterThanOrEqual(1)
       expect(JSON.parse(chunkEvents[0].data)).toHaveProperty("raw")
 
-      const doneEvent = events[doneIndex]
-      const doneData = JSON.parse(doneEvent.data) as {
+      const doneData = JSON.parse(events[doneIdx].data) as {
         durationMs: number
       }
       expect(typeof doneData.durationMs).toBe("number")
