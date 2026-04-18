@@ -297,7 +297,7 @@ export const sanitizeIdeTools = (payload: AnthropicMessagesPayload): void => {
   }
 
   payload.tools = payload.tools.flatMap((tool) => {
-    if (tool.name === IDE_EXECUTE_CODE_TOOL) {
+    if (tool.name === IDE_EXECUTE_CODE_TOOL && !tool.defer_loading) {
       return []
     }
 
