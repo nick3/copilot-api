@@ -49,7 +49,9 @@ import {
 
 const EMPTY = "—"
 
-export function buildRequestDetailUpstreamHeaderRows(item: AdminRequestItem): Array<{
+export function buildRequestDetailUpstreamHeaderRows(
+  item: AdminRequestItem,
+): Array<{
   labelKey: string
   tooltipKey: string
   value: string

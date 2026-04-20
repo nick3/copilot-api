@@ -356,6 +356,39 @@ describe("RequestHistoryStore", () => {
 })
 
 describe("RequestHistoryStore migrations", () => {
+  test("initAdminDb replays v11 patch when user_version is 11 but columns are missing", () => {
+    const db = new Database(":memory:")
+    db.run(`
+      CREATE TABLE request_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        request_id TEXT NOT NULL UNIQUE
+      );
+    `)
+    db.run("PRAGMA user_version = 11;")
+
+    initAdminDb(db)
+
+    const columns = db
+      .query("PRAGMA table_info(request_log);")
+      .all()
+      .map((row) => (row as { name: string }).name)
+
+    expect(columns).toContain("outbound_x_request_id")
+    expect(columns).toContain("outbound_x_agent_task_id")
+    expect(columns).toContain("outbound_x_interaction_id")
+    expect(columns).toContain("outbound_x_interaction_type")
+    expect(columns).toContain("outbound_openai_intent")
+    expect(columns).toContain("outbound_user_agent")
+    expect(
+      db
+        .query(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'request_outbound' LIMIT 1;",
+        )
+        .get(),
+    ).toEqual({ name: "request_outbound" })
+    expect(db.query("PRAGMA user_version;").get()).toEqual({ user_version: 12 })
+  })
+
   test("initAdminDb is idempotent when is_subagent already exists but user_version is stale", () => {
     const db = new Database(":memory:")
     initAdminDb(db)

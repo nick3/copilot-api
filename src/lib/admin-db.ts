@@ -354,6 +354,10 @@ function migrateAdminDb(db: Database): void {
     return
   }
 
+  if (current === 11) {
+    migrateV11(db)
+  }
+
   if (current < 1) {
     migrateV1(db)
   }
