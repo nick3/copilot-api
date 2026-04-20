@@ -199,6 +199,7 @@ export type RequestLogInsert = {
   upstreamRequestId?: string
   outboundXRequestId?: string
   outboundXAgentTaskId?: string
+  outboundXInteractionId?: string
   outboundXInteractionType?: string
   outboundOpenaiIntent?: string
   outboundUserAgent?: string
@@ -260,6 +261,7 @@ export type RequestLogRow = {
   upstream_request_id: string | null
   outbound_x_request_id: string | null
   outbound_x_agent_task_id: string | null
+  outbound_x_interaction_id: string | null
   outbound_x_interaction_type: string | null
   outbound_openai_intent: string | null
   outbound_user_agent: string | null
@@ -344,6 +346,10 @@ function buildInsertArgs(record: RequestLogInsert) {
       record.outboundXAgentTaskId,
       outboundHeadersSnapshot?.xAgentTaskId,
     ),
+    xInteractionId: pickRecordedHeader(
+      record.outboundXInteractionId,
+      outboundHeadersSnapshot?.xInteractionId,
+    ),
     xInteractionType: pickRecordedHeader(
       record.outboundXInteractionType,
       outboundHeadersSnapshot?.xInteractionType,
@@ -387,6 +393,7 @@ function buildInsertArgs(record: RequestLogInsert) {
     toDbNull(record.upstreamRequestId),
     toDbNull(recordedOutboundHeaders.xRequestId),
     toDbNull(recordedOutboundHeaders.xAgentTaskId),
+    toDbNull(recordedOutboundHeaders.xInteractionId),
     toDbNull(recordedOutboundHeaders.xInteractionType),
     toDbNull(recordedOutboundHeaders.openaiIntent),
     toDbNull(recordedOutboundHeaders.userAgent),
@@ -456,6 +463,7 @@ export class RequestHistoryStore {
       "upstream_request_id",
       "outbound_x_request_id",
       "outbound_x_agent_task_id",
+      "outbound_x_interaction_id",
       "outbound_x_interaction_type",
       "outbound_openai_intent",
       "outbound_user_agent",

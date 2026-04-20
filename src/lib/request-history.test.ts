@@ -256,6 +256,7 @@ describe("RequestHistoryStore", () => {
 
     expect(columns).toContain("outbound_x_request_id")
     expect(columns).toContain("outbound_x_agent_task_id")
+    expect(columns).toContain("outbound_x_interaction_id")
     expect(columns).toContain("outbound_x_interaction_type")
     expect(columns).toContain("outbound_openai_intent")
     expect(columns).toContain("outbound_user_agent")
@@ -271,6 +272,7 @@ describe("RequestHistoryStore", () => {
       httpStatus: 200,
       outboundXRequestId: "upstream-req-1",
       outboundXAgentTaskId: "agent-task-1",
+      outboundXInteractionId: "interaction-1",
       outboundXInteractionType: "messages-proxy",
       outboundOpenaiIntent: "messages-proxy",
       outboundUserAgent: "vscode_claude_code/2.1.81",
@@ -283,10 +285,11 @@ describe("RequestHistoryStore", () => {
     expect(row?.request_id).toBe("r-outbound")
     expect(row?.outbound_x_request_id).toBe("upstream-req-1")
     expect(row?.outbound_x_agent_task_id).toBe("agent-task-1")
+    expect(row?.outbound_x_interaction_id).toBe("interaction-1")
     expect(row?.outbound_x_interaction_type).toBe("messages-proxy")
     expect(row?.outbound_openai_intent).toBe("messages-proxy")
     expect(row?.outbound_user_agent).toBe("vscode_claude_code/2.1.81")
-    expect(store.meta().userVersion).toBe(11)
+    expect(store.meta().userVersion).toBe(12)
   })
 
   test("store.insert consumes outbound snapshot after the first write", () => {
@@ -307,6 +310,7 @@ describe("RequestHistoryStore", () => {
         captureOutboundHeadersSnapshot({
           "x-request-id": "upstream-req-2",
           "x-agent-task-id": "agent-task-2",
+          "x-interaction-id": "interaction-2",
           "x-interaction-type": "messages-proxy",
           "openai-intent": "messages-proxy",
           "user-agent": "vscode_claude_code/2.1.81",
@@ -340,8 +344,10 @@ describe("RequestHistoryStore", () => {
       | null
 
     expect(firstRow?.outbound_x_request_id).toBe("upstream-req-2")
+    expect(firstRow?.outbound_x_interaction_id).toBe("interaction-2")
     expect(firstRow?.outbound_user_agent).toBe("vscode_claude_code/2.1.81")
     expect(secondRow?.outbound_x_request_id).toBeNull()
+    expect(secondRow?.outbound_x_interaction_id).toBeNull()
     expect(secondRow?.outbound_x_agent_task_id).toBeNull()
     expect(secondRow?.outbound_x_interaction_type).toBeNull()
     expect(secondRow?.outbound_openai_intent).toBeNull()
@@ -373,11 +379,12 @@ describe("RequestHistoryStore migrations", () => {
     expect(columns).toContain("upstream_error_message_raw")
     expect(columns).toContain("outbound_x_request_id")
     expect(columns).toContain("outbound_x_agent_task_id")
+    expect(columns).toContain("outbound_x_interaction_id")
     expect(columns).toContain("outbound_x_interaction_type")
     expect(columns).toContain("outbound_openai_intent")
     expect(columns).toContain("outbound_user_agent")
 
-    expect(db.query("PRAGMA user_version;").get()).toEqual({ user_version: 11 })
+    expect(db.query("PRAGMA user_version;").get()).toEqual({ user_version: 12 })
   })
 
   test("initAdminDb upgrades v10 to v11 without replaying quota backfill", () => {
@@ -437,7 +444,7 @@ describe("RequestHistoryStore migrations", () => {
       .get() as { count: number }
 
     expect(row.count).toBe(1)
-    expect(db.query("PRAGMA user_version;").get()).toEqual({ user_version: 11 })
+    expect(db.query("PRAGMA user_version;").get()).toEqual({ user_version: 12 })
   })
 })
 

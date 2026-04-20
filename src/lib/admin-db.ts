@@ -312,7 +312,15 @@ function migrateV11(db: Database): void {
   `)
 }
 
-function migrateV8ToV11(db: Database, current: number): void {
+function migrateV12(db: Database): void {
+  if (!hasRequestLogColumn(db, "outbound_x_interaction_id")) {
+    db.run("ALTER TABLE request_log ADD COLUMN outbound_x_interaction_id TEXT;")
+  }
+
+  db.run("PRAGMA user_version = 12;")
+}
+
+function migrateV8ToV12(db: Database, current: number): void {
   if (current < 8) {
     migrateV8(db)
   }
@@ -328,6 +336,10 @@ function migrateV8ToV11(db: Database, current: number): void {
   if (current < 11) {
     migrateV11(db)
   }
+
+  if (current < 12) {
+    migrateV12(db)
+  }
 }
 
 // eslint-disable-next-line complexity -- migration chain grows with each version
@@ -337,8 +349,8 @@ function migrateAdminDb(db: Database): void {
   } | null
   const current = row?.user_version ?? 0
 
-  if (current >= 11) {
-    if (current === 11) migrateV11(db)
+  if (current >= 12) {
+    if (current === 12) migrateV12(db)
     return
   }
 
@@ -434,5 +446,5 @@ function migrateAdminDb(db: Database): void {
     db.run("PRAGMA user_version = 7;")
   }
 
-  migrateV8ToV11(db, current)
+  migrateV8ToV12(db, current)
 }
