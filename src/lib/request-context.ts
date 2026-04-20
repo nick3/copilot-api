@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks"
 export interface OutboundHeadersSnapshot {
   xRequestId?: string
   xAgentTaskId?: string
+  xInteractionId?: string
   xInteractionType?: string
   openaiIntent?: string
   userAgent?: string
@@ -40,6 +41,7 @@ function buildOutboundHeadersSnapshot(
   const snapshot: OutboundHeadersSnapshot = {
     xRequestId: undefined,
     xAgentTaskId: undefined,
+    xInteractionId: undefined,
     xInteractionType: undefined,
     openaiIntent: undefined,
     userAgent: undefined,
@@ -53,6 +55,10 @@ function buildOutboundHeadersSnapshot(
       }
       case "x-agent-task-id": {
         snapshot.xAgentTaskId = value
+        break
+      }
+      case "x-interaction-id": {
+        snapshot.xInteractionId = value
         break
       }
       case "x-interaction-type": {

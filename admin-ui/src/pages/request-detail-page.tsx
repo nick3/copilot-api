@@ -49,6 +49,47 @@ import {
 
 const EMPTY = "—"
 
+export function buildRequestDetailUpstreamHeaderRows(
+  item: AdminRequestItem,
+): Array<{
+  labelKey: string
+  tooltipKey: string
+  value: string
+}> {
+  return [
+    {
+      labelKey: "requestDetailPage.fields.outboundXRequestId",
+      tooltipKey: "requestDetailPage.fieldTooltip.outboundXRequestId",
+      value: item.outbound_x_request_id || EMPTY,
+    },
+    {
+      labelKey: "requestDetailPage.fields.outboundXAgentTaskId",
+      tooltipKey: "requestDetailPage.fieldTooltip.outboundXAgentTaskId",
+      value: item.outbound_x_agent_task_id || EMPTY,
+    },
+    {
+      labelKey: "requestDetailPage.fields.outboundXInteractionId",
+      tooltipKey: "requestDetailPage.fieldTooltip.outboundXInteractionId",
+      value: item.outbound_x_interaction_id || EMPTY,
+    },
+    {
+      labelKey: "requestDetailPage.fields.outboundXInteractionType",
+      tooltipKey: "requestDetailPage.fieldTooltip.outboundXInteractionType",
+      value: item.outbound_x_interaction_type || EMPTY,
+    },
+    {
+      labelKey: "requestDetailPage.fields.outboundOpenaiIntent",
+      tooltipKey: "requestDetailPage.fieldTooltip.outboundOpenaiIntent",
+      value: item.outbound_openai_intent || EMPTY,
+    },
+    {
+      labelKey: "requestDetailPage.fields.outboundUserAgent",
+      tooltipKey: "requestDetailPage.fieldTooltip.outboundUserAgent",
+      value: item.outbound_user_agent || EMPTY,
+    },
+  ]
+}
+
 function getQuotaLabel(item: AdminRequestItem): string {
   if (item.premium_unlimited_after) {
     return "∞"
@@ -558,73 +599,19 @@ export function RequestDetailPage(): React.JSX.Element {
                 <SectionHeader
                   label={t("requestDetailPage.sections.upstreamHeaders")}
                 />
-                <TableRow>
-                  <TableCell className="text-muted-foreground">
-                    <FieldLabel
-                      label={t("requestDetailPage.fields.outboundXRequestId")}
-                      tooltip={t(
-                        "requestDetailPage.fieldTooltip.outboundXRequestId",
-                      )}
-                    />
-                  </TableCell>
-                  <TableCell className="font-mono text-xs whitespace-normal break-words">
-                    {item.outbound_x_request_id || EMPTY}
-                  </TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell className="text-muted-foreground">
-                    <FieldLabel
-                      label={t("requestDetailPage.fields.outboundXAgentTaskId")}
-                      tooltip={t(
-                        "requestDetailPage.fieldTooltip.outboundXAgentTaskId",
-                      )}
-                    />
-                  </TableCell>
-                  <TableCell className="font-mono text-xs whitespace-normal break-words">
-                    {item.outbound_x_agent_task_id || EMPTY}
-                  </TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell className="text-muted-foreground">
-                    <FieldLabel
-                      label={t(
-                        "requestDetailPage.fields.outboundXInteractionType",
-                      )}
-                      tooltip={t(
-                        "requestDetailPage.fieldTooltip.outboundXInteractionType",
-                      )}
-                    />
-                  </TableCell>
-                  <TableCell className="font-mono text-xs whitespace-normal break-words">
-                    {item.outbound_x_interaction_type || EMPTY}
-                  </TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell className="text-muted-foreground">
-                    <FieldLabel
-                      label={t("requestDetailPage.fields.outboundOpenaiIntent")}
-                      tooltip={t(
-                        "requestDetailPage.fieldTooltip.outboundOpenaiIntent",
-                      )}
-                    />
-                  </TableCell>
-                  <TableCell className="font-mono text-xs whitespace-normal break-words">
-                    {item.outbound_openai_intent || EMPTY}
-                  </TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell className="text-muted-foreground">
-                    <FieldLabel
-                      label={t("requestDetailPage.fields.outboundUserAgent")}
-                      tooltip={t(
-                        "requestDetailPage.fieldTooltip.outboundUserAgent",
-                      )}
-                    />
-                  </TableCell>
-                  <TableCell className="font-mono text-xs whitespace-normal break-words">
-                    {item.outbound_user_agent || EMPTY}
-                  </TableCell>
-                </TableRow>
+                {buildRequestDetailUpstreamHeaderRows(item).map((row) => (
+                  <TableRow key={row.labelKey}>
+                    <TableCell className="text-muted-foreground">
+                      <FieldLabel
+                        label={t(row.labelKey)}
+                        tooltip={t(row.tooltipKey)}
+                      />
+                    </TableCell>
+                    <TableCell className="font-mono text-xs whitespace-normal break-words">
+                      {row.value}
+                    </TableCell>
+                  </TableRow>
+                ))}
 
                 {/* ── Client ── */}
                 <SectionHeader

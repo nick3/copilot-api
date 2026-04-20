@@ -40,6 +40,7 @@ type AdminRequestItemWire = {
   upstream_request_id?: string
   outbound_x_request_id?: string
   outbound_x_agent_task_id?: string
+  outbound_x_interaction_id?: string | null
   outbound_x_interaction_type?: string
   outbound_openai_intent?: string
   outbound_user_agent?: string

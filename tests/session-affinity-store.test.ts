@@ -4,14 +4,14 @@ import { expect, test } from "bun:test"
 import { getAdminDbUserVersion, initAdminDb } from "../src/lib/admin-db"
 import { SessionAffinityStore } from "../src/lib/session-affinity-store"
 
-test("initAdminDb migrates admin DB to user_version 11", () => {
+test("initAdminDb migrates admin DB to user_version 12", () => {
   const db = new Database(":memory:")
   initAdminDb(db)
 
-  expect(getAdminDbUserVersion(db)).toBe(11)
+  expect(getAdminDbUserVersion(db)).toBe(12)
 })
 
-test("initAdminDb upgrades an existing v7 DB with request_log to v11 and creates session_affinity", () => {
+test("initAdminDb upgrades an existing v7 DB with request_log to v12 and creates session_affinity", () => {
   const db = new Database(":memory:")
 
   db.run(`
@@ -93,7 +93,7 @@ test("initAdminDb upgrades an existing v7 DB with request_log to v11 and creates
     .all() as Array<{ name: string }>
   const columnNamesAfter = requestLogColumnsAfter.map((column) => column.name)
 
-  expect(getAdminDbUserVersion(db)).toBe(11)
+  expect(getAdminDbUserVersion(db)).toBe(12)
   expect(after?.name).toBe("session_affinity")
   expect(columnNamesAfter).toContain("outbound_x_request_id")
 })
