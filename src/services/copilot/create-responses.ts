@@ -408,7 +408,7 @@ export const createResponses = async (
   prepareForCompact(headers, compactType)
 
   // service_tier is not supported by github copilot
-  payload.service_tier = null
+  payload.service_tier = undefined
   captureOutboundHeadersSnapshot(headers)
 
   const response = await copilotFetch(

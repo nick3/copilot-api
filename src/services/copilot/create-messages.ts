@@ -110,7 +110,7 @@ const buildAnthropicBetaHeader = (
     // in vscode copilot extension, advanced-tool-use is enabled by default
     // align header with vscode copilot extension
 
-    // will remove append ADVANCED_TOOL_USE_BETA in next github copilot extension version (>0.44.1)
+    // remove this append once GitHub Copilot extension sends ADVANCED_TOOL_USE_BETA by default
     const copilotHeaderSet =
       modelSupportsToolSearch(model) ? [ADVANCED_TOOL_USE_BETA] : []
     const headerSet = new Set([...copilotHeaderSet, ...filteredBeta])

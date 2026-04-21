@@ -141,7 +141,7 @@ const OPENCODE_VERSION = "opencode/1.3.15"
 const OPENCODE_LLM_USER_AGENT =
   "opencode/1.3.15 ai-sdk/provider-utils/4.0.21 runtime/bun/1.3.11, opencode/1.3.15"
 
-const COPILOT_VERSION = "0.44.1"
+const COPILOT_VERSION = "0.44.2"
 const EDITOR_PLUGIN_VERSION = `copilot-chat/${COPILOT_VERSION}`
 const USER_AGENT = `GitHubCopilotChat/${COPILOT_VERSION}`
 const CLAUDE_AGENT_USER_AGENT =
