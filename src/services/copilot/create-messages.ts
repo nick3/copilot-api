@@ -17,6 +17,7 @@ import {
   prepareMessageProxyHeaders,
 } from "~/lib/api-config"
 import { isForceAgentEnabled } from "~/lib/config"
+import { logCopilotRateLimits } from "~/lib/copilot-rate-limit"
 import { HTTPError } from "~/lib/error"
 import { captureOutboundHeadersSnapshot } from "~/lib/request-context"
 import { resolveEffectiveInitiator } from "~/lib/request-initiator"
@@ -251,6 +252,8 @@ export const createMessages = async (
       callSite: "messages",
     },
   )
+
+  logCopilotRateLimits(response.headers)
 
   if (!response.ok) {
     consola.error("Failed to create messages", response)

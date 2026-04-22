@@ -12,6 +12,7 @@ import {
   prepareInteractionHeaders,
 } from "~/lib/api-config"
 import { getReasoningEffortForModel, isForceAgentEnabled } from "~/lib/config"
+import { logCopilotRateLimits } from "~/lib/copilot-rate-limit"
 import { HTTPError } from "~/lib/error"
 import { captureOutboundHeadersSnapshot } from "~/lib/request-context"
 import { resolveEffectiveInitiator } from "~/lib/request-initiator"
@@ -115,6 +116,8 @@ export const createChatCompletions = async (
       callSite: "chat-completions",
     },
   )
+
+  logCopilotRateLimits(response.headers)
 
   if (!response.ok) {
     consola.error("Failed to create chat completions", response)
