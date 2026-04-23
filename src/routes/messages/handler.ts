@@ -923,6 +923,15 @@ async function streamChatCompletionsAndLog(params: {
   }
 }
 
+function invalidateAffinityOnOwnershipMismatch(
+  ownershipMismatch: boolean,
+  instr: Pick<InstrumentationContext, "affinityHit" | "affinityCacheKey">,
+): void {
+  if (ownershipMismatch && instr.affinityHit && instr.affinityCacheKey) {
+    accountsManager.invalidateAffinity(instr.affinityCacheKey)
+  }
+}
+
 async function handleResponsesCreateError(params: {
   error: unknown
   instr: InstrumentationContext
@@ -932,6 +941,8 @@ async function handleResponsesCreateError(params: {
 
   const finishedAtMs = Date.now()
   const details = await extractErrorObservability(error)
+
+  invalidateAffinityOnOwnershipMismatch(details.ownershipMismatch, instr)
 
   if (shouldMarkAccountFailed(details)) {
     accountsManager.markAccountFailed(instr.account.id, "Unauthorized (401)")
@@ -1146,6 +1157,8 @@ async function streamResponsesAndLog(params: {
     upstreamErrorMessageRaw = details.upstreamErrorMessageRaw
 
     logger.warn("Streaming error:", error)
+
+    invalidateAffinityOnOwnershipMismatch(details.ownershipMismatch, instr)
 
     if (shouldMarkAccountFailed(details)) {
       accountsManager.markAccountFailed(instr.account.id, "Unauthorized (401)")

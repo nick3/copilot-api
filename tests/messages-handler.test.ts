@@ -5,6 +5,7 @@ import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types
 import type { Model } from "~/services/copilot/get-models"
 
 import { accountsManager } from "~/lib/accounts-manager"
+import { getAdminDb } from "~/lib/admin-db"
 import { getSmallModel } from "~/lib/config"
 import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
@@ -184,6 +185,8 @@ function createPayload(
 beforeEach(() => {
   state.manualApprove = false
   state.verbose = false
+
+  getAdminDb().run("DELETE FROM session_affinity;")
 
   accountsManager.selectAccountForRequest = () =>
     Promise.resolve(buildSelection("/v1/messages", "messages-model"))
@@ -731,11 +734,29 @@ describe("messages handler ownership context", () => {
 })
 
 describe("messages handler unauthorized classification", () => {
-  test("ownership mismatch 401 does not trigger markAccountFailed", async () => {
+  test("ownership mismatch 401 invalidates stale affinity mapping and does not trigger markAccountFailed", async () => {
     const markFailedSpy = mock(() => {})
+    const cacheKey = "test-cache-key"
+
+    getAdminDb()
+      .query(
+        `INSERT INTO session_affinity (
+          cache_key,
+          account_id,
+          created_at_ms,
+          last_confirmed_at_ms,
+          last_used_at_ms
+        ) VALUES (?, ?, ?, ?, ?);`,
+      )
+      .run(cacheKey, "octocat", 1, 1, 1)
 
     accountsManager.selectAccountForRequest = () =>
-      Promise.resolve(buildSelection("/v1/messages", "messages-model"))
+      Promise.resolve({
+        ...buildSelection("/responses", "responses-model"),
+        affinityHit: true,
+        affinityCacheKey: cacheKey,
+        selectionReason: "affinity_hit",
+      })
     accountsManager.markAccountFailed = markFailedSpy
 
     const fetchMock = mock(() =>
@@ -758,8 +779,91 @@ describe("messages handler unauthorized classification", () => {
       }),
     )
 
+    const affinityRow = getAdminDb()
+      .query(
+        "SELECT account_id FROM session_affinity WHERE cache_key = ? LIMIT 1;",
+      )
+      .get(cacheKey) as { account_id?: string } | null
+
     expect(response.status).toBe(401)
     expect(markFailedSpy).not.toHaveBeenCalled()
+    expect(affinityRow).toBeNull()
+  })
+
+  test("ownership mismatch during responses stream invalidates stale affinity mapping and does not trigger markAccountFailed", async () => {
+    const markFailedSpy = mock(() => {})
+    const cacheKey = "test-stream-cache-key"
+    const encoder = new TextEncoder()
+
+    getAdminDb()
+      .query(
+        `INSERT INTO session_affinity (
+          cache_key,
+          account_id,
+          created_at_ms,
+          last_confirmed_at_ms,
+          last_used_at_ms
+        ) VALUES (?, ?, ?, ?, ?);`,
+      )
+      .run(cacheKey, "octocat", 1, 1, 1)
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve({
+        ...buildSelection("/responses", "responses-model"),
+        affinityHit: true,
+        affinityCacheKey: cacheKey,
+        selectionReason: "affinity_hit",
+      })
+    accountsManager.markAccountFailed = markFailedSpy
+
+    const fetchMock = mock(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                encoder.encode('event: ping\ndata: {"type":"ping"}\n\n'),
+              )
+              queueMicrotask(() => {
+                controller.error(
+                  new HTTPError(
+                    'input item ID "msg_abc" does not belong to this connection',
+                    new Response("ownership mismatch", { status: 401 }),
+                  ),
+                )
+              })
+            },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          },
+        ),
+      ),
+    )
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(createPayload({ stream: true })),
+      }),
+    )
+
+    await response.text()
+
+    const affinityRow = getAdminDb()
+      .query(
+        "SELECT account_id FROM session_affinity WHERE cache_key = ? LIMIT 1;",
+      )
+      .get(cacheKey) as { account_id?: string } | null
+
+    expect(response.status).toBe(200)
+    expect(markFailedSpy).not.toHaveBeenCalled()
+    expect(affinityRow).toBeNull()
   })
 
   test("genuine unauthorized 401 does trigger markAccountFailed", async () => {

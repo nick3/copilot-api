@@ -5,6 +5,7 @@ import "./shared-admin-db-test-home"
 import type { AccountRuntime } from "~/lib/types/account"
 import type { Model } from "~/services/copilot/get-models"
 
+import { HTTPError } from "~/lib/error"
 import { getUUID } from "~/lib/utils"
 
 const [{ accountsManager }, { getAdminDb }, { state }, { responsesRoutes }] =
@@ -146,6 +147,7 @@ beforeEach(() => {
   state.verbose = false
 
   getAdminDb().run("DELETE FROM request_log;")
+  getAdminDb().run("DELETE FROM session_affinity;")
 
   accountsManager.finalizeQuota = () => Promise.resolve()
   accountsManager.markAccountFailed = () => {}
@@ -159,6 +161,65 @@ afterEach(() => {
 })
 
 describe("responses request log prompt_cache_key persistence", () => {
+  test("ownership mismatch 401 invalidates stale affinity mapping and does not trigger markAccountFailed", async () => {
+    const markFailedSpy = mock(() => {})
+    const cacheKey = "test-cache-key"
+
+    getAdminDb()
+      .query(
+        `INSERT INTO session_affinity (
+          cache_key,
+          account_id,
+          created_at_ms,
+          last_confirmed_at_ms,
+          last_used_at_ms
+        ) VALUES (?, ?, ?, ?, ?);`,
+      )
+      .run(cacheKey, "octocat", 1, 1, 1)
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve({
+        ...buildSelection("/responses", "responses-model"),
+        affinityHit: true,
+        affinityCacheKey: cacheKey,
+        selectionReason: "affinity_hit",
+      })
+    accountsManager.markAccountFailed = markFailedSpy
+
+    const fetchMock = mock(() =>
+      Promise.reject(
+        new HTTPError(
+          'input item ID "msg_abc" does not belong to this connection',
+          new Response("ownership mismatch", { status: 401 }),
+        ),
+      ),
+    )
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "original-model",
+          input: "hello",
+        }),
+      }),
+    )
+
+    const affinityRow = getAdminDb()
+      .query(
+        "SELECT account_id FROM session_affinity WHERE cache_key = ? LIMIT 1;",
+      )
+      .get(cacheKey) as { account_id?: string } | null
+
+    expect(response.status).toBe(401)
+    expect(markFailedSpy).not.toHaveBeenCalled()
+    expect(affinityRow).toBeNull()
+  })
+
   test("prefers payload.prompt_cache_key over metadata user_id session_id", async () => {
     let selectionRequestId: string | undefined
 
