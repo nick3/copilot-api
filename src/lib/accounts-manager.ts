@@ -1202,6 +1202,15 @@ export class AccountsManager {
     return result
   }
 
+  invalidateAffinity(cacheKey: string): void {
+    const normalizedCacheKey = cacheKey.trim()
+    if (!normalizedCacheKey) {
+      return
+    }
+
+    this.affinityCache.delete(normalizedCacheKey)
+  }
+
   private attachConfirmOwnership(
     result: SelectAccountForRequestSuccess,
     ownershipWriteSessionId: string | undefined,

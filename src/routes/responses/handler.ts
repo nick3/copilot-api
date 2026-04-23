@@ -258,8 +258,17 @@ type StreamSseStream = Parameters<Parameters<typeof streamSSE>[1]>[0]
 async function observeRequestError(
   accountId: string,
   error: unknown,
+  affinity?: { affinityHit?: boolean; affinityCacheKey?: string },
 ): Promise<ObservedErrorState> {
   const details = await extractErrorObservability(error)
+
+  if (
+    details.ownershipMismatch
+    && affinity?.affinityHit
+    && affinity.affinityCacheKey
+  ) {
+    accountsManager.invalidateAffinity(affinity.affinityCacheKey)
+  }
 
   if (shouldMarkAccountFailed(details)) {
     accountsManager.markAccountFailed(accountId, "Unauthorized (401)")
@@ -537,6 +546,14 @@ async function handleUpstreamCreateError(params: {
   const finishedAtMs = Date.now()
   const details = await extractErrorObservability(error)
 
+  if (
+    details.ownershipMismatch
+    && request.affinityHit
+    && request.affinityCacheKey
+  ) {
+    accountsManager.invalidateAffinity(request.affinityCacheKey)
+  }
+
   if (shouldMarkAccountFailed(details)) {
     accountsManager.markAccountFailed(account.id, "Unauthorized (401)")
   }
@@ -718,6 +735,14 @@ async function streamResponsesAndLog(params: {
 
     logger.warn("Responses streaming error:", error)
 
+    if (
+      details.ownershipMismatch
+      && request.affinityHit
+      && request.affinityCacheKey
+    ) {
+      accountsManager.invalidateAffinity(request.affinityCacheKey)
+    }
+
     if (shouldMarkAccountFailed(details)) {
       accountsManager.markAccountFailed(account.id, "Unauthorized (401)")
     }
@@ -816,7 +841,10 @@ async function handleNonStreamingResponses(params: {
     return c.json(result)
   } catch (error) {
     finishedAtMs = Date.now()
-    errorState = await observeRequestError(account.id, error)
+    errorState = await observeRequestError(account.id, error, {
+      affinityHit: request.affinityHit,
+      affinityCacheKey: request.affinityCacheKey,
+    })
     throw error
   } finally {
     const finishedAtMsFinal = finishedAtMs ?? Date.now()
