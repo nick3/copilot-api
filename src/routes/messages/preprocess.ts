@@ -6,7 +6,7 @@ import {
   compactAutoContinuePromptStarts,
   compactMessageSections,
   compactSummaryPromptStart,
-  compactSystemPromptStart,
+  compactSystemPromptStarts,
   compactTextOnlyGuard,
   type CompactType,
 } from "~/lib/compact"
@@ -93,14 +93,19 @@ export const getCompactType = (
 
   const system = anthropicPayload.system
   if (typeof system === "string") {
-    return system.startsWith(compactSystemPromptStart) ? COMPACT_REQUEST : 0
+    const hasCompactSystemPrompt = compactSystemPromptStarts.some(
+      (promptStart) => system.startsWith(promptStart),
+    )
+    return hasCompactSystemPrompt ? COMPACT_REQUEST : 0
   }
   if (!Array.isArray(system)) return 0
 
   const hasCompactSystemPrompt = system.some(
     (msg) =>
       typeof msg.text === "string"
-      && msg.text.startsWith(compactSystemPromptStart),
+      && compactSystemPromptStarts.some((promptStart) =>
+        msg.text.startsWith(promptStart),
+      ),
   )
   if (hasCompactSystemPrompt) {
     return COMPACT_REQUEST
