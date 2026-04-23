@@ -156,6 +156,7 @@ export const handleResponses = async (c: Context) => {
 
   const upstreamPayload = { ...payload, model: selectedModel.id }
   useFunctionApplyPatch(upstreamPayload)
+  removeUnsupportedTools(upstreamPayload)
   applyResponsesApiContextManagement(
     upstreamPayload,
     selectedModel.capabilities.limits.max_prompt_tokens,
@@ -850,5 +851,24 @@ async function handleNonStreamingResponses(params: {
       errorMessage: errorState.errorMessage,
       upstreamErrorMessageRaw: errorState.upstreamErrorMessageRaw,
     })
+  }
+}
+
+const COPILOT_UNSUPPORTED_TOOL_TYPES = new Set(["image_generation"])
+
+export const removeUnsupportedTools = (payload: ResponsesPayload): void => {
+  if (!Array.isArray(payload.tools) || payload.tools.length === 0) return
+
+  const dropped: Array<string> = []
+  payload.tools = payload.tools.filter((t) => {
+    const type = t.type as string
+    if (COPILOT_UNSUPPORTED_TOOL_TYPES.has(type)) {
+      dropped.push(type)
+      return false
+    }
+    return true
+  })
+  if (dropped.length > 0) {
+    logger.debug("Removed unsupported tools:", dropped)
   }
 }
