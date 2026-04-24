@@ -829,6 +829,7 @@ Here is an example `.claude/settings.json` file:
     "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
     "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION": "false",
     "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "true",
+    "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
     "CLAUDE_PLUGIN_ENABLE_QUESTION_RULES": "true"
   },
   "permissions": {
@@ -842,9 +843,9 @@ Here is an example `.claude/settings.json` file:
 
 - Replace `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, and `ANTHROPIC_DEFAULT_HAIKU_MODEL` according to your needs. After configuration, please install the claude code plugin [Plugin Integrations](#plugin-integrations). If configuring the claude model, it is recommended to set all model configurations the same, so as to remain consistent with github-copilot claude agent behavior. 
 - Setting CLAUDE_CODE_ATTRIBUTION_HEADER to 0 can prevent Claude code from adding billing and version information in system prompts, thereby avoiding prompt cache invalidation.
-- Turning off CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION can prevent quota from being consumed unnecessarily.
-- If you want to disable Claude Code WebSearch, deny `WebSearch` in permissions or set `useResponsesApiWebSearch` to `false` in `config.json`. When enabled, `/v1/responses` can forward `web_search` tools upstream, but actual support still depends on the selected model and Copilot behavior.
-- Please do not enable `ENABLE_TOOL_SEARCH`, as the current Claude Code uses the client tool search mode. In this mode, loading defer tools requires an additional request each time, and cache hit rates are affected, so it does not necessarily save tokens. Only server tool search mode can save tokens. The current project has compatibility issues with client tool search mode, which can also cause errors when used.
+- Turning off `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` and `CLAUDE_CODE_ENABLE_AWAY_SUMMARY` can prevent quota from being consumed unnecessarily.
+- Permissions deny `WebSearch` because the GitHub Copilot API does not currently support native web search in this project. You can keep `WebSearch` denied in Claude Code permissions or set `useResponsesApiWebSearch` to `false` in `config.json`. If you need search, use an alternative tool such as `mcp_server_fetch`.
+- Please do not enable `ENABLE_TOOL_SEARCH`, as the current Claude Code uses the client tool search mode. In this mode, loading deferred tools requires an additional request each time, cache hit rates are affected, and it does not necessarily save tokens. Only server-side tool search can potentially save tokens. The current project still has compatibility issues with client tool search mode, which can also cause errors when used.
 
 ### CLAUDE.md or AGENTS.md Recommended Content
 

@@ -836,6 +836,7 @@ npx @nick3/copilot-api@latest start --claude-code
     "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
     "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION": "false",
     "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "true",
+    "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
     "CLAUDE_PLUGIN_ENABLE_QUESTION_RULES": "true"
   },
   "permissions": {
@@ -849,9 +850,9 @@ npx @nick3/copilot-api@latest start --claude-code
 
 - 请根据需要替换 `ANTHROPIC_MODEL`、`ANTHROPIC_DEFAULT_OPUS_MODEL`、`ANTHROPIC_DEFAULT_SONNET_MODEL` 和 `ANTHROPIC_DEFAULT_HAIKU_MODEL`。配置完成后，请安装 Claude Code 插件，见 [插件集成](#plugin-integrations)。如果你配置的是 Claude 模型，建议把这些模型配置尽量设为一致，以保持与 GitHub Copilot Claude agent 行为一致。
 - 将 `CLAUDE_CODE_ATTRIBUTION_HEADER` 设为 `0` 可以阻止 Claude Code 在 system prompt 中附加计费和版本信息，从而避免 prompt cache 失效。
-- 关闭 `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` 可以避免不必要地消耗额度。
-- 如果你想禁用 Claude Code 的 WebSearch，可以在 `permissions` 中拒绝 `WebSearch`，或在 `config.json` 中将 `useResponsesApiWebSearch` 设为 `false`。开启后，`/v1/responses` 仍可以向上游转发 `web_search` 工具，但实际是否可用仍取决于所选模型与 Copilot 上游行为。
-- 请不要启用 `ENABLE_TOOL_SEARCH`。Claude Code 当前使用的是客户端 tool search 模式，在该模式下每次加载 defer tools 都需要额外请求一次，缓存命中率也会受到影响，因此不一定真的省 token。只有服务端 tool search 模式才有节省 token 的空间，而本项目目前与客户端 tool search 模式仍存在兼容性问题，启用后也可能引发错误。
+- 关闭 `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` 和 `CLAUDE_CODE_ENABLE_AWAY_SUMMARY` 可以避免不必要地消耗额度。
+- `permissions` 中默认禁止 `WebSearch`，因为当前项目下 GitHub Copilot API 还不支持原生 web search。你可以继续在 Claude Code 的 `permissions` 中拒绝 `WebSearch`，或在 `config.json` 中将 `useResponsesApiWebSearch` 设为 `false`。如果需要搜索能力，建议使用 `mcp_server_fetch` 等替代工具。
+- 请不要启用 `ENABLE_TOOL_SEARCH`。Claude Code 当前使用的是客户端 tool search 模式；每次加载 deferred tools 都需要额外请求，会影响缓存命中率，而且本项目目前与该模式仍存在兼容性问题，启用后也可能引发错误。
 
 <a id="claudemd-or-agentsmd-recommended-content"></a>
 
