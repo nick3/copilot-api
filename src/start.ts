@@ -124,6 +124,7 @@ async function setupClaudeCode(
       CLAUDE_CODE_ATTRIBUTION_HEADER: "0",
       CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false",
       CLAUDE_CODE_DISABLE_TERMINAL_TITLE: "true",
+      CLAUDE_CODE_ENABLE_AWAY_SUMMARY: "0",
       CLAUDE_PLUGIN_ENABLE_QUESTION_RULES: "true",
     },
     "claude",
