@@ -46,7 +46,7 @@ interface CopilotUsageResponse {
   assigned_date: string
   can_signup_for_limited: boolean
   chat_enabled: boolean
-  copilot_plan: string
+  copilot_plan?: string
   organization_login_list: Array<unknown>
   organization_list: Array<unknown>
   quota_reset_date: string

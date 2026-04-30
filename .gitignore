@@ -17,6 +17,16 @@ dist/
 /.claude
 /.worktrees/
 
+# local runtime data
+copilot-data/
+
+# local agent state
+.omc/
+admin-ui/.omc/
+.agents/
+.factory/
+.superpowers/
+
 .opencode/plans
 .opencode/package-lock.json
 

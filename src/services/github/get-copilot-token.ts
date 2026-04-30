@@ -1,3 +1,5 @@
+import consola from "consola"
+
 import type { AccountContext } from "~/lib/types/account"
 
 import { getGitHubApiBaseUrl, githubHeaders } from "~/lib/api-config"
@@ -13,7 +15,12 @@ export const getCopilotToken = async (account?: AccountContext) => {
     },
   )
 
-  if (!response.ok) throw new HTTPError("Failed to get Copilot token", response)
+  if (!response.ok) {
+    const errorText = await response.clone().text()
+    consola.error("Failed to get Copilot token response body", errorText)
+
+    throw new HTTPError("Failed to get Copilot token", response)
+  }
 
   return (await response.json()) as GetCopilotTokenResponse
 }
