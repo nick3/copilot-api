@@ -5,6 +5,12 @@ import clipboard from "clipboardy"
 import consola from "consola"
 import { serve, type ServerHandler } from "srvx"
 
+import {
+  registerQuotaRefreshSchedulerShutdownCleanup,
+  startQuotaRefreshSchedulerFromConfig,
+  stopQuotaRefreshScheduler,
+} from "~/lib/quota-refresh-scheduler-runtime"
+
 import { accountsManager } from "./lib/accounts-manager"
 import { addAccountToRegistry, saveAccountToken } from "./lib/accounts-registry"
 import {
@@ -15,11 +21,6 @@ import {
 import { initOpencodeVersion } from "./lib/opencode"
 import { ensurePaths } from "./lib/paths"
 import { initProxyFromEnv } from "./lib/proxy"
-import {
-  registerQuotaRefreshSchedulerShutdownCleanup,
-  startQuotaRefreshSchedulerFromConfig,
-  stopQuotaRefreshScheduler,
-} from "./lib/quota-refresh-scheduler-runtime"
 import { applySharedSessionAffinityRetention } from "./lib/session-affinity-store"
 import { generateEnvScript } from "./lib/shell"
 import { state } from "./lib/state"

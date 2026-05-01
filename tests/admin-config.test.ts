@@ -614,6 +614,65 @@ test("POST /api/admin/config updates quotaRefresh and clamps short positive inte
   })
 })
 
+test("POST /api/admin/config merges partial quotaRefresh updates", async () => {
+  await withConfig(
+    {
+      quotaRefresh: {
+        enabled: true,
+        intervalMinutes: 120,
+        startupDelaySeconds: 10,
+        staggerMinSeconds: 4,
+        staggerMaxSeconds: 8,
+      },
+    },
+    async () => {
+      const { server } = await import("../src/server")
+
+      const postRes = await server.fetch(
+        new Request("http://localhost/api/admin/config", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            quotaRefresh: {
+              enabled: false,
+            },
+          }),
+        }),
+      )
+
+      expect(postRes.status).toBe(200)
+
+      const postBody = (await postRes.json()) as {
+        quotaRefresh?: {
+          enabled?: boolean
+          intervalMinutes?: number
+          startupDelaySeconds?: number
+          staggerMinSeconds?: number
+          staggerMaxSeconds?: number
+        }
+      }
+      expect(postBody.quotaRefresh).toEqual({
+        enabled: false,
+        intervalMinutes: 120,
+        startupDelaySeconds: 10,
+        staggerMinSeconds: 4,
+        staggerMaxSeconds: 8,
+      })
+
+      const getRes = await server.fetch(
+        new Request("http://localhost/api/admin/config"),
+      )
+
+      expect(getRes.status).toBe(200)
+
+      const getBody = (await getRes.json()) as typeof postBody
+      expect(getBody.quotaRefresh).toEqual(postBody.quotaRefresh)
+    },
+  )
+})
+
 test("POST /api/admin/config refreshes the running quota scheduler config", async () => {
   await withConfig({}, async () => {
     const runtime = await import("../src/lib/quota-refresh-scheduler-runtime")

@@ -222,6 +222,39 @@ test("QuotaRefreshScheduler updateConfig disables work during a pending stagger 
   expect(fakeTimer.delayMsList).toEqual([])
 })
 
+test("QuotaRefreshScheduler ignores stale in-flight rounds after updateConfig restarts", async () => {
+  const fakeTimer = new FakeTimer()
+  const calls: Array<string> = []
+  let resolveRefresh: (() => void) | undefined
+  const refreshPromise = new Promise<void>((resolve) => {
+    resolveRefresh = resolve
+  })
+  const manager: QuotaRefreshManager = {
+    getQuotaRefreshAccounts: () => [account("a"), account("b")],
+    refreshAccountQuota: (runtime) => {
+      calls.push(runtime.id)
+      return runtime.id === "a" ? refreshPromise : Promise.resolve()
+    },
+  }
+  const scheduler = new QuotaRefreshScheduler({
+    config: config({ startupDelaySeconds: 0 }),
+    logger,
+    manager,
+    timer: fakeTimer,
+  })
+
+  scheduler.start()
+  fakeTimer.runNext()
+  await flushAsyncWork()
+
+  scheduler.updateConfig(config({ startupDelaySeconds: 30 }))
+  resolveRefresh?.()
+  await flushAsyncWork()
+
+  expect(calls).toEqual(["a"])
+  expect(fakeTimer.delayMsList).toEqual([30_000])
+})
+
 test("QuotaRefreshScheduler does not schedule when interval is non-positive", () => {
   const fakeTimer = new FakeTimer()
   const manager: QuotaRefreshManager = {

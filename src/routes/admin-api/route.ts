@@ -1109,7 +1109,13 @@ function applyQuotaRefreshConfig(
     delete next.quotaRefresh
     return undefined
   }
-  next.quotaRefresh = parsed.value
+  next.quotaRefresh =
+    next.quotaRefresh === undefined ?
+      parsed.value
+    : {
+        ...next.quotaRefresh,
+        ...parsed.value,
+      }
   return undefined
 }
 

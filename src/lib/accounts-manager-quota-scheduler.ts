@@ -65,6 +65,7 @@ export class QuotaRefreshScheduler {
   private readonly now: () => number
   private readonly random: () => number
   private readonly timer: SchedulerTimer
+  private generation = 0
   private pendingDelay?: PendingDelay
   private roundTimer?: TimerHandle
   private stopped = true
@@ -87,10 +88,14 @@ export class QuotaRefreshScheduler {
     }
 
     this.stopped = false
-    this.scheduleRound(secondsToMs(this.config.startupDelaySeconds))
+    this.scheduleRound(
+      secondsToMs(this.config.startupDelaySeconds),
+      this.generation,
+    )
   }
 
   stop(): void {
+    this.generation += 1
     this.stopped = true
     this.clearRoundTimer()
     this.clearPendingDelay()
@@ -100,24 +105,36 @@ export class QuotaRefreshScheduler {
     this.start(config)
   }
 
-  private scheduleRound(delayMs: number): void {
+  private isActiveGeneration(generation: number): boolean {
+    return !this.stopped && this.generation === generation
+  }
+
+  private scheduleRound(delayMs: number, generation: number): void {
     this.clearRoundTimer()
-    this.roundTimer = this.timer.setTimer(
+    const handle = this.timer.setTimer(
       () => {
-        this.roundTimer = undefined
-        void this.runRound()
+        if (this.roundTimer === handle) {
+          this.roundTimer = undefined
+        }
+        if (this.isActiveGeneration(generation)) {
+          void this.runRound(generation)
+        }
       },
       Math.max(0, delayMs),
     )
+    this.roundTimer = handle
   }
 
-  private scheduleNextRound(): void {
-    if (!isSchedulingEnabled(this.config)) {
+  private scheduleNextRound(generation: number): void {
+    if (
+      !this.isActiveGeneration(generation)
+      || !isSchedulingEnabled(this.config)
+    ) {
       return
     }
 
     const intervalMs = minutesToMs(this.config.intervalMinutes)
-    this.scheduleRound(this.withJitter(intervalMs))
+    this.scheduleRound(this.withJitter(intervalMs), generation)
   }
 
   private withJitter(intervalMs: number): number {
@@ -187,12 +204,12 @@ export class QuotaRefreshScheduler {
     resolve()
   }
 
-  private async runRound(): Promise<void> {
+  private async runRound(generation: number): Promise<void> {
     try {
       const accounts = this.manager.getQuotaRefreshAccounts()
 
       for (const [index, account] of accounts.entries()) {
-        if (this.stopped) {
+        if (!this.isActiveGeneration(generation)) {
           return
         }
         if (this.isFresh(account)) {
@@ -202,22 +219,31 @@ export class QuotaRefreshScheduler {
         try {
           await this.manager.refreshAccountQuota(account)
         } catch (error) {
-          this.logger.debug("Background quota refresh failed", {
-            accountId: account.id,
-            error,
-          })
+          if (this.isActiveGeneration(generation)) {
+            this.logger.debug("Background quota refresh failed", {
+              accountId: account.id,
+              error,
+            })
+          }
+        }
+
+        if (!this.isActiveGeneration(generation)) {
+          return
         }
 
         if (index < accounts.length - 1) {
           await this.schedulerDelay(this.getStaggerDelayMs())
+          if (!this.isActiveGeneration(generation)) {
+            return
+          }
         }
       }
     } catch (error) {
-      this.logger.error("Background quota refresh round failed", error)
-    } finally {
-      if (!this.stopped) {
-        this.scheduleNextRound()
+      if (this.isActiveGeneration(generation)) {
+        this.logger.error("Background quota refresh round failed", error)
       }
+    } finally {
+      this.scheduleNextRound(generation)
     }
   }
 }
