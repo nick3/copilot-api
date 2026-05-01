@@ -15,6 +15,11 @@ import {
 import { initOpencodeVersion } from "./lib/opencode"
 import { ensurePaths } from "./lib/paths"
 import { initProxyFromEnv } from "./lib/proxy"
+import {
+  registerQuotaRefreshSchedulerShutdownCleanup,
+  startQuotaRefreshSchedulerFromConfig,
+  stopQuotaRefreshScheduler,
+} from "./lib/quota-refresh-scheduler-runtime"
 import { applySharedSessionAffinityRetention } from "./lib/session-affinity-store"
 import { generateEnvScript } from "./lib/shell"
 import { state } from "./lib/state"
@@ -203,6 +208,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
         // Re-initialize accounts manager with the new account
         accountsManager.shutdown()
+        stopQuotaRefreshScheduler()
         await accountsManager.initialize(state.vsCodeVersion)
         accountsManager.setModelsRefreshIntervalMs(getModelRefreshIntervalMs())
       } catch (error) {
@@ -211,6 +217,9 @@ export async function runServer(options: RunServerOptions): Promise<void> {
       }
     }
   }
+
+  startQuotaRefreshSchedulerFromConfig()
+  registerQuotaRefreshSchedulerShutdownCleanup()
 
   // Get models from the first available account
   const models = accountsManager.getFirstAccountModels()

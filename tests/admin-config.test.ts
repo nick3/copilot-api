@@ -541,3 +541,154 @@ test("POST /api/admin/config rejects unknown top-level config keys", async () =>
     expect(body.error?.message).toContain("Unknown config key: notARealKey")
   })
 })
+
+test("GET /api/admin/config returns default quotaRefresh config", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config"),
+    )
+
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as {
+      quotaRefresh?: {
+        enabled?: boolean
+        intervalMinutes?: number
+        startupDelaySeconds?: number
+        staggerMinSeconds?: number
+        staggerMaxSeconds?: number
+      }
+    }
+    expect(body.quotaRefresh).toEqual({
+      enabled: true,
+      intervalMinutes: 360,
+      startupDelaySeconds: 60,
+      staggerMinSeconds: 2,
+      staggerMaxSeconds: 5,
+    })
+  })
+})
+
+test("POST /api/admin/config updates quotaRefresh and clamps short positive interval", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          quotaRefresh: {
+            enabled: true,
+            intervalMinutes: 5,
+            startupDelaySeconds: 0,
+            staggerMinSeconds: 7,
+            staggerMaxSeconds: 3,
+          },
+        }),
+      }),
+    )
+
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as {
+      quotaRefresh?: {
+        enabled?: boolean
+        intervalMinutes?: number
+        startupDelaySeconds?: number
+        staggerMinSeconds?: number
+        staggerMaxSeconds?: number
+      }
+    }
+    expect(body.quotaRefresh).toEqual({
+      enabled: true,
+      intervalMinutes: 30,
+      startupDelaySeconds: 0,
+      staggerMinSeconds: 7,
+      staggerMaxSeconds: 7,
+    })
+  })
+})
+
+test("POST /api/admin/config refreshes the running quota scheduler config", async () => {
+  await withConfig({}, async () => {
+    const runtime = await import("../src/lib/quota-refresh-scheduler-runtime")
+    const originalStart = runtime.quotaRefreshScheduler.start.bind(
+      runtime.quotaRefreshScheduler,
+    )
+    const originalStop = runtime.quotaRefreshScheduler.stop.bind(
+      runtime.quotaRefreshScheduler,
+    )
+    const originalUpdateConfig =
+      runtime.quotaRefreshScheduler.updateConfig.bind(
+        runtime.quotaRefreshScheduler,
+      )
+    let starts = 0
+    let updates = 0
+
+    runtime.quotaRefreshScheduler.start = () => {
+      starts += 1
+    }
+    runtime.quotaRefreshScheduler.stop = () => {}
+    runtime.quotaRefreshScheduler.updateConfig = () => {
+      updates += 1
+    }
+
+    try {
+      runtime.startQuotaRefreshSchedulerFromConfig()
+      const { server } = await import("../src/server")
+
+      const res = await server.fetch(
+        new Request("http://localhost/api/admin/config", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            quotaRefresh: {
+              enabled: false,
+            },
+          }),
+        }),
+      )
+
+      expect(res.status).toBe(200)
+      expect(starts).toBe(1)
+      expect(updates).toBe(1)
+    } finally {
+      runtime.quotaRefreshScheduler.start = originalStart
+      runtime.quotaRefreshScheduler.stop = originalStop
+      runtime.quotaRefreshScheduler.updateConfig = originalUpdateConfig
+      runtime.stopQuotaRefreshScheduler()
+    }
+  })
+})
+
+test("POST /api/admin/config rejects invalid quotaRefresh fields", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          quotaRefresh: {
+            enabled: "yes",
+          },
+        }),
+      }),
+    )
+
+    expect(res.status).toBe(400)
+
+    const body = (await res.json()) as { error?: { message?: string } }
+    expect(body.error?.message).toBe("quotaRefresh.enabled must be a boolean")
+  })
+})

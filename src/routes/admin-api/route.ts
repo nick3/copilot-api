@@ -27,8 +27,10 @@ import {
   type LogLevel,
   type ModelConfig,
   type ProviderConfig,
+  type QuotaRefreshConfig,
 } from "~/lib/config"
 import { PATHS } from "~/lib/paths"
+import { updateQuotaRefreshSchedulerFromConfig } from "~/lib/quota-refresh-scheduler-runtime"
 import {
   getRequestHistoryStore,
   getStatsStore,
@@ -195,6 +197,7 @@ const CONFIG_KEYS = new Set<keyof AppConfig>([
   "useMessagesApi",
   "useResponsesApiWebSearch",
   "devMode",
+  "quotaRefresh",
 ])
 
 const REASONING_EFFORTS = new Set<ReasoningEffort>([
@@ -1047,6 +1050,69 @@ function applyDevModeConfig(
   return undefined
 }
 
+const QUOTA_REFRESH_KEYS = new Set([
+  "enabled",
+  "intervalMinutes",
+  "startupDelaySeconds",
+  "staggerMinSeconds",
+  "staggerMaxSeconds",
+])
+
+function parseQuotaRefreshConfig(
+  value: unknown,
+): ParseFieldResult<QuotaRefreshConfig> {
+  if (value === null || value === undefined) return { clear: true }
+  if (!isPlainObject(value)) return { error: "quotaRefresh must be an object" }
+
+  for (const key of Object.keys(value)) {
+    if (!QUOTA_REFRESH_KEYS.has(key)) {
+      return { error: `quotaRefresh.${key} is not supported` }
+    }
+  }
+
+  const out: QuotaRefreshConfig = {}
+
+  if (Object.hasOwn(value, "enabled")) {
+    const parsed = parseOptionalBoolean(value.enabled, "quotaRefresh.enabled")
+    if ("error" in parsed) return parsed
+    if ("value" in parsed) out.enabled = parsed.value
+  }
+
+  for (const key of [
+    "intervalMinutes",
+    "startupDelaySeconds",
+    "staggerMinSeconds",
+    "staggerMaxSeconds",
+  ] as const) {
+    if (!Object.hasOwn(value, key)) {
+      continue
+    }
+
+    const parsed = parseOptionalNonNegativeNumber(
+      value[key],
+      `quotaRefresh.${key}`,
+    )
+    if ("error" in parsed) return parsed
+    if ("value" in parsed) out[key] = parsed.value
+  }
+
+  return { value: out }
+}
+
+function applyQuotaRefreshConfig(
+  next: AppConfig,
+  value: unknown,
+): string | undefined {
+  const parsed = parseQuotaRefreshConfig(value)
+  if ("error" in parsed) return parsed.error
+  if ("clear" in parsed) {
+    delete next.quotaRefresh
+    return undefined
+  }
+  next.quotaRefresh = parsed.value
+  return undefined
+}
+
 type ConfigPatchHandler = (
   next: AppConfig,
   value: unknown,
@@ -1084,6 +1150,7 @@ const CONFIG_PATCH_HANDLERS: Partial<Record<string, ConfigPatchHandler>> = {
   useResponsesApiWebSearch: (next, value) =>
     applyOptionalBoolean(next, "useResponsesApiWebSearch", value),
   devMode: applyDevModeConfig,
+  quotaRefresh: applyQuotaRefreshConfig,
 }
 
 function applyConfigPatch(
@@ -1180,6 +1247,7 @@ adminApiRoutes.post("/config", async (c) => {
     const merged = mergeConfigWithDefaults()
     accountsManager.setAccountAffinityEnabled(isAccountAffinityEnabled())
     accountsManager.setModelsRefreshIntervalMs(getModelRefreshIntervalMs())
+    updateQuotaRefreshSchedulerFromConfig()
     applySharedSessionAffinityRetention()
     return c.json({ ...merged, _configPath: PATHS.CONFIG_PATH })
   } catch {
