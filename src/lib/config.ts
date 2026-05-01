@@ -12,6 +12,22 @@ export interface DevModeConfig {
   captureOther: boolean
 }
 
+export interface QuotaRefreshConfig {
+  enabled?: boolean
+  intervalMinutes?: number
+  startupDelaySeconds?: number
+  staggerMinSeconds?: number
+  staggerMaxSeconds?: number
+}
+
+export interface ResolvedQuotaRefreshConfig {
+  enabled: boolean
+  intervalMinutes: number
+  startupDelaySeconds: number
+  staggerMinSeconds: number
+  staggerMaxSeconds: number
+}
+
 export interface AppConfig {
   auth?: {
     apiKeys?: Array<string>
@@ -41,6 +57,7 @@ export interface AppConfig {
   claudeTokenMultiplier?: number
   logLevel?: LogLevel
   devMode?: DevModeConfig
+  quotaRefresh?: QuotaRefreshConfig
 }
 
 export interface ModelConfig {
@@ -81,6 +98,16 @@ const gpt5ExplorationPrompt = `## Exploration and reading files
 - **multi_tool_use.parallel** Use multi_tool_use.parallel to parallelize tool calls and only this.
 - **Only make sequential calls if you truly cannot know the next file without seeing a result first.**
 - **Workflow:** (a) plan all needed reads → (b) issue one parallel batch → (c) analyze results → (d) repeat if new, unpredictable reads arise.`
+
+const DEFAULT_QUOTA_REFRESH_CONFIG: ResolvedQuotaRefreshConfig = {
+  enabled: true,
+  intervalMinutes: 360,
+  startupDelaySeconds: 60,
+  staggerMinSeconds: 2,
+  staggerMaxSeconds: 5,
+}
+
+const MIN_QUOTA_REFRESH_INTERVAL_MINUTES = 30
 
 const gpt5CommentaryPrompt = `# Working with the user
 
@@ -140,6 +167,7 @@ const defaultConfig: AppConfig = {
     capture5xx: false,
     captureOther: false,
   },
+  quotaRefresh: DEFAULT_QUOTA_REFRESH_CONFIG,
 }
 
 let cachedConfig: AppConfig | null = null
@@ -166,6 +194,42 @@ function normalizeNonNegativeNumber(value: unknown): number | undefined {
   if (!Number.isFinite(value)) return undefined
   if (value < 0) return undefined
   return value
+}
+
+function normalizeQuotaRefreshIntervalMinutes(value: unknown): number {
+  const normalized = normalizeNonNegativeNumber(value)
+  const minutes = normalized ?? DEFAULT_QUOTA_REFRESH_CONFIG.intervalMinutes
+
+  if (minutes > 0 && minutes < MIN_QUOTA_REFRESH_INTERVAL_MINUTES) {
+    return MIN_QUOTA_REFRESH_INTERVAL_MINUTES
+  }
+
+  return minutes
+}
+
+export function normalizeQuotaRefreshConfig(
+  value: unknown,
+): ResolvedQuotaRefreshConfig {
+  const raw = isPlainObject(value) ? value : {}
+  const staggerMinSeconds =
+    normalizeNonNegativeNumber(raw.staggerMinSeconds)
+    ?? DEFAULT_QUOTA_REFRESH_CONFIG.staggerMinSeconds
+  const rawStaggerMaxSeconds =
+    normalizeNonNegativeNumber(raw.staggerMaxSeconds)
+    ?? DEFAULT_QUOTA_REFRESH_CONFIG.staggerMaxSeconds
+
+  return {
+    enabled:
+      typeof raw.enabled === "boolean" ?
+        raw.enabled
+      : DEFAULT_QUOTA_REFRESH_CONFIG.enabled,
+    intervalMinutes: normalizeQuotaRefreshIntervalMinutes(raw.intervalMinutes),
+    startupDelaySeconds:
+      normalizeNonNegativeNumber(raw.startupDelaySeconds)
+      ?? DEFAULT_QUOTA_REFRESH_CONFIG.startupDelaySeconds,
+    staggerMinSeconds,
+    staggerMaxSeconds: Math.max(staggerMinSeconds, rawStaggerMaxSeconds),
+  }
 }
 
 const LOG_LEVELS = new Set<LogLevel>(["error", "warn", "info", "debug"])
@@ -409,6 +473,22 @@ function mergeDefaultDevMode(config: AppConfig): ConfigMergeResult {
   }
 }
 
+function mergeDefaultQuotaRefresh(config: AppConfig): ConfigMergeResult {
+  const quotaRefresh = normalizeQuotaRefreshConfig(config.quotaRefresh)
+
+  if (JSON.stringify(config.quotaRefresh) === JSON.stringify(quotaRefresh)) {
+    return { mergedConfig: config, changed: false }
+  }
+
+  return {
+    mergedConfig: {
+      ...config,
+      quotaRefresh,
+    },
+    changed: true,
+  }
+}
+
 type ConfigMergeResult = {
   mergedConfig: AppConfig
   changed: boolean
@@ -443,6 +523,7 @@ export function mergeConfigWithDefaults(): AppConfig {
     mergeDefaultSessionAffinityRetention,
     mergeDefaultLogLevel,
     mergeDefaultDevMode,
+    mergeDefaultQuotaRefresh,
   ])
 
   if (changed) {
@@ -679,6 +760,10 @@ export function getModelRefreshIntervalMs(): number {
   const hours = getModelRefreshIntervalHours()
   if (!Number.isFinite(hours) || hours <= 0) return 0
   return hours * 60 * 60 * 1000
+}
+
+export function getQuotaRefreshConfig(): ResolvedQuotaRefreshConfig {
+  return normalizeQuotaRefreshConfig(getConfig().quotaRefresh)
 }
 
 export function getSessionAffinityRetentionDays(): number {

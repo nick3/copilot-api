@@ -5,6 +5,12 @@ import clipboard from "clipboardy"
 import consola from "consola"
 import { serve, type ServerHandler } from "srvx"
 
+import {
+  registerQuotaRefreshSchedulerShutdownCleanup,
+  startQuotaRefreshSchedulerFromConfig,
+  stopQuotaRefreshScheduler,
+} from "~/lib/quota-refresh-scheduler-runtime"
+
 import { accountsManager } from "./lib/accounts-manager"
 import { addAccountToRegistry, saveAccountToken } from "./lib/accounts-registry"
 import {
@@ -203,6 +209,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
         // Re-initialize accounts manager with the new account
         accountsManager.shutdown()
+        stopQuotaRefreshScheduler()
         await accountsManager.initialize(state.vsCodeVersion)
         accountsManager.setModelsRefreshIntervalMs(getModelRefreshIntervalMs())
       } catch (error) {
@@ -211,6 +218,9 @@ export async function runServer(options: RunServerOptions): Promise<void> {
       }
     }
   }
+
+  startQuotaRefreshSchedulerFromConfig()
+  registerQuotaRefreshSchedulerShutdownCleanup()
 
   // Get models from the first available account
   const models = accountsManager.getFirstAccountModels()

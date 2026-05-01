@@ -303,6 +303,17 @@ export class AccountsManager {
     this.scheduleModelsRefresh()
   }
 
+  getQuotaRefreshAccounts(): Array<AccountRuntime> {
+    return this.getOrderedEnabledAccounts().filter(
+      (account) =>
+        !this.isAccountFailed(account) && account.copilotToken !== undefined,
+    )
+  }
+
+  refreshAccountQuota(account: AccountRuntime): Promise<void> {
+    return this.refreshQuota(account)
+  }
+
   private computeTokenRefreshDelayMs(refreshInSeconds: number): number {
     const baseDelay = Math.max((refreshInSeconds - 60) * 1000, 1000)
     const jitter = Math.floor(Math.random() * TOKEN_REFRESH_JITTER_MS)
