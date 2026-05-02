@@ -12,6 +12,19 @@ function countTable(db: Database, name: string): number {
   return row.c
 }
 
+test("initAdminDb creates Responses item owner request_log columns", () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+
+  const columns = db.query("PRAGMA table_info(request_log);").all() as Array<{
+    name: string
+  }>
+  const columnNames = columns.map((column) => column.name)
+
+  expect(columnNames).toContain("responses_item_owner_lookup_keys_json")
+  expect(columnNames).toContain("responses_item_owner_recorded_keys_json")
+})
+
 test("migrateV11 creates request_outbound with FK cascade", () => {
   const db = new Database(":memory:")
   initAdminDb(db)

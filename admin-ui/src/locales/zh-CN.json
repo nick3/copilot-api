@@ -317,6 +317,8 @@
       "affinityKeyUsed": "实际使用的亲和性键",
       "affinityKeySource": "亲和性键来源",
       "selectionReason": "选中原因",
+      "responsesItemOwnerLookupKeys": "Responses Item Owner 查询键",
+      "responsesItemOwnerRecordedKeys": "Responses Item Owner 记录键",
       "upstreamErrorMessageRaw": "上游原始错误（脱敏后）",
       "duration": "耗时（s）",
       "ttfb": "首字节（s）"
@@ -340,6 +342,8 @@
       "affinityKeyUsed": "本次请求在评估账号亲和性时实际使用的键值",
       "affinityKeySource": "亲和性键的来源：prompt_cache_key、metadata.session_id、x-session-id，或 request-id 回退值",
       "selectionReason": "账号选择器记录的高层原因，用于解释这次为何选中当前账号",
+      "responsesItemOwnerLookupKeys": "账号选择前从本次请求里的 Responses reasoning 或 compaction 历史项提取的哈希归属键",
+      "responsesItemOwnerRecordedKeys": "上游请求成功后从 Responses reasoning 或 compaction 输出项记录的哈希归属键",
       "upstreamErrorMessageRaw": "为调试和所有权不匹配分析保存的、已脱敏的上游原始错误消息",
       "duration": "请求总处理时间（秒）",
       "ttfb": "首字节时间（秒）— 收到第一个响应块前的延迟"

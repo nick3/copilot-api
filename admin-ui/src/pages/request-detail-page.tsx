@@ -18,6 +18,7 @@ import {
 } from "@/lib/admin-api"
 import { fmtDurationSeconds, fmtLocalDateTime, fmtNum } from "@/lib/format"
 import { i18n } from "@/lib/i18n"
+import { buildRequestDetailResponsesItemOwnerRows } from "@/lib/request-detail-ownership"
 import { JsonViewer } from "@/components/json/json-viewer"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -524,6 +525,19 @@ export function RequestDetailPage(): React.JSX.Element {
                     </TableCell>
                   </TableRow>
                 ) : null}
+                {buildRequestDetailResponsesItemOwnerRows(item).map((row) => (
+                  <TableRow key={row.labelKey}>
+                    <TableCell className="text-muted-foreground">
+                      <FieldLabel
+                        label={t(row.labelKey)}
+                        tooltip={t(row.tooltipKey)}
+                      />
+                    </TableCell>
+                    <TableCell className="font-mono text-xs whitespace-pre-wrap break-words">
+                      {row.value}
+                    </TableCell>
+                  </TableRow>
+                ))}
                 <TableRow>
                   <TableCell className="text-muted-foreground">
                     <FieldLabel

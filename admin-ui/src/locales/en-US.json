@@ -317,6 +317,8 @@
       "affinityKeyUsed": "Affinity Key Used",
       "affinityKeySource": "Affinity Key Source",
       "selectionReason": "Selection Reason",
+      "responsesItemOwnerLookupKeys": "Responses Item Owner Lookup Keys",
+      "responsesItemOwnerRecordedKeys": "Responses Item Owner Recorded Keys",
       "upstreamErrorMessageRaw": "Upstream Error (Raw)",
       "duration": "Duration (s)",
       "ttfb": "TTFB (s)"
@@ -340,6 +342,8 @@
       "affinityKeyUsed": "The exact key value used when evaluating account affinity for this request",
       "affinityKeySource": "Where the affinity key came from: prompt_cache_key, metadata.session_id, x-session-id, or request-id fallback",
       "selectionReason": "High-level reason recorded by the account selector for why this account was chosen",
+      "responsesItemOwnerLookupKeys": "Hashed Responses reasoning or compaction item owner keys extracted from this request before account selection",
+      "responsesItemOwnerRecordedKeys": "Hashed Responses reasoning or compaction item owner keys recorded from the successful upstream response",
       "upstreamErrorMessageRaw": "Sanitized raw upstream error message captured for debugging and ownership-mismatch analysis",
       "duration": "Total request processing time in seconds",
       "ttfb": "Time to first byte in seconds — latency before the first response chunk"

@@ -6,6 +6,7 @@ import type { AccountRuntime } from "../src/lib/types/account"
 import { buildAffinityCacheKey } from "../src/lib/account-affinity"
 import { initAdminDb } from "../src/lib/admin-db"
 import { SessionAffinityStore } from "../src/lib/session-affinity-store"
+import { buildResponsesItemOwnershipKey } from "../src/routes/messages/responses-item-ownership"
 import {
   makeModel,
   makeModelsResponse,
@@ -57,6 +58,54 @@ test("persistent affinity: pre-written binding routes to the same account on fre
   expect(selection.account.id).toBe("b")
   expect(selection.affinityHit).toBe(true)
   expect(selection.selectionReason).toBe("affinity_hit")
+})
+
+test("responses item ownership routes before ordinary session affinity", async () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+  const store = new SessionAffinityStore(db)
+
+  const model = makeModel({ id: "free-model" })
+  const affinityKey = buildAffinityCacheKey("session-1", "free-model")
+  const ownerKey = buildResponsesItemOwnershipKey("id", "rs_owner")
+
+  const accountA: AccountRuntime = {
+    id: "a",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_a",
+    models: makeModelsResponse([model]),
+  }
+  const accountB: AccountRuntime = {
+    id: "b",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_b",
+    models: makeModelsResponse([model]),
+  }
+
+  store.set(affinityKey, "a")
+  store.set(ownerKey, "b")
+
+  const manager = setupManager([accountA, accountB], {
+    persistentAffinityStore: store,
+  })
+
+  const selection = await manager.selectAccountForRequest(
+    [{ modelId: "free-model", endpoint: "/chat/completions" }],
+    {
+      requestId: "session-1",
+      responsesItemOwnershipKeys: [ownerKey],
+    },
+  )
+
+  expect(selection.ok).toBe(true)
+  if (!selection.ok) return
+
+  expect(selection.account.id).toBe("b")
+  expect(selection.affinityHit).toBe(true)
+  expect(selection.affinityCacheKey).toBe(ownerKey)
+  expect(selection.selectionReason).toBe("responses_item_owner_hit")
 })
 
 test("persistent affinity: stale binding pointing to unavailable account is purged and falls back", async () => {

@@ -320,7 +320,23 @@ function migrateV12(db: Database): void {
   db.run("PRAGMA user_version = 12;")
 }
 
-function migrateV8ToV12(db: Database, current: number): void {
+function migrateV13(db: Database): void {
+  if (!hasRequestLogColumn(db, "responses_item_owner_lookup_keys_json")) {
+    db.run(
+      "ALTER TABLE request_log ADD COLUMN responses_item_owner_lookup_keys_json TEXT;",
+    )
+  }
+
+  if (!hasRequestLogColumn(db, "responses_item_owner_recorded_keys_json")) {
+    db.run(
+      "ALTER TABLE request_log ADD COLUMN responses_item_owner_recorded_keys_json TEXT;",
+    )
+  }
+
+  db.run("PRAGMA user_version = 13;")
+}
+
+function migrateV8ToV13(db: Database, current: number): void {
   if (current < 8) {
     migrateV8(db)
   }
@@ -340,6 +356,10 @@ function migrateV8ToV12(db: Database, current: number): void {
   if (current < 12) {
     migrateV12(db)
   }
+
+  if (current < 13) {
+    migrateV13(db)
+  }
 }
 
 // eslint-disable-next-line complexity -- migration chain grows with each version
@@ -349,9 +369,13 @@ function migrateAdminDb(db: Database): void {
   } | null
   const current = row?.user_version ?? 0
 
-  if (current >= 12) {
-    if (current === 12) migrateV12(db)
+  if (current >= 13) {
+    if (current === 13) migrateV13(db)
     return
+  }
+
+  if (current === 12) {
+    migrateV12(db)
   }
 
   if (current === 11) {
@@ -450,5 +474,5 @@ function migrateAdminDb(db: Database): void {
     db.run("PRAGMA user_version = 7;")
   }
 
-  migrateV8ToV12(db, current)
+  migrateV8ToV13(db, current)
 }

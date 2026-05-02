@@ -50,6 +50,11 @@ import {
   resolveAffinityKey,
 } from "~/lib/utils"
 import {
+  extractAnthropicResponsesItemOwnerKeys,
+  extractResponsesResultOwnerKeys,
+  extractResponsesStreamEventOwnerKeys,
+} from "~/routes/messages/responses-item-ownership"
+import {
   buildErrorEvent,
   createResponsesStreamState,
   translateResponsesStreamEvent,
@@ -148,6 +153,8 @@ type InstrumentationContext = {
   affinityKeyUsed?: string
   affinityKeySource?: AffinityKeySource
   selectionReason?: AccountSelectionReason
+  responsesItemOwnerLookupKeys?: ReadonlyArray<string>
+  responsesItemOwnerRecordedKeys?: ReadonlyArray<string>
 
   clientModel: string
 
@@ -303,12 +310,15 @@ export async function handleCompletion(c: Context) {
     headerSessionId,
     upstreamRequestId,
   })
+  const responsesItemOwnershipKeys =
+    extractAnthropicResponsesItemOwnerKeys(anthropicPayload)
 
   const selection = await accountsManager.selectAccountForRequest(candidates, {
     requestId: affinityKey.requestId,
     affinityModelId,
     ownershipLookupSessionId,
     ownershipWriteSessionId,
+    responsesItemOwnershipKeys,
   })
   const selectionReason =
     invalidSubagentMarkerSelectionReason ?? selection.selectionReason
@@ -373,6 +383,7 @@ export async function handleCompletion(c: Context) {
     affinityKeyUsed: affinityKey.affinityKeyUsed,
     affinityKeySource: affinityKey.affinityKeySource,
     selectionReason,
+    responsesItemOwnerLookupKeys: responsesItemOwnershipKeys,
   }
   if (endpoint === MESSAGES_ENDPOINT) {
     return await handleWithMessagesApi({
@@ -619,6 +630,10 @@ type ChatCompletionsStream = Exclude<
 
 type MessagesResult = Awaited<ReturnType<typeof createMessages>>
 
+function stringifyOwnerKeys(keys?: ReadonlyArray<string>): string | undefined {
+  return keys && keys.length > 0 ? JSON.stringify(keys) : undefined
+}
+
 function insertRequestLog(
   instr: InstrumentationContext,
   record: Omit<
@@ -689,6 +704,12 @@ function insertRequestLog(
     premiumRemainingBefore,
     premiumUnlimitedBefore,
     ...record,
+    responsesItemOwnerLookupKeysJson: stringifyOwnerKeys(
+      instr.responsesItemOwnerLookupKeys,
+    ),
+    responsesItemOwnerRecordedKeysJson: stringifyOwnerKeys(
+      instr.responsesItemOwnerRecordedKeys,
+    ),
   })
   void flushPendingCapture(requestId)
 }
@@ -987,6 +1008,12 @@ async function handleResponsesNonStreaming(params: {
 
   try {
     usage = extractResponsesUsageFromResult(result)
+    const responseOwnerKeys = extractResponsesResultOwnerKeys(result)
+    instr.responsesItemOwnerRecordedKeys = responseOwnerKeys
+    accountsManager.recordResponsesItemOwnership(
+      responseOwnerKeys,
+      instr.account.id,
+    )
 
     logger.debug(
       "Non-streaming Responses result:",
@@ -1075,6 +1102,42 @@ async function writeAnthropicStreamError(
   }
 }
 
+function collectResponsesStreamOwnerKeys(
+  event: ResponseStreamEvent,
+  responseOwnerKeys: Set<string>,
+): void {
+  for (const key of extractResponsesStreamEventOwnerKeys(event)) {
+    responseOwnerKeys.add(key)
+  }
+}
+
+function createResponsesStreamStateWithUsage(params: {
+  estimatedInputTokens?: number
+  historicalUsage?: NormalizedUsage
+}): ReturnType<typeof createResponsesStreamState> {
+  const streamState = createResponsesStreamState()
+  streamState.estimatedInputTokens = params.estimatedInputTokens
+  streamState.historicalInputTokens = params.historicalUsage?.tokensInput
+  streamState.historicalOutputTokens = params.historicalUsage?.tokensOutput
+  streamState.historicalCachedInputTokens =
+    params.historicalUsage?.tokensCachedInput
+  return streamState
+}
+
+function recordStreamOwnerKeys(
+  streamState: ReturnType<typeof createResponsesStreamState>,
+  responseOwnerKeys: Set<string>,
+  instr: InstrumentationContext,
+): void {
+  if (!streamState.messageCompleted) {
+    return
+  }
+
+  const ownerKeys = [...responseOwnerKeys]
+  instr.responsesItemOwnerRecordedKeys = ownerKeys
+  accountsManager.recordResponsesItemOwnership(ownerKeys, instr.account.id)
+}
+
 async function streamResponsesAndLog(params: {
   stream: StreamSseStream
   response: AsyncIterable<unknown>
@@ -1082,8 +1145,7 @@ async function streamResponsesAndLog(params: {
   estimatedInputTokens?: number
   historicalUsage?: NormalizedUsage
 }): Promise<void> {
-  const { stream, response, instr, estimatedInputTokens, historicalUsage } =
-    params
+  const { stream, response, instr } = params
 
   let ttfbMs: number | undefined
   let lastUsage: NormalizedUsage = {}
@@ -1093,11 +1155,8 @@ async function streamResponsesAndLog(params: {
   let errorMessage: string | undefined
   let upstreamErrorMessageRaw: string | undefined
 
-  const streamState = createResponsesStreamState()
-  streamState.estimatedInputTokens = estimatedInputTokens
-  streamState.historicalInputTokens = historicalUsage?.tokensInput
-  streamState.historicalOutputTokens = historicalUsage?.tokensOutput
-  streamState.historicalCachedInputTokens = historicalUsage?.tokensCachedInput
+  const streamState = createResponsesStreamStateWithUsage(params)
+  const responseOwnerKeys = new Set<string>()
 
   try {
     for await (const chunk of response) {
@@ -1119,6 +1178,7 @@ async function streamResponsesAndLog(params: {
       logger.debug("Responses raw stream event:", data)
 
       const parsed = JSON.parse(data) as ResponseStreamEvent
+      collectResponsesStreamOwnerKeys(parsed, responseOwnerKeys)
       const u = extractResponsesUsageFromStreamEvent(parsed)
       if (u.usageJson) {
         lastUsage = u
@@ -1148,6 +1208,8 @@ async function streamResponsesAndLog(params: {
         errorMessage = message
       },
     })
+
+    recordStreamOwnerKeys(streamState, responseOwnerKeys, instr)
   } catch (error) {
     const details = await extractErrorObservability(error)
 

@@ -50,6 +50,8 @@ type AdminRequestItemWire = {
   affinity_key_used?: string | null
   affinity_key_source?: string | null
   selection_reason?: string | null
+  responses_item_owner_lookup_keys_json?: string | null
+  responses_item_owner_recorded_keys_json?: string | null
   upstream_error_message_raw?: string | null
 
   has_outbound?: boolean
