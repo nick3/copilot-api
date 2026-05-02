@@ -1,4 +1,4 @@
-import type { AffinityPersistenceStore } from "../src/lib/account-affinity"
+import type { AffinityPersistenceStoreProvider } from "../src/lib/account-affinity"
 import type { AccountRuntime } from "../src/lib/types/account"
 import type { Model, ModelsResponse } from "../src/services/copilot/get-models"
 
@@ -6,7 +6,7 @@ import { AccountsManager } from "../src/lib/accounts-manager"
 
 type SetupManagerOptions = {
   temporaryAccount?: AccountRuntime
-  persistentAffinityStore?: AffinityPersistenceStore
+  persistentAffinityStore?: AffinityPersistenceStoreProvider
 }
 
 export function makeModel(overrides: Partial<Model> = {}): Model {

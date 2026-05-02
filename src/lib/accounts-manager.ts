@@ -1298,15 +1298,28 @@ export class AccountsManager {
       return {}
     }
 
-    const accountIds = new Map<string, string>()
-    for (const key of ownershipKeys) {
-      const accountId = this.affinityCache.get(key)
-      if (accountId) {
-        accountIds.set(accountId, key)
-      }
+    let ownershipMappings: ReadonlyMap<string, string>
+    try {
+      ownershipMappings = this.affinityCache.getMany(ownershipKeys)
+    } catch (error) {
+      consola.warn(
+        "Failed to read Responses item owner mappings; falling back",
+        {
+          error,
+          ownershipKeyCount: ownershipKeys.length,
+        },
+      )
+      return {}
     }
 
-    if (accountIds.size !== 1) {
+    const accountIds = new Map<string, string>()
+    for (const key of ownershipKeys) {
+      const accountId = ownershipMappings.get(key)
+      if (!accountId) {
+        continue
+      }
+
+      accountIds.set(accountId, key)
       if (accountIds.size > 1) {
         consola.warn(
           "Conflicting Responses item owner mappings; falling back",
@@ -1315,7 +1328,11 @@ export class AccountsManager {
             ownershipKeyCount: ownershipKeys.length,
           },
         )
+        return {}
       }
+    }
+
+    if (accountIds.size === 0) {
       return {}
     }
 

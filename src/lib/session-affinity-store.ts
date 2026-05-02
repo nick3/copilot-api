@@ -8,9 +8,19 @@ import { getSessionAffinityRetentionMs } from "./config"
 const DAY_MS = 24 * 60 * 60 * 1000
 const DEFAULT_MAX_AGE_MS = 7 * DAY_MS
 const CLEANUP_INTERVAL_MS = DAY_MS
+const MAX_BATCH_KEYS = 500
 
 const maybeUnref = (timer: ReturnType<typeof setInterval>) => {
   timer.unref()
+}
+
+function* chunks<T>(
+  values: ReadonlyArray<T>,
+  size: number,
+): Generator<ReadonlyArray<T>> {
+  for (let index = 0; index < values.length; index += size) {
+    yield values.slice(index, index + size)
+  }
 }
 
 export class SessionAffinityStore {
@@ -49,6 +59,99 @@ export class SessionAffinityStore {
     }
 
     return row.account_id
+  }
+
+  getMany(cacheKeys: ReadonlyArray<string>): Map<string, string> {
+    const uniqueKeys = [...new Set(cacheKeys)].filter(Boolean)
+    const result = new Map<string, string>()
+
+    let chunkIndex = 0
+    for (const keys of chunks(uniqueKeys, MAX_BATCH_KEYS)) {
+      try {
+        this.readManyChunk(keys, result)
+      } catch (error) {
+        consola.error("Failed to batch-read session affinity mappings", {
+          chunkIndex,
+          chunkKeyCount: keys.length,
+          error,
+          totalKeyCount: uniqueKeys.length,
+        })
+        throw error
+      }
+      chunkIndex += 1
+    }
+
+    if (result.size === 0) {
+      return result
+    }
+
+    const now = Date.now()
+    let touchChunkIndex = 0
+    const touchedKeyCount = result.size
+    for (const keys of chunks([...result.keys()], MAX_BATCH_KEYS)) {
+      try {
+        this.touchManyChunk(keys, now)
+      } catch (error) {
+        consola.warn(
+          "Failed to batch-update session affinity last_used_at_ms",
+          {
+            chunkIndex: touchChunkIndex,
+            chunkKeyCount: keys.length,
+            error,
+            touchedKeyCount,
+          },
+        )
+      }
+      touchChunkIndex += 1
+    }
+
+    return result
+  }
+
+  private readManyChunk(
+    cacheKeys: ReadonlyArray<string>,
+    result: Map<string, string>,
+  ): void {
+    if (cacheKeys.length === 0) {
+      return
+    }
+
+    const placeholders = cacheKeys.map(() => "?").join(", ")
+    const rows = this.db
+      .query(
+        `SELECT cache_key, account_id FROM session_affinity
+         WHERE cache_key IN (${placeholders});`,
+      )
+      .all(...cacheKeys) as Array<{
+      cache_key?: string
+      account_id?: string
+    }>
+
+    for (const row of rows) {
+      if (!row.cache_key || !row.account_id) {
+        consola.error("Invalid session affinity row returned from database", {
+          hasAccountId: Boolean(row.account_id),
+          hasCacheKey: Boolean(row.cache_key),
+        })
+        throw new Error("Invalid session affinity row returned from database")
+      }
+
+      result.set(row.cache_key, row.account_id)
+    }
+  }
+
+  private touchManyChunk(cacheKeys: ReadonlyArray<string>, now: number): void {
+    if (cacheKeys.length === 0) {
+      return
+    }
+
+    const placeholders = cacheKeys.map(() => "?").join(", ")
+    this.db
+      .query(
+        `UPDATE session_affinity SET last_used_at_ms = ?
+         WHERE cache_key IN (${placeholders});`,
+      )
+      .run(now, ...cacheKeys)
   }
 
   set(cacheKey: string, accountId: string): void {
