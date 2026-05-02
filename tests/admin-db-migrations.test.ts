@@ -25,6 +25,26 @@ test("initAdminDb creates Responses item owner request_log columns", () => {
   expect(columnNames).toContain("responses_item_owner_recorded_keys_json")
 })
 
+test("migrateV13 adds Responses item owner columns to v12 databases", () => {
+  const db = new Database(":memory:")
+  db.run("CREATE TABLE request_log (request_id TEXT PRIMARY KEY);")
+  db.run("PRAGMA user_version = 12;")
+
+  initAdminDb(db)
+
+  const columns = db.query("PRAGMA table_info(request_log);").all() as Array<{
+    name: string
+  }>
+  const columnNames = columns.map((column) => column.name)
+  const version = (
+    db.query("PRAGMA user_version;").get() as { user_version: number }
+  ).user_version
+
+  expect(columnNames).toContain("responses_item_owner_lookup_keys_json")
+  expect(columnNames).toContain("responses_item_owner_recorded_keys_json")
+  expect(version).toBeGreaterThanOrEqual(13)
+})
+
 test("migrateV11 creates request_outbound with FK cascade", () => {
   const db = new Database(":memory:")
   initAdminDb(db)

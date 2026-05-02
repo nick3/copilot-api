@@ -314,3 +314,215 @@ describe("messages handler Responses item ownership", () => {
     )
   })
 })
+
+describe("messages handler Responses item ownership review fixes", () => {
+  test("logs but does not cache owner keys from incomplete non-streaming Responses output", async () => {
+    const selection = buildSelection("/responses", "responses-model")
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    const fetchMock = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ...buildResponsesResult("responses-model", "responses"),
+            status: "incomplete",
+            incomplete_details: { reason: "max_output_tokens" },
+            output: [
+              {
+                id: "rs_incomplete",
+                type: "reasoning",
+                summary: [],
+                encrypted_content: "enc-incomplete",
+                status: "incomplete",
+              },
+              {
+                id: "out_1",
+                type: "message",
+                role: "assistant",
+                status: "incomplete",
+                content: [
+                  {
+                    type: "output_text",
+                    text: "responses",
+                    annotations: [],
+                  },
+                ],
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      ),
+    )
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(createPayload()),
+      }),
+    )
+
+    const idKey = buildResponsesItemOwnershipKey("id", "rs_incomplete")
+    const encryptedKey = buildResponsesItemOwnershipKey(
+      "encrypted_content",
+      "enc-incomplete",
+    )
+    const row = getAdminDb()
+      .query(
+        `SELECT count(*) AS c FROM session_affinity
+         WHERE cache_key IN (?, ?);`,
+      )
+      .get(idKey, encryptedKey) as { c: number }
+
+    const requestLog = getAdminDb()
+      .query(
+        `SELECT responses_item_owner_recorded_keys_json
+         FROM request_log
+         ORDER BY id DESC
+         LIMIT 1;`,
+      )
+      .get() as {
+      responses_item_owner_recorded_keys_json: string | null
+    } | null
+
+    expect(response.status).toBe(200)
+    expect(row.c).toBe(0)
+    expect(requestLog?.responses_item_owner_recorded_keys_json).toBe(
+      JSON.stringify([idKey, encryptedKey]),
+    )
+  })
+
+  test("logs owner lookup keys when account selection fails", async () => {
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve({ ok: false, reason: "NO_QUOTA" })
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          createPayload({
+            messages: [
+              {
+                role: "assistant",
+                content: [
+                  {
+                    type: "thinking",
+                    thinking: "Thinking...",
+                    signature: "enc-selection-failure@rs_selection_failure",
+                  },
+                ],
+              },
+              { role: "user", content: "continue" },
+            ],
+          }),
+        ),
+      }),
+    )
+
+    const lookupIdKey = buildResponsesItemOwnershipKey(
+      "id",
+      "rs_selection_failure",
+    )
+    const lookupEncryptedKey = buildResponsesItemOwnershipKey(
+      "encrypted_content",
+      "enc-selection-failure",
+    )
+    const requestLog = getAdminDb()
+      .query(
+        `SELECT responses_item_owner_lookup_keys_json
+         FROM request_log
+         ORDER BY id DESC
+         LIMIT 1;`,
+      )
+      .get() as {
+      responses_item_owner_lookup_keys_json: string | null
+    } | null
+
+    expect(response.status).toBe(429)
+    expect(requestLog?.responses_item_owner_lookup_keys_json).toBe(
+      JSON.stringify([lookupIdKey, lookupEncryptedKey]),
+    )
+  })
+})
+
+describe("messages handler Responses stream review fixes", () => {
+  test("logs upstream stream failed events as request errors", async () => {
+    const responseBase = {
+      ...buildResponsesResult("responses-model", ""),
+      output: [],
+      output_text: "",
+      status: "in_progress",
+    }
+    const upstreamSse =
+      "event: response.created\n"
+      + "data: "
+      + JSON.stringify({
+        type: "response.created",
+        sequence_number: 0,
+        response: responseBase,
+      })
+      + "\n\n"
+      + "event: response.failed\n"
+      + "data: "
+      + JSON.stringify({
+        type: "response.failed",
+        sequence_number: 1,
+        response: {
+          ...responseBase,
+          status: "failed",
+          error: { message: "upstream failed" },
+        },
+      })
+      + "\n\n"
+
+    const fetchMock = mock(() =>
+      Promise.resolve(
+        new Response(upstreamSse, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        }),
+      ),
+    )
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(createPayload({ stream: true })),
+      }),
+    )
+
+    await response.text()
+
+    const requestLog = getAdminDb()
+      .query(
+        `SELECT http_status, error_name, error_message, upstream_error_message_raw
+         FROM request_log
+         ORDER BY id DESC
+         LIMIT 1;`,
+      )
+      .get() as {
+      http_status: number | null
+      error_name: string | null
+      error_message: string | null
+      upstream_error_message_raw: string | null
+    } | null
+
+    expect(response.status).toBe(200)
+    expect(requestLog?.http_status).toBe(502)
+    expect(requestLog?.error_name).toBe("ResponsesStreamFailed")
+    expect(requestLog?.error_message).toBe("upstream failed")
+    expect(requestLog?.upstream_error_message_raw).toBe("upstream failed")
+  })
+})

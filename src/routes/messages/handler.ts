@@ -343,6 +343,7 @@ export async function handleCompletion(c: Context) {
       affinityKeyUsed: affinityKey.affinityKeyUsed,
       affinityKeySource: affinityKey.affinityKeySource,
       selectionReason,
+      responsesItemOwnerLookupKeys: responsesItemOwnershipKeys,
       selection,
     })
   }
@@ -1010,10 +1011,6 @@ async function handleResponsesNonStreaming(params: {
     usage = extractResponsesUsageFromResult(result)
     const responseOwnerKeys = extractResponsesResultOwnerKeys(result)
     instr.responsesItemOwnerRecordedKeys = responseOwnerKeys
-    accountsManager.recordResponsesItemOwnership(
-      responseOwnerKeys,
-      instr.account.id,
-    )
 
     logger.debug(
       "Non-streaming Responses result:",
@@ -1023,7 +1020,15 @@ async function handleResponsesNonStreaming(params: {
     const anthropicResponse = translateResponsesResultToAnthropic(result)
     debugJson(logger, "Translated Anthropic response:", anthropicResponse)
 
-    return c.json(anthropicResponse)
+    const response = c.json(anthropicResponse)
+    if (result.status === "completed") {
+      accountsManager.recordResponsesItemOwnership(
+        responseOwnerKeys,
+        instr.account.id,
+      )
+    }
+
+    return response
   } catch (error) {
     const details = await extractErrorObservability(error)
 
@@ -1135,7 +1140,55 @@ function recordStreamOwnerKeys(
 
   const ownerKeys = [...responseOwnerKeys]
   instr.responsesItemOwnerRecordedKeys = ownerKeys
-  accountsManager.recordResponsesItemOwnership(ownerKeys, instr.account.id)
+  if (streamState.responseStatus === "completed") {
+    accountsManager.recordResponsesItemOwnership(ownerKeys, instr.account.id)
+  }
+}
+
+function getResponsesStreamEventError(event: ResponseStreamEvent):
+  | {
+      errorName: string
+      errorStatus: number
+      errorMessage: string
+      upstreamErrorMessageRaw: string
+    }
+  | undefined {
+  if (event.type === "response.failed") {
+    const message =
+      event.response.error?.message ?? "Responses stream failed upstream."
+    return {
+      errorName: "ResponsesStreamFailed",
+      errorStatus: 502,
+      errorMessage: message,
+      upstreamErrorMessageRaw: message,
+    }
+  }
+
+  if (event.type === "error") {
+    const message = event.message || "Responses stream returned an error."
+    return {
+      errorName: "ResponsesStreamError",
+      errorStatus: 502,
+      errorMessage: message,
+      upstreamErrorMessageRaw: message,
+    }
+  }
+
+  return undefined
+}
+
+async function writeTranslatedAnthropicStreamEvents(
+  stream: StreamSseStream,
+  events: Array<AnthropicStreamEventData>,
+): Promise<void> {
+  for (const event of events) {
+    const eventData = JSON.stringify(event)
+    logger.debug("Translated Anthropic event:", eventData)
+    await stream.writeSSE({
+      event: event.type,
+      data: eventData,
+    })
+  }
 }
 
 async function streamResponsesAndLog(params: {
@@ -1178,6 +1231,14 @@ async function streamResponsesAndLog(params: {
       logger.debug("Responses raw stream event:", data)
 
       const parsed = JSON.parse(data) as ResponseStreamEvent
+      const streamEventError = getResponsesStreamEventError(parsed)
+      if (streamEventError) {
+        errorName = streamEventError.errorName
+        errorStatus = streamEventError.errorStatus
+        errorMessage = streamEventError.errorMessage
+        upstreamErrorMessageRaw = streamEventError.upstreamErrorMessageRaw
+      }
+
       collectResponsesStreamOwnerKeys(parsed, responseOwnerKeys)
       const u = extractResponsesUsageFromStreamEvent(parsed)
       if (u.usageJson) {
@@ -1185,14 +1246,7 @@ async function streamResponsesAndLog(params: {
       }
 
       const events = translateResponsesStreamEvent(parsed, streamState)
-      for (const event of events) {
-        const eventData = JSON.stringify(event)
-        logger.debug("Translated Anthropic event:", eventData)
-        await stream.writeSSE({
-          event: event.type,
-          data: eventData,
-        })
-      }
+      await writeTranslatedAnthropicStreamEvents(stream, events)
 
       if (streamState.messageCompleted) {
         logger.debug("Message completed, ending stream")

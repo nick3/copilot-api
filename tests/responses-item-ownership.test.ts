@@ -91,4 +91,46 @@ describe("responses item ownership", () => {
       buildResponsesItemOwnershipKey("encrypted_content", "enc-stream"),
     ])
   })
+
+  test("extracts owner keys from Responses completed stream events", () => {
+    const event = {
+      type: "response.completed",
+      sequence_number: 1,
+      response: {
+        output: [
+          {
+            id: "rs_completed",
+            type: "reasoning",
+            encrypted_content: "enc-completed",
+          },
+        ],
+      },
+    } as ResponseStreamEvent
+
+    expect(extractResponsesStreamEventOwnerKeys(event)).toEqual([
+      buildResponsesItemOwnershipKey("id", "rs_completed"),
+      buildResponsesItemOwnershipKey("encrypted_content", "enc-completed"),
+    ])
+  })
+
+  test("extracts owner keys from Responses incomplete stream events", () => {
+    const event = {
+      type: "response.incomplete",
+      sequence_number: 1,
+      response: {
+        output: [
+          {
+            id: "rs_incomplete",
+            type: "reasoning",
+            encrypted_content: "enc-incomplete",
+          },
+        ],
+      },
+    } as ResponseStreamEvent
+
+    expect(extractResponsesStreamEventOwnerKeys(event)).toEqual([
+      buildResponsesItemOwnershipKey("id", "rs_incomplete"),
+      buildResponsesItemOwnershipKey("encrypted_content", "enc-incomplete"),
+    ])
+  })
 })

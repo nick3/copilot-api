@@ -68,7 +68,10 @@ export function extractResponsesStreamEventOwnerKeys(
     return unique(keys)
   }
 
-  if (event.type === "response.completed") {
+  if (
+    event.type === "response.completed"
+    || event.type === "response.incomplete"
+  ) {
     return extractResponsesResultOwnerKeys(event.response)
   }
 

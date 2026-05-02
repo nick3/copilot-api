@@ -66,6 +66,7 @@ export interface ResponsesStreamState {
   openBlocks: Set<number>
   blockHasDelta: Set<number>
   functionCallStateByOutputIndex: Map<number, FunctionCallStreamState>
+  responseStatus?: string
   estimatedInputTokens?: number
   historicalInputTokens?: number
   historicalOutputTokens?: number
@@ -469,6 +470,7 @@ const handleResponseCompleted = (
   const events = new Array<AnthropicStreamEventData>()
 
   closeAllOpenBlocks(state, events)
+  state.responseStatus = response.status
   const anthropic = translateResponsesResultToAnthropic(response)
   events.push(
     {
@@ -492,6 +494,7 @@ const handleResponseFailed = (
   const response = rawEvent.response
   const events = new Array<AnthropicStreamEventData>()
   closeAllOpenBlocks(state, events)
+  state.responseStatus = response.status
 
   const message =
     response.error?.message ?? "The response failed due to an unknown error."

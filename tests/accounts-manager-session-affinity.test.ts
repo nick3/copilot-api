@@ -1,12 +1,13 @@
 import { Database } from "bun:sqlite"
 import { expect, test } from "bun:test"
 
-import type { AccountRuntime } from "../src/lib/types/account"
+import type { AccountRuntime } from "~/lib/types/account"
 
-import { buildAffinityCacheKey } from "../src/lib/account-affinity"
-import { initAdminDb } from "../src/lib/admin-db"
-import { SessionAffinityStore } from "../src/lib/session-affinity-store"
-import { buildResponsesItemOwnershipKey } from "../src/routes/messages/responses-item-ownership"
+import { buildAffinityCacheKey } from "~/lib/account-affinity"
+import { initAdminDb } from "~/lib/admin-db"
+import { SessionAffinityStore } from "~/lib/session-affinity-store"
+import { buildResponsesItemOwnershipKey } from "~/routes/messages/responses-item-ownership"
+
 import {
   makeModel,
   makeModelsResponse,
@@ -106,6 +107,168 @@ test("responses item ownership routes before ordinary session affinity", async (
   expect(selection.affinityHit).toBe(true)
   expect(selection.affinityCacheKey).toBe(ownerKey)
   expect(selection.selectionReason).toBe("responses_item_owner_hit")
+})
+
+test("responses item ownership lookup is ignored when account affinity is disabled", async () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+  const store = new SessionAffinityStore(db)
+
+  const model = makeModel({ id: "free-model" })
+  const ownerKey = buildResponsesItemOwnershipKey("id", "rs_owner_disabled")
+
+  const accountA: AccountRuntime = {
+    id: "a",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_a",
+    models: makeModelsResponse([model]),
+  }
+  const accountB: AccountRuntime = {
+    id: "b",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_b",
+    models: makeModelsResponse([model]),
+  }
+
+  store.set(ownerKey, "b")
+
+  const manager = setupManager([accountA, accountB], {
+    persistentAffinityStore: store,
+  })
+  manager.setAccountAffinityEnabled(false)
+
+  const selection = await manager.selectAccountForRequest(
+    [{ modelId: "free-model", endpoint: "/chat/completions" }],
+    { responsesItemOwnershipKeys: [ownerKey] },
+  )
+
+  expect(selection.ok).toBe(true)
+  if (!selection.ok) return
+
+  expect(selection.account.id).toBe("a")
+  expect(selection.affinityHit).toBeUndefined()
+  expect(selection.selectionReason).toBe("no_session_key")
+})
+
+test("responses item ownership recording is skipped when account affinity is disabled", async () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+  const store = new SessionAffinityStore(db)
+
+  const model = makeModel({ id: "free-model" })
+  const ownerKey = buildResponsesItemOwnershipKey(
+    "id",
+    "rs_owner_record_disabled",
+  )
+
+  const accountA: AccountRuntime = {
+    id: "a",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_a",
+    models: makeModelsResponse([model]),
+  }
+  const accountB: AccountRuntime = {
+    id: "b",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_b",
+    models: makeModelsResponse([model]),
+  }
+
+  const manager = setupManager([accountA, accountB], {
+    persistentAffinityStore: store,
+  })
+  manager.setAccountAffinityEnabled(false)
+  manager.recordResponsesItemOwnership([ownerKey], "b")
+  manager.setAccountAffinityEnabled(true)
+
+  const selection = await manager.selectAccountForRequest(
+    [{ modelId: "free-model", endpoint: "/chat/completions" }],
+    { responsesItemOwnershipKeys: [ownerKey] },
+  )
+
+  expect(selection.ok).toBe(true)
+  if (!selection.ok) return
+
+  expect(selection.account.id).toBe("a")
+  expect(store.get(ownerKey)).toBeUndefined()
+})
+
+test("responses item ownership stale account mapping is purged and falls back", async () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+  const store = new SessionAffinityStore(db)
+
+  const model = makeModel({ id: "free-model" })
+  const ownerKey = buildResponsesItemOwnershipKey("id", "rs_owner_stale")
+
+  const accountA: AccountRuntime = {
+    id: "a",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_a",
+    models: makeModelsResponse([model]),
+  }
+
+  store.set(ownerKey, "ghost-account")
+
+  const manager = setupManager([accountA], { persistentAffinityStore: store })
+
+  const selection = await manager.selectAccountForRequest(
+    [{ modelId: "free-model", endpoint: "/chat/completions" }],
+    { responsesItemOwnershipKeys: [ownerKey] },
+  )
+
+  expect(selection.ok).toBe(true)
+  if (!selection.ok) return
+
+  expect(selection.account.id).toBe("a")
+  expect(store.get(ownerKey)).toBeUndefined()
+})
+
+test("responses item ownership keeps mappings for temporarily failed accounts", async () => {
+  const db = new Database(":memory:")
+  initAdminDb(db)
+  const store = new SessionAffinityStore(db)
+
+  const model = makeModel({ id: "free-model" })
+  const ownerKey = buildResponsesItemOwnershipKey("id", "rs_owner_failed")
+
+  const accountA: AccountRuntime = {
+    id: "a",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_a",
+    models: makeModelsResponse([model]),
+  }
+  const accountB: AccountRuntime = {
+    id: "b",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_b",
+    failed: true,
+    models: makeModelsResponse([model]),
+  }
+
+  store.set(ownerKey, "b")
+
+  const manager = setupManager([accountA, accountB], {
+    persistentAffinityStore: store,
+  })
+
+  const selection = await manager.selectAccountForRequest(
+    [{ modelId: "free-model", endpoint: "/chat/completions" }],
+    { responsesItemOwnershipKeys: [ownerKey] },
+  )
+
+  expect(selection.ok).toBe(true)
+  if (!selection.ok) return
+
+  expect(selection.account.id).toBe("a")
+  expect(store.get(ownerKey)).toBe("b")
 })
 
 test("persistent affinity: stale binding pointing to unavailable account is purged and falls back", async () => {

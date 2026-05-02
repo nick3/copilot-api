@@ -1249,6 +1249,10 @@ export class AccountsManager {
     ownershipKeys: ReadonlyArray<string>,
     accountId: string,
   ): void {
+    if (!this.accountAffinityEnabled) {
+      return
+    }
+
     const normalizedAccountId = accountId.trim()
     if (!normalizedAccountId) {
       return
@@ -1284,6 +1288,10 @@ export class AccountsManager {
   }): Promise<{
     result?: SelectAccountForRequestSuccess
   }> {
+    if (!this.accountAffinityEnabled) {
+      return {}
+    }
+
     const { orderedAccounts, candidates } = params
     const ownershipKeys = normalizeCacheKeys(params.ownershipKeys)
     if (ownershipKeys.length === 0) {
@@ -1299,6 +1307,15 @@ export class AccountsManager {
     }
 
     if (accountIds.size !== 1) {
+      if (accountIds.size > 1) {
+        consola.warn(
+          "Conflicting Responses item owner mappings; falling back",
+          {
+            accountIds: [...accountIds.keys()],
+            ownershipKeyCount: ownershipKeys.length,
+          },
+        )
+      }
       return {}
     }
 
@@ -1309,6 +1326,9 @@ export class AccountsManager {
       candidates,
     )
     if (!ownerResult) {
+      if (this.isMissingOrDisabledAccount(accountId, orderedAccounts)) {
+        this.deleteResponsesItemOwnershipMappings(ownershipKeys, accountId)
+      }
       return {}
     }
 
@@ -1317,6 +1337,24 @@ export class AccountsManager {
     ownerResult.selectionReason = "responses_item_owner_hit"
 
     return { result: ownerResult }
+  }
+
+  private isMissingOrDisabledAccount(
+    accountId: string,
+    orderedAccounts: ReadonlyArray<AccountRuntime>,
+  ): boolean {
+    return !orderedAccounts.some((account) => account.id === accountId)
+  }
+
+  private deleteResponsesItemOwnershipMappings(
+    ownershipKeys: ReadonlyArray<string>,
+    accountId: string,
+  ): void {
+    for (const key of ownershipKeys) {
+      if (this.affinityCache.get(key) === accountId) {
+        this.affinityCache.delete(key)
+      }
+    }
   }
 
   private async selectPreferredSessionOwner(params: {
