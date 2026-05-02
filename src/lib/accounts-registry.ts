@@ -19,23 +19,28 @@ import { accountTokenPath, PATHS } from "~/lib/paths"
 /**
  * Validate account ID (GitHub login).
  * Rules:
- * - Only alphanumeric characters or single hyphens
  * - 1-39 chars
- * - Cannot begin or end with a hyphen
- * - No consecutive hyphens
+ * - Alphanumeric segments may be separated by single hyphens or underscores
+ * - Cannot begin or end with a separator
+ * - No consecutive separators
  */
 export function validateAccountId(id: string): boolean {
   if (id.length === 0 || id.length > 39) return false
-  if (!/^[a-z0-9-]+$/i.test(id)) return false
-  if (id.startsWith("-") || id.endsWith("-")) return false
-  if (id.includes("--")) return false
-  return true
+  return /^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*$/u.test(id)
 }
+
+function assertValidAccountId(id: string): void {
+  if (!validateAccountId(id)) {
+    throw new Error(`Invalid account ID: ${id}`)
+  }
+}
+
+const ACCOUNT_ID_VALIDATION_RULES =
+  "1-39 chars, alphanumeric with optional single hyphen/underscore separators, no leading/trailing separator, no consecutive separators."
 
 const accountMetaSchema = z.object({
   id: z.string().refine(validateAccountId, {
-    message:
-      "Invalid account id. Expected a GitHub login (1-39 chars, alphanumeric or single hyphens, no leading/trailing hyphen, no consecutive hyphens).",
+    message: `Invalid account id. Expected a GitHub login (${ACCOUNT_ID_VALIDATION_RULES})`,
   }),
   accountType: z.enum(["individual", "business", "enterprise"]),
   addedAt: z.number(),
@@ -52,8 +57,7 @@ export function isAccountEnabled(meta: AccountMeta): boolean {
 
 const accountClientIdentitySchema = z.object({
   login: z.string().refine(validateAccountId, {
-    message:
-      "Invalid client identity login. Expected a GitHub login (1-39 chars, alphanumeric or single hyphens, no leading/trailing hyphen, no consecutive hyphens).",
+    message: `Invalid client identity login. Expected a GitHub login (${ACCOUNT_ID_VALIDATION_RULES})`,
   }),
   oauthApp: z.string().min(1),
   enterpriseDomain: z.string().min(1),
@@ -337,9 +341,7 @@ export async function ensureAccountClientIdentity({
   oauthApp: string
   enterpriseDomain: string
 }): Promise<AccountClientIdentity> {
-  if (!validateAccountId(login)) {
-    throw new Error(`Invalid account ID: ${login}`)
-  }
+  assertValidAccountId(login)
 
   const normalizedOauthApp = oauthApp.trim()
   if (!normalizedOauthApp) {
@@ -399,9 +401,7 @@ export async function ensureAccountClientIdentity({
  * The account is appended to the end of the list (lowest priority).
  */
 export async function addAccountToRegistry(meta: AccountMeta): Promise<void> {
-  if (!validateAccountId(meta.id)) {
-    throw new Error(`Invalid account ID: ${meta.id}`)
-  }
+  assertValidAccountId(meta.id)
 
   await runWithRegistryLock(async () => {
     const { registry } = await loadRegistrySnapshot()
@@ -465,9 +465,7 @@ export async function listAccountsFromRegistry(): Promise<Array<AccountMeta>> {
  * Returns null if the token file doesn't exist.
  */
 export async function loadAccountToken(id: string): Promise<string | null> {
-  if (!validateAccountId(id)) {
-    throw new Error(`Invalid account ID: ${id}`)
-  }
+  assertValidAccountId(id)
 
   try {
     const tokenPath = accountTokenPath(id)
@@ -488,9 +486,7 @@ export async function saveAccountToken(
   id: string,
   token: string,
 ): Promise<void> {
-  if (!validateAccountId(id)) {
-    throw new Error(`Invalid account ID: ${id}`)
-  }
+  assertValidAccountId(id)
 
   const tokenPath = accountTokenPath(id)
   await fs.writeFile(tokenPath, token, { mode: 0o600 })
@@ -500,9 +496,7 @@ export async function saveAccountToken(
  * Remove the GitHub token file for a specific account.
  */
 export async function removeAccountToken(id: string): Promise<void> {
-  if (!validateAccountId(id)) {
-    throw new Error(`Invalid account ID: ${id}`)
-  }
+  assertValidAccountId(id)
 
   const tokenPath = accountTokenPath(id)
   try {

@@ -324,7 +324,7 @@ The `auth` command has three subcommands for managing multiple accounts:
 | --force   | Skip confirmation prompt | false   | -f    |
 | --verbose | Enable verbose logging   | false   | -v    |
 
-The `<target>` can be either the account ID (GitHub username) or a 1-based index.
+The `<target>` can be either the account ID (GitHub login) or a 1-based index.
 
 ### Debug Command Options
 
@@ -582,7 +582,7 @@ npx @nick3/copilot-api@latest auth ls -q
 # Remove an account by index (1-based)
 npx @nick3/copilot-api@latest auth rm 2
 
-# Remove an account by ID (GitHub username)
+# Remove an account by ID (GitHub login)
 npx @nick3/copilot-api@latest auth rm octocat
 
 # Show your Copilot usage/quota in the terminal (no server needed)
