@@ -9,6 +9,7 @@ export interface AffinityContext {
 
 export interface AffinityPersistenceStore {
   get(key: string): string | undefined
+  getMany?(keys: ReadonlyArray<string>): ReadonlyMap<string, string>
   set(key: string, accountId: string): void
   delete(key: string): void
   clear(): void
@@ -74,6 +75,51 @@ export class AccountAffinityCache {
     return accountId
   }
 
+  getMany(keys: ReadonlyArray<string>): ReadonlyMap<string, string> {
+    const result = new Map<string, string>()
+    const missingKeys = new Array<string>()
+    const now = Date.now()
+
+    for (const key of keys) {
+      if (result.has(key)) {
+        continue
+      }
+
+      const entry = this.cache.get(key)
+      if (!entry) {
+        missingKeys.push(key)
+        continue
+      }
+
+      if (now >= entry.expiresAt) {
+        this.cache.delete(key)
+        missingKeys.push(key)
+        continue
+      }
+
+      result.set(key, entry.accountId)
+    }
+
+    if (missingKeys.length === 0) {
+      return result
+    }
+
+    const persistentEntries = this.readPersistentEntries(missingKeys)
+    for (const [key, accountId] of persistentEntries) {
+      this.setMemory(key, accountId)
+    }
+
+    if (result.size === 0) {
+      return persistentEntries
+    }
+
+    for (const [key, accountId] of persistentEntries) {
+      result.set(key, accountId)
+    }
+
+    return result
+  }
+
   /** Record a successful account mapping. Refreshes TTL and moves the entry to the newest position. */
   set(key: string, accountId: string): void {
     this.setMemory(key, accountId)
@@ -103,7 +149,9 @@ export class AccountAffinityCache {
     return this.cache.size
   }
 
-  private getPersistentStore(): AffinityPersistenceStore | undefined {
+  private getPersistentStore(
+    options: { throwOnProviderFailure?: boolean } = {},
+  ): AffinityPersistenceStore | undefined {
     if (this.persistentStore) {
       return this.persistentStore
     }
@@ -118,7 +166,11 @@ export class AccountAffinityCache {
       }
       return store
     } catch (error) {
-      this.persistentStoreProvider = undefined
+      if (options.throwOnProviderFailure) {
+        consola.error("Failed to resolve affinity persistence store:", error)
+        throw new Error("Affinity persistence store provider failed")
+      }
+
       consola.warn("Failed to resolve affinity persistence store:", error)
       return undefined
     }
@@ -139,6 +191,54 @@ export class AccountAffinityCache {
       )
       return undefined
     }
+  }
+
+  private readPersistentEntries(
+    keys: ReadonlyArray<string>,
+  ): ReadonlyMap<string, string> {
+    const store = this.getPersistentStore({ throwOnProviderFailure: true })
+    if (!store) {
+      return new Map()
+    }
+
+    if (store.getMany) {
+      try {
+        return store.getMany(keys)
+      } catch (error) {
+        consola.warn(
+          "Failed to batch-read affinity mappings from persistent store:",
+          error,
+        )
+        throw new Error(
+          `Affinity persistent store batch lookup failed for ${keys.length} keys`,
+        )
+      }
+    }
+
+    const result = new Map<string, string>()
+    const failedKeys = new Array<string>()
+    for (const key of keys) {
+      try {
+        const accountId = store.get(key)
+        if (accountId) {
+          result.set(key, accountId)
+        }
+      } catch (error) {
+        failedKeys.push(key)
+        consola.warn(
+          "Failed to read affinity mapping from persistent store:",
+          error,
+        )
+      }
+    }
+
+    if (failedKeys.length > 0) {
+      throw new Error(
+        `Affinity persistent store lookup failed for ${failedKeys.length}/${keys.length} keys`,
+      )
+    }
+
+    return result
   }
 
   private writePersistentEntry(key: string, accountId: string): void {
