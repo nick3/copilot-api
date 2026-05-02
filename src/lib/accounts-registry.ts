@@ -19,18 +19,14 @@ import { accountTokenPath, PATHS } from "~/lib/paths"
 /**
  * Validate account ID (GitHub login).
  * Rules:
- * - Only alphanumeric characters, underscores, or single hyphens
  * - 1-39 chars
- * - Cannot begin or end with a hyphen or underscore
- * - No consecutive hyphens or underscores
+ * - Alphanumeric segments may be separated by single hyphens or underscores
+ * - Cannot begin or end with a separator
+ * - No consecutive separators
  */
 export function validateAccountId(id: string): boolean {
   if (id.length === 0 || id.length > 39) return false
-  if (!/^[\w-]+$/.test(id)) return false
-  if (id.startsWith("-") || id.endsWith("-")) return false
-  if (id.startsWith("_") || id.endsWith("_")) return false
-  if (id.includes("--") || id.includes("__")) return false
-  return true
+  return /^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*$/u.test(id)
 }
 
 function assertValidAccountId(id: string): void {
@@ -40,7 +36,7 @@ function assertValidAccountId(id: string): void {
 }
 
 const ACCOUNT_ID_VALIDATION_RULES =
-  "1-39 chars, alphanumeric, underscores, or single hyphens, no leading/trailing underscore or hyphen, no consecutive underscores or hyphens."
+  "1-39 chars, alphanumeric with optional single hyphen/underscore separators, no leading/trailing separator, no consecutive separators."
 
 const accountMetaSchema = z.object({
   id: z.string().refine(validateAccountId, {

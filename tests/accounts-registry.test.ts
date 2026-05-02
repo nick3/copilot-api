@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from "bun:test"
 import fs from "node:fs/promises"
 
-import type { AccountClientIdentity } from "../src/lib/types/account"
+import type { AccountClientIdentity } from "~/lib/types/account"
 
-import { buildIdentityKey } from "../src/lib/account-client-identity"
+import { buildIdentityKey } from "~/lib/account-client-identity"
 import {
   addAccountToRegistry,
   ensureAccountClientIdentity,
@@ -11,7 +11,7 @@ import {
   hasRegistry,
   loadRegistry,
   validateAccountId,
-} from "../src/lib/accounts-registry"
+} from "~/lib/accounts-registry"
 
 type ReadFile = typeof fs.readFile
 type WriteFile = typeof fs.writeFile
@@ -97,6 +97,8 @@ test("validateAccountId follows GitHub login rules", () => {
   expect(validateAccountId("abc-")).toBe(false)
   expect(validateAccountId("a__b")).toBe(false)
   expect(validateAccountId("a--b")).toBe(false)
+  expect(validateAccountId("a-_b")).toBe(false)
+  expect(validateAccountId("a_-b")).toBe(false)
   expect(validateAccountId("a".repeat(40))).toBe(false)
 })
 
