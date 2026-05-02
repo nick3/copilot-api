@@ -99,6 +99,7 @@ export type { AffinityContext } from "~/lib/account-affinity"
 export type AccountSelectionContext = AffinityContext & {
   ownershipLookupSessionId?: string
   ownershipWriteSessionId?: string
+  responsesItemOwnershipKeys?: ReadonlyArray<string>
 }
 
 export type SelectAccountForRequestFailureReason =
@@ -116,6 +117,7 @@ export type AccountSelectionReason =
   | "subagent_owner_miss"
   | "subagent_owner_unusable_fallback"
   | "subagent_marker_invalid_fallback"
+  | "responses_item_owner_hit"
 
 type SelectAccountForRequestSuccess = {
   ok: true
@@ -173,6 +175,14 @@ function preserveSubagentSelectionReason(
   return initialSelectionReason.startsWith("subagent_") ?
       initialSelectionReason
     : nextSelectionReason
+}
+
+function normalizeCacheKeys(keys?: ReadonlyArray<string>): Array<string> {
+  if (!keys) {
+    return []
+  }
+
+  return [...new Set(keys.map((key) => key.trim()).filter(Boolean))]
 }
 
 type ScoredAccountRuntime = {
@@ -1073,6 +1083,19 @@ export class AccountsManager {
     }
 
     const orderedAccounts = this.getOrderedEnabledAccounts()
+    const itemOwnerSelection = await this.selectPreferredResponsesItemOwner({
+      ownershipKeys: context?.responsesItemOwnershipKeys,
+      orderedAccounts,
+      candidates,
+    })
+    if (itemOwnerSelection.result) {
+      this.attachConfirmOwnership(
+        itemOwnerSelection.result,
+        context?.ownershipWriteSessionId,
+      )
+      return itemOwnerSelection.result
+    }
+
     const ownerSelection = await this.selectPreferredSessionOwner({
       lookupSessionId: context?.ownershipLookupSessionId,
       orderedAccounts,
@@ -1222,6 +1245,24 @@ export class AccountsManager {
     this.affinityCache.delete(normalizedCacheKey)
   }
 
+  recordResponsesItemOwnership(
+    ownershipKeys: ReadonlyArray<string>,
+    accountId: string,
+  ): void {
+    if (!this.accountAffinityEnabled) {
+      return
+    }
+
+    const normalizedAccountId = accountId.trim()
+    if (!normalizedAccountId) {
+      return
+    }
+
+    for (const key of normalizeCacheKeys(ownershipKeys)) {
+      this.affinityCache.set(key, normalizedAccountId)
+    }
+  }
+
   private attachConfirmOwnership(
     result: SelectAccountForRequestSuccess,
     ownershipWriteSessionId: string | undefined,
@@ -1237,6 +1278,82 @@ export class AccountsManager {
         return
       }
       this.sessionOwnership.set(rootSessionId, result.account.id)
+    }
+  }
+
+  private async selectPreferredResponsesItemOwner(params: {
+    ownershipKeys: ReadonlyArray<string> | undefined
+    orderedAccounts: Array<AccountRuntime>
+    candidates: Array<AccountRequestCandidate>
+  }): Promise<{
+    result?: SelectAccountForRequestSuccess
+  }> {
+    if (!this.accountAffinityEnabled) {
+      return {}
+    }
+
+    const { orderedAccounts, candidates } = params
+    const ownershipKeys = normalizeCacheKeys(params.ownershipKeys)
+    if (ownershipKeys.length === 0) {
+      return {}
+    }
+
+    const accountIds = new Map<string, string>()
+    for (const key of ownershipKeys) {
+      const accountId = this.affinityCache.get(key)
+      if (accountId) {
+        accountIds.set(accountId, key)
+      }
+    }
+
+    if (accountIds.size !== 1) {
+      if (accountIds.size > 1) {
+        consola.warn(
+          "Conflicting Responses item owner mappings; falling back",
+          {
+            accountIds: [...accountIds.keys()],
+            ownershipKeyCount: ownershipKeys.length,
+          },
+        )
+      }
+      return {}
+    }
+
+    const [[accountId, ownerKey]] = [...accountIds]
+    const ownerResult = await this.tryAffinityAccount(
+      accountId,
+      orderedAccounts,
+      candidates,
+    )
+    if (!ownerResult) {
+      if (this.isMissingOrDisabledAccount(accountId, orderedAccounts)) {
+        this.deleteResponsesItemOwnershipMappings(ownershipKeys, accountId)
+      }
+      return {}
+    }
+
+    ownerResult.affinityHit = true
+    ownerResult.affinityCacheKey = ownerKey
+    ownerResult.selectionReason = "responses_item_owner_hit"
+
+    return { result: ownerResult }
+  }
+
+  private isMissingOrDisabledAccount(
+    accountId: string,
+    orderedAccounts: ReadonlyArray<AccountRuntime>,
+  ): boolean {
+    return !orderedAccounts.some((account) => account.id === accountId)
+  }
+
+  private deleteResponsesItemOwnershipMappings(
+    ownershipKeys: ReadonlyArray<string>,
+    accountId: string,
+  ): void {
+    for (const key of ownershipKeys) {
+      if (this.affinityCache.get(key) === accountId) {
+        this.affinityCache.delete(key)
+      }
     }
   }
 

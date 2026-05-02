@@ -206,6 +206,8 @@ export type RequestLogInsert = {
   affinityKeyUsed?: string
   affinityKeySource?: AffinityKeySource
   selectionReason?: AccountSelectionReason
+  responsesItemOwnerLookupKeysJson?: string
+  responsesItemOwnerRecordedKeysJson?: string
 
   tokensInput?: number
   tokensOutput?: number
@@ -268,6 +270,8 @@ export type RequestLogRow = {
   affinity_key_used: string | null
   affinity_key_source: string | null
   selection_reason: string | null
+  responses_item_owner_lookup_keys_json: string | null
+  responses_item_owner_recorded_keys_json: string | null
 
   tokens_input: number | null
   tokens_output: number | null
@@ -400,6 +404,8 @@ function buildInsertArgs(record: RequestLogInsert) {
     toDbNull(record.affinityKeyUsed),
     toDbNull(record.affinityKeySource),
     toDbNull(record.selectionReason),
+    toDbNull(record.responsesItemOwnerLookupKeysJson),
+    toDbNull(record.responsesItemOwnerRecordedKeysJson),
 
     toDbNull(record.tokensInput),
     toDbNull(record.tokensOutput),
@@ -470,6 +476,8 @@ export class RequestHistoryStore {
       "affinity_key_used",
       "affinity_key_source",
       "selection_reason",
+      "responses_item_owner_lookup_keys_json",
+      "responses_item_owner_recorded_keys_json",
       "tokens_input",
       "tokens_output",
       "tokens_total",

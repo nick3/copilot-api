@@ -78,7 +78,12 @@ type SelectionFailureContext = {
   affinityKeyUsed?: string
   affinityKeySource?: AffinityKeySource
   selectionReason?: AccountSelectionReason
+  responsesItemOwnerLookupKeys?: ReadonlyArray<string>
   selection: SelectionFailure
+}
+
+function stringifyOwnerKeys(keys?: ReadonlyArray<string>): string | undefined {
+  return keys && keys.length > 0 ? JSON.stringify(keys) : undefined
 }
 
 export const isWarmupProbeRequest = (
@@ -137,6 +142,7 @@ export const handleSelectionFailure = (
     affinityKeyUsed,
     affinityKeySource,
     selectionReason,
+    responsesItemOwnerLookupKeys,
     selection,
   } = context
   const finishedAtMs = Date.now()
@@ -160,6 +166,9 @@ export const handleSelectionFailure = (
     isSubagent,
     affinityKeyUsed,
     affinityKeySource,
+    responsesItemOwnerLookupKeysJson: stringifyOwnerKeys(
+      responsesItemOwnerLookupKeys,
+    ),
     httpStatus: selection.reason === "MODEL_NOT_SUPPORTED" ? 400 : 429,
     selectionReason: selectionReason ?? selection.selectionReason,
     selectionFailureReason: selection.reason,

@@ -50,6 +50,11 @@ import {
   resolveAffinityKey,
 } from "~/lib/utils"
 import {
+  extractAnthropicResponsesItemOwnerKeys,
+  extractResponsesResultOwnerKeys,
+  extractResponsesStreamEventOwnerKeys,
+} from "~/routes/messages/responses-item-ownership"
+import {
   buildErrorEvent,
   createResponsesStreamState,
   translateResponsesStreamEvent,
@@ -148,6 +153,8 @@ type InstrumentationContext = {
   affinityKeyUsed?: string
   affinityKeySource?: AffinityKeySource
   selectionReason?: AccountSelectionReason
+  responsesItemOwnerLookupKeys?: ReadonlyArray<string>
+  responsesItemOwnerRecordedKeys?: ReadonlyArray<string>
 
   clientModel: string
 
@@ -303,12 +310,15 @@ export async function handleCompletion(c: Context) {
     headerSessionId,
     upstreamRequestId,
   })
+  const responsesItemOwnershipKeys =
+    extractAnthropicResponsesItemOwnerKeys(anthropicPayload)
 
   const selection = await accountsManager.selectAccountForRequest(candidates, {
     requestId: affinityKey.requestId,
     affinityModelId,
     ownershipLookupSessionId,
     ownershipWriteSessionId,
+    responsesItemOwnershipKeys,
   })
   const selectionReason =
     invalidSubagentMarkerSelectionReason ?? selection.selectionReason
@@ -333,6 +343,7 @@ export async function handleCompletion(c: Context) {
       affinityKeyUsed: affinityKey.affinityKeyUsed,
       affinityKeySource: affinityKey.affinityKeySource,
       selectionReason,
+      responsesItemOwnerLookupKeys: responsesItemOwnershipKeys,
       selection,
     })
   }
@@ -373,6 +384,7 @@ export async function handleCompletion(c: Context) {
     affinityKeyUsed: affinityKey.affinityKeyUsed,
     affinityKeySource: affinityKey.affinityKeySource,
     selectionReason,
+    responsesItemOwnerLookupKeys: responsesItemOwnershipKeys,
   }
   if (endpoint === MESSAGES_ENDPOINT) {
     return await handleWithMessagesApi({
@@ -619,6 +631,10 @@ type ChatCompletionsStream = Exclude<
 
 type MessagesResult = Awaited<ReturnType<typeof createMessages>>
 
+function stringifyOwnerKeys(keys?: ReadonlyArray<string>): string | undefined {
+  return keys && keys.length > 0 ? JSON.stringify(keys) : undefined
+}
+
 function insertRequestLog(
   instr: InstrumentationContext,
   record: Omit<
@@ -689,6 +705,12 @@ function insertRequestLog(
     premiumRemainingBefore,
     premiumUnlimitedBefore,
     ...record,
+    responsesItemOwnerLookupKeysJson: stringifyOwnerKeys(
+      instr.responsesItemOwnerLookupKeys,
+    ),
+    responsesItemOwnerRecordedKeysJson: stringifyOwnerKeys(
+      instr.responsesItemOwnerRecordedKeys,
+    ),
   })
   void flushPendingCapture(requestId)
 }
@@ -987,6 +1009,8 @@ async function handleResponsesNonStreaming(params: {
 
   try {
     usage = extractResponsesUsageFromResult(result)
+    const responseOwnerKeys = extractResponsesResultOwnerKeys(result)
+    instr.responsesItemOwnerRecordedKeys = responseOwnerKeys
 
     logger.debug(
       "Non-streaming Responses result:",
@@ -996,7 +1020,15 @@ async function handleResponsesNonStreaming(params: {
     const anthropicResponse = translateResponsesResultToAnthropic(result)
     debugJson(logger, "Translated Anthropic response:", anthropicResponse)
 
-    return c.json(anthropicResponse)
+    const response = c.json(anthropicResponse)
+    if (result.status === "completed") {
+      accountsManager.recordResponsesItemOwnership(
+        responseOwnerKeys,
+        instr.account.id,
+      )
+    }
+
+    return response
   } catch (error) {
     const details = await extractErrorObservability(error)
 
@@ -1075,6 +1107,90 @@ async function writeAnthropicStreamError(
   }
 }
 
+function collectResponsesStreamOwnerKeys(
+  event: ResponseStreamEvent,
+  responseOwnerKeys: Set<string>,
+): void {
+  for (const key of extractResponsesStreamEventOwnerKeys(event)) {
+    responseOwnerKeys.add(key)
+  }
+}
+
+function createResponsesStreamStateWithUsage(params: {
+  estimatedInputTokens?: number
+  historicalUsage?: NormalizedUsage
+}): ReturnType<typeof createResponsesStreamState> {
+  const streamState = createResponsesStreamState()
+  streamState.estimatedInputTokens = params.estimatedInputTokens
+  streamState.historicalInputTokens = params.historicalUsage?.tokensInput
+  streamState.historicalOutputTokens = params.historicalUsage?.tokensOutput
+  streamState.historicalCachedInputTokens =
+    params.historicalUsage?.tokensCachedInput
+  return streamState
+}
+
+function recordStreamOwnerKeys(
+  streamState: ReturnType<typeof createResponsesStreamState>,
+  responseOwnerKeys: Set<string>,
+  instr: InstrumentationContext,
+): void {
+  if (!streamState.messageCompleted) {
+    return
+  }
+
+  const ownerKeys = [...responseOwnerKeys]
+  instr.responsesItemOwnerRecordedKeys = ownerKeys
+  if (streamState.responseStatus === "completed") {
+    accountsManager.recordResponsesItemOwnership(ownerKeys, instr.account.id)
+  }
+}
+
+function getResponsesStreamEventError(event: ResponseStreamEvent):
+  | {
+      errorName: string
+      errorStatus: number
+      errorMessage: string
+      upstreamErrorMessageRaw: string
+    }
+  | undefined {
+  if (event.type === "response.failed") {
+    const message =
+      event.response.error?.message ?? "Responses stream failed upstream."
+    return {
+      errorName: "ResponsesStreamFailed",
+      errorStatus: 502,
+      errorMessage: message,
+      upstreamErrorMessageRaw: message,
+    }
+  }
+
+  if (event.type === "error") {
+    const message = event.message || "Responses stream returned an error."
+    return {
+      errorName: "ResponsesStreamError",
+      errorStatus: 502,
+      errorMessage: message,
+      upstreamErrorMessageRaw: message,
+    }
+  }
+
+  return undefined
+}
+
+async function writeTranslatedAnthropicStreamEvents(
+  stream: StreamSseStream,
+  events: Array<AnthropicStreamEventData>,
+): Promise<void> {
+  for (const event of events) {
+    const eventData = JSON.stringify(event)
+    logger.debug("Translated Anthropic event:", eventData)
+    await stream.writeSSE({
+      event: event.type,
+      data: eventData,
+    })
+  }
+}
+
 async function streamResponsesAndLog(params: {
   stream: StreamSseStream
   response: AsyncIterable<unknown>
@@ -1082,8 +1198,7 @@ async function streamResponsesAndLog(params: {
   estimatedInputTokens?: number
   historicalUsage?: NormalizedUsage
 }): Promise<void> {
-  const { stream, response, instr, estimatedInputTokens, historicalUsage } =
-    params
+  const { stream, response, instr } = params
 
   let ttfbMs: number | undefined
   let lastUsage: NormalizedUsage = {}
@@ -1093,11 +1208,8 @@ async function streamResponsesAndLog(params: {
   let errorMessage: string | undefined
   let upstreamErrorMessageRaw: string | undefined
 
-  const streamState = createResponsesStreamState()
-  streamState.estimatedInputTokens = estimatedInputTokens
-  streamState.historicalInputTokens = historicalUsage?.tokensInput
-  streamState.historicalOutputTokens = historicalUsage?.tokensOutput
-  streamState.historicalCachedInputTokens = historicalUsage?.tokensCachedInput
+  const streamState = createResponsesStreamStateWithUsage(params)
+  const responseOwnerKeys = new Set<string>()
 
   try {
     for await (const chunk of response) {
@@ -1119,20 +1231,22 @@ async function streamResponsesAndLog(params: {
       logger.debug("Responses raw stream event:", data)
 
       const parsed = JSON.parse(data) as ResponseStreamEvent
+      const streamEventError = getResponsesStreamEventError(parsed)
+      if (streamEventError) {
+        errorName = streamEventError.errorName
+        errorStatus = streamEventError.errorStatus
+        errorMessage = streamEventError.errorMessage
+        upstreamErrorMessageRaw = streamEventError.upstreamErrorMessageRaw
+      }
+
+      collectResponsesStreamOwnerKeys(parsed, responseOwnerKeys)
       const u = extractResponsesUsageFromStreamEvent(parsed)
       if (u.usageJson) {
         lastUsage = u
       }
 
       const events = translateResponsesStreamEvent(parsed, streamState)
-      for (const event of events) {
-        const eventData = JSON.stringify(event)
-        logger.debug("Translated Anthropic event:", eventData)
-        await stream.writeSSE({
-          event: event.type,
-          data: eventData,
-        })
-      }
+      await writeTranslatedAnthropicStreamEvents(stream, events)
 
       if (streamState.messageCompleted) {
         logger.debug("Message completed, ending stream")
@@ -1148,6 +1262,8 @@ async function streamResponsesAndLog(params: {
         errorMessage = message
       },
     })
+
+    recordStreamOwnerKeys(streamState, responseOwnerKeys, instr)
   } catch (error) {
     const details = await extractErrorObservability(error)
 

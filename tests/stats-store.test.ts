@@ -4,11 +4,11 @@ import { expect, test } from "bun:test"
 import { getAdminDbUserVersion, initAdminDb } from "../src/lib/admin-db"
 import { StatsStore, toLocalDateString } from "../src/lib/stats-store"
 
-test("initAdminDb migrates admin DB to user_version 12", () => {
+test("initAdminDb migrates admin DB to user_version 13", () => {
   const db = new Database(":memory:")
   initAdminDb(db)
 
-  expect(getAdminDbUserVersion(db)).toBe(12)
+  expect(getAdminDbUserVersion(db)).toBe(13)
 })
 
 test("daily_premium_stats table has the expected columns", () => {
@@ -304,7 +304,7 @@ test("v9 migration backfills from existing request_log data", () => {
   // Re-run migration (should trigger v9 since user_version is 8)
   initAdminDb(db)
 
-  expect(getAdminDbUserVersion(db)).toBe(12)
+  expect(getAdminDbUserVersion(db)).toBe(13)
 
   const rows = db
     .query(
@@ -364,7 +364,7 @@ test("v10 migration backfills quota_snapshots from request_log", () => {
 
   initAdminDb(db)
 
-  expect(getAdminDbUserVersion(db)).toBe(12)
+  expect(getAdminDbUserVersion(db)).toBe(13)
 
   const rows = db
     .query(

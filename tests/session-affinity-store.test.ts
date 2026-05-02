@@ -4,14 +4,14 @@ import { expect, test } from "bun:test"
 import { getAdminDbUserVersion, initAdminDb } from "../src/lib/admin-db"
 import { SessionAffinityStore } from "../src/lib/session-affinity-store"
 
-test("initAdminDb migrates admin DB to user_version 12", () => {
+test("initAdminDb migrates admin DB to user_version 13", () => {
   const db = new Database(":memory:")
   initAdminDb(db)
 
-  expect(getAdminDbUserVersion(db)).toBe(12)
+  expect(getAdminDbUserVersion(db)).toBe(13)
 })
 
-test("initAdminDb upgrades an existing v7 DB with request_log to v12 and creates session_affinity", () => {
+test("initAdminDb upgrades an existing v7 DB with request_log to v13 and creates session_affinity", () => {
   const db = new Database(":memory:")
 
   db.run(`
@@ -93,9 +93,11 @@ test("initAdminDb upgrades an existing v7 DB with request_log to v12 and creates
     .all() as Array<{ name: string }>
   const columnNamesAfter = requestLogColumnsAfter.map((column) => column.name)
 
-  expect(getAdminDbUserVersion(db)).toBe(12)
+  expect(getAdminDbUserVersion(db)).toBe(13)
   expect(after?.name).toBe("session_affinity")
   expect(columnNamesAfter).toContain("outbound_x_request_id")
+  expect(columnNamesAfter).toContain("responses_item_owner_lookup_keys_json")
+  expect(columnNamesAfter).toContain("responses_item_owner_recorded_keys_json")
 })
 
 test("initAdminDb creates session_affinity with the expected columns", () => {
