@@ -5,6 +5,7 @@ import type { AccountClientIdentity } from "../src/lib/types/account"
 
 import { buildIdentityKey } from "../src/lib/account-client-identity"
 import {
+  addAccountToRegistry,
   ensureAccountClientIdentity,
   getAccountClientIdentity,
   hasRegistry,
@@ -86,13 +87,49 @@ test("validateAccountId follows GitHub login rules", () => {
   expect(validateAccountId("octocat")).toBe(true)
   expect(validateAccountId("a-1")).toBe(true)
   expect(validateAccountId("A1")).toBe(true)
+  expect(validateAccountId("a_b")).toBe(true)
+  expect(validateAccountId("username_company")).toBe(true)
 
   // invalid
-  expect(validateAccountId("a_b")).toBe(false)
+  expect(validateAccountId("_abc")).toBe(false)
+  expect(validateAccountId("abc_")).toBe(false)
   expect(validateAccountId("-abc")).toBe(false)
   expect(validateAccountId("abc-")).toBe(false)
+  expect(validateAccountId("a__b")).toBe(false)
   expect(validateAccountId("a--b")).toBe(false)
   expect(validateAccountId("a".repeat(40))).toBe(false)
+})
+
+test("addAccountToRegistry accepts managed user logins with underscores", async () => {
+  let storedContent = ""
+
+  await withMockedFs(
+    {
+      readFile: (() => "   \n") as unknown as ReadFile,
+      writeFile: ((
+        _path: Parameters<WriteFile>[0],
+        data: Parameters<WriteFile>[1],
+      ) => {
+        storedContent = toWrittenString(data)
+        return Promise.resolve()
+      }) as unknown as WriteFile,
+    },
+    () =>
+      addAccountToRegistry({
+        id: "username_company",
+        accountType: "enterprise",
+        addedAt: 1,
+      }),
+  )
+
+  expect(JSON.parse(storedContent)).toMatchObject({
+    accounts: [{ id: "username_company" }],
+    clientIdentities: {
+      "public:default:username_company": {
+        login: "username_company",
+      },
+    },
+  })
 })
 
 test("loadRegistry returns empty registry on ENOENT", async () => {

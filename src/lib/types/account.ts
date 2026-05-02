@@ -33,7 +33,7 @@ export function parseAccountType(value: unknown): AccountType {
  * Metadata for a registered account, stored in the registry file.
  */
 export interface AccountMeta {
-  /** GitHub login (username) */
+  /** GitHub login */
   id: string
   /** Account subscription type */
   accountType: AccountType
