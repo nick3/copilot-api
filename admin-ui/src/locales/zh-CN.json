@@ -449,7 +449,12 @@
     "collapseAll": "全部折叠",
     "statusCollapsed": "已折叠",
     "statusExpanded": "已展开",
-    "statusDepth": "层级<{{depth}}"
+    "statusDepth": "层级<{{depth}}",
+    "longStringLabel": "长字符串",
+    "longStringChars": "个字符",
+    "longStringViewFull": "查看完整",
+    "longStringCopy": "复制",
+    "longStringSearchMatch": "搜索命中该长值内部内容"
   },
   "settingsPage": {
     "subtitle": "管理服务端配置和功能开关。",

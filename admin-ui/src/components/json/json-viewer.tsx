@@ -2,9 +2,18 @@ import * as React from "react"
 
 import type { TFunction } from "i18next"
 import { useTranslation } from "react-i18next"
-import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
+import { ChevronDownIcon, ChevronRightIcon, CopyIcon, EyeIcon } from "lucide-react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { copyText } from "@/lib/clipboard"
 import { fmtLocalDateTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
@@ -16,6 +25,8 @@ export interface JsonViewerProps {
 }
 
 const MAX_ITEMS_PER_NODE = 200
+const LONG_STRING_THRESHOLD = 2000
+const LONG_STRING_PREVIEW_LENGTH = 240
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
@@ -55,19 +66,32 @@ function highlight(text: string, query: string | undefined): React.ReactNode {
   return <>{parts}</>
 }
 
+function formatCount(count: number): string {
+  return new Intl.NumberFormat().format(count)
+}
+
+function getLongStringPreview(value: string): string {
+  if (value.length <= LONG_STRING_PREVIEW_LENGTH) return value
+  return `${value.slice(0, LONG_STRING_PREVIEW_LENGTH - 1)}…`
+}
+
+function isLongString(value: unknown): value is string {
+  return typeof value === "string" && value.length >= LONG_STRING_THRESHOLD
+}
+
 function formatPrimitive(
   value: unknown,
   search: string | undefined,
-  name: string | undefined
+  name: string | undefined,
 ): React.ReactNode {
   if (value == null) return <span className="text-muted-foreground">null</span>
 
   if (typeof value === "string") {
-    return (
-      <span className="text-foreground">
-        &quot;{highlight(value, search)}&quot;
-      </span>
-    )
+    return isLongString(value) ?
+        <LongStringValue value={value} search={search} />
+      : <span className="text-foreground">
+          &quot;{highlight(value, search)}&quot;
+        </span>
   }
 
   if (typeof value === "number") {
@@ -105,6 +129,94 @@ function formatPrimitive(
   }
 
   return <span className="text-foreground">{String(value)}</span>
+}
+
+function LongStringValue({
+  value,
+  search,
+}: {
+  value: string
+  search: string | undefined
+}): React.JSX.Element {
+  const { t } = useTranslation()
+  const [open, setOpen] = React.useState(false)
+  const normalizedSearch = search?.trim().toLowerCase()
+  const hasSearchMatch = normalizedSearch ? value.toLowerCase().includes(normalizedSearch) : false
+  const preview = getLongStringPreview(value)
+
+  async function handleCopy(): Promise<void> {
+    try {
+      await copyText(value)
+      toast.success(t("common.copied"))
+    } catch (error) {
+      toast.error(t("common.copyFailed"), {
+        description: String(error),
+      })
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/15 p-2">
+      <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+        <span>{t("jsonViewer.longStringLabel")}</span>
+        <span>·</span>
+        <span>
+          {formatCount(value.length)} {t("jsonViewer.longStringChars")}
+        </span>
+      </div>
+
+      <div className="font-mono text-[11px] leading-5 whitespace-pre-wrap break-all">
+        &quot;{highlight(preview, search)}&quot;
+      </div>
+
+      {hasSearchMatch ? (
+        <div className="text-[11px] text-muted-foreground">
+          {t("jsonViewer.longStringSearchMatch")}
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap gap-2 font-sans">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1.5 px-2 text-[11px]"
+          onClick={() => setOpen(true)}
+        >
+          <EyeIcon className="size-3.5" />
+          {t("jsonViewer.longStringViewFull")}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1.5 px-2 text-[11px]"
+          onClick={() => void handleCopy()}
+        >
+          <CopyIcon className="size-3.5" />
+          {t("jsonViewer.longStringCopy")}
+        </Button>
+      </div>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden p-0 sm:max-w-4xl">
+          <DialogHeader className="border-b px-4 pt-4 pb-4 sm:px-6">
+            <DialogTitle>{t("jsonViewer.longStringLabel")}</DialogTitle>
+            <DialogDescription>
+              {formatCount(value.length)} {t("jsonViewer.longStringChars")}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-auto px-4 pb-4 sm:px-6 sm:pb-6">
+            <div className="rounded-md border bg-muted/10 p-3">
+              <div className="font-mono text-xs leading-5 whitespace-pre-wrap break-all">
+                {highlight(value, search)}
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
 }
 
 function NodeRow({
@@ -153,7 +265,7 @@ function NodeRow({
         <span className="text-muted-foreground">{t("jsonViewer.root")}</span>
       )}
 
-      <span className="min-w-0 break-words">{valuePreview}</span>
+      <div className="min-w-0 flex-1 break-words">{valuePreview}</div>
     </div>
   )
 }
