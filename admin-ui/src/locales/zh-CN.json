@@ -451,6 +451,7 @@
     "statusExpanded": "已展开",
     "statusDepth": "层级<{{depth}}",
     "longStringLabel": "长字符串",
+    "longStringLabelWithName": "长字符串：{{name}}",
     "longStringChars": "个字符",
     "longStringViewFull": "查看完整",
     "longStringCopy": "复制",

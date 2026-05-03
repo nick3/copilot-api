@@ -43,6 +43,7 @@ function restoreGlobal(name: "navigator" | "document", descriptor?: PropertyDesc
 }
 
 beforeEach(() => {
+  i18n.changeLanguage("en-US")
   writeText = mock(async () => {})
   setGlobal("navigator", { clipboard: { writeText } })
   setGlobal("document", undefined)
@@ -74,7 +75,7 @@ test("JsonViewer summarizes very long string values", () => {
   expect(html).not.toContain(longValue)
 })
 
-test("JsonViewer includes the field name in long string context", () => {
+test("JsonViewer localizes the field name in long string context", () => {
   const longValue = "lookup-key-".repeat(500)
 
   const html = renderToStaticMarkup(
@@ -82,6 +83,18 @@ test("JsonViewer includes the field name in long string context", () => {
   )
 
   expect(html).toContain("Long string: responses_item_owner_lookup_keys_json")
+})
+
+test("JsonViewer uses the current locale for long string context", () => {
+  const longValue = "lookup-key-".repeat(500)
+  i18n.changeLanguage("zh-CN")
+
+  const html = renderToStaticMarkup(
+    <JsonViewer value={{ responses_item_owner_lookup_keys_json: longValue }} />,
+  )
+
+  expect(html).toContain("长字符串：responses_item_owner_lookup_keys_json")
+  expect(html).not.toContain("长字符串: responses_item_owner_lookup_keys_json")
 })
 
 test("JsonViewer keeps short string values inline", () => {

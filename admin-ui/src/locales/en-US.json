@@ -451,6 +451,7 @@
     "statusExpanded": "expanded",
     "statusDepth": "depth<{{depth}}",
     "longStringLabel": "Long string",
+    "longStringLabelWithName": "Long string: {{name}}",
     "longStringChars": "chars",
     "longStringViewFull": "View full",
     "longStringCopy": "Copy",

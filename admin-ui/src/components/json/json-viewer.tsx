@@ -66,8 +66,8 @@ function highlight(text: string, query: string | undefined): React.ReactNode {
   return <>{parts}</>
 }
 
-function formatCount(count: number): string {
-  return new Intl.NumberFormat().format(count)
+function formatCount(count: number, language: string): string {
+  return new Intl.NumberFormat(language).format(count)
 }
 
 function getLongStringPreview(value: string): string {
@@ -132,8 +132,9 @@ function formatPrimitive(
 }
 
 function getLongStringTitle(name: string | undefined, t: TFunction): string {
-  const label = t("jsonViewer.longStringLabel")
-  return name ? `${label}: ${name}` : label
+  return name ?
+      t("jsonViewer.longStringLabelWithName", { name })
+    : t("jsonViewer.longStringLabel")
 }
 
 interface LongStringCopyNotifier {
@@ -165,7 +166,7 @@ function LongStringValue({
   search: string | undefined
   name: string | undefined
 }): React.JSX.Element {
-  const { t } = useTranslation()
+  const { i18n, t } = useTranslation()
   const [open, setOpen] = React.useState(false)
   const normalizedSearch = search?.trim().toLowerCase()
   const hasSearchMatch = normalizedSearch ? value.toLowerCase().includes(normalizedSearch) : false
@@ -178,7 +179,7 @@ function LongStringValue({
         <span>{title}</span>
         <span>·</span>
         <span>
-          {formatCount(value.length)} {t("jsonViewer.longStringChars")}
+          {formatCount(value.length, i18n.language)} {t("jsonViewer.longStringChars")}
         </span>
       </div>
 
@@ -220,7 +221,7 @@ function LongStringValue({
           <DialogHeader className="border-b px-4 pt-4 pb-4 sm:px-6">
             <DialogTitle>{title}</DialogTitle>
             <DialogDescription>
-              {formatCount(value.length)} {t("jsonViewer.longStringChars")}
+              {formatCount(value.length, i18n.language)} {t("jsonViewer.longStringChars")}
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-auto px-4 pb-4 sm:px-6 sm:pb-6">
