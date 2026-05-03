@@ -88,7 +88,7 @@ function formatPrimitive(
 
   if (typeof value === "string") {
     return isLongString(value) ?
-        <LongStringValue value={value} search={search} />
+        <LongStringValue value={value} search={search} name={name} />
       : <span className="text-foreground">
           &quot;{highlight(value, search)}&quot;
         </span>
@@ -131,34 +131,51 @@ function formatPrimitive(
   return <span className="text-foreground">{String(value)}</span>
 }
 
+function getLongStringTitle(name: string | undefined, t: TFunction): string {
+  const label = t("jsonViewer.longStringLabel")
+  return name ? `${label}: ${name}` : label
+}
+
+interface LongStringCopyNotifier {
+  success: (message: string) => void
+  error: (message: string, options?: { description: string }) => void
+}
+
+export async function copyLongStringValue(
+  value: string,
+  t: TFunction,
+  notifier: LongStringCopyNotifier = toast,
+): Promise<void> {
+  try {
+    await copyText(value)
+    notifier.success(t("jsonViewer.longStringCopied"))
+  } catch (error) {
+    notifier.error(t("jsonViewer.longStringCopyFailed"), {
+      description: String(error),
+    })
+  }
+}
+
 function LongStringValue({
   value,
   search,
+  name,
 }: {
   value: string
   search: string | undefined
+  name: string | undefined
 }): React.JSX.Element {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
   const normalizedSearch = search?.trim().toLowerCase()
   const hasSearchMatch = normalizedSearch ? value.toLowerCase().includes(normalizedSearch) : false
   const preview = getLongStringPreview(value)
-
-  async function handleCopy(): Promise<void> {
-    try {
-      await copyText(value)
-      toast.success(t("common.copied"))
-    } catch (error) {
-      toast.error(t("common.copyFailed"), {
-        description: String(error),
-      })
-    }
-  }
+  const title = getLongStringTitle(name, t)
 
   return (
     <div className="space-y-2 rounded-md border bg-muted/15 p-2">
       <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-        <span>{t("jsonViewer.longStringLabel")}</span>
+        <span>{title}</span>
         <span>·</span>
         <span>
           {formatCount(value.length)} {t("jsonViewer.longStringChars")}
@@ -191,7 +208,7 @@ function LongStringValue({
           variant="ghost"
           size="sm"
           className="h-7 gap-1.5 px-2 text-[11px]"
-          onClick={() => void handleCopy()}
+          onClick={() => void copyLongStringValue(value, t)}
         >
           <CopyIcon className="size-3.5" />
           {t("jsonViewer.longStringCopy")}
@@ -201,7 +218,7 @@ function LongStringValue({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden p-0 sm:max-w-4xl">
           <DialogHeader className="border-b px-4 pt-4 pb-4 sm:px-6">
-            <DialogTitle>{t("jsonViewer.longStringLabel")}</DialogTitle>
+            <DialogTitle>{title}</DialogTitle>
             <DialogDescription>
               {formatCount(value.length)} {t("jsonViewer.longStringChars")}
             </DialogDescription>
@@ -209,7 +226,7 @@ function LongStringValue({
           <div className="min-h-0 flex-1 overflow-auto px-4 pb-4 sm:px-6 sm:pb-6">
             <div className="rounded-md border bg-muted/10 p-3">
               <div className="font-mono text-xs leading-5 whitespace-pre-wrap break-all">
-                {highlight(value, search)}
+                &quot;{highlight(value, search)}&quot;
               </div>
             </div>
           </div>

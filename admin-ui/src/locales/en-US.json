@@ -454,6 +454,8 @@
     "longStringChars": "chars",
     "longStringViewFull": "View full",
     "longStringCopy": "Copy",
+    "longStringCopied": "Long string copied",
+    "longStringCopyFailed": "Failed to copy long string",
     "longStringSearchMatch": "Search matches inside this long value"
   },
   "settingsPage": {

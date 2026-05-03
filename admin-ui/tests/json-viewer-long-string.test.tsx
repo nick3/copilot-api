@@ -1,9 +1,59 @@
-import { expect, test } from "bun:test"
+import { afterEach, beforeEach, expect, mock, test } from "bun:test"
 import { renderToStaticMarkup } from "react-dom/server"
 
-import "../src/lib/i18n"
+import { copyLongStringValue, JsonViewer } from "~/components/json/json-viewer"
+import { i18n } from "~/lib/i18n"
 
-import { JsonViewer } from "../src/components/json/json-viewer"
+const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator")
+const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document")
+
+let writeText = mock(async () => {})
+let successToasts: string[] = []
+let errorToasts: Array<{ message: string; options?: unknown }> = []
+
+function setGlobal(name: "navigator" | "document", value: unknown): void {
+  Object.defineProperty(globalThis, name, {
+    value,
+    configurable: true,
+    writable: true,
+  })
+}
+
+function createNotifier(): {
+  success: (message: string) => void
+  error: (message: string, options?: unknown) => void
+} {
+  return {
+    success: (message: string) => {
+      successToasts.push(message)
+    },
+    error: (message: string, options?: unknown) => {
+      errorToasts.push({ message, options })
+    },
+  }
+}
+
+function restoreGlobal(name: "navigator" | "document", descriptor?: PropertyDescriptor): void {
+  if (descriptor) {
+    Object.defineProperty(globalThis, name, descriptor)
+    return
+  }
+
+  Reflect.deleteProperty(globalThis, name)
+}
+
+beforeEach(() => {
+  writeText = mock(async () => {})
+  setGlobal("navigator", { clipboard: { writeText } })
+  setGlobal("document", undefined)
+  successToasts = []
+  errorToasts = []
+})
+
+afterEach(() => {
+  restoreGlobal("navigator", originalNavigator)
+  restoreGlobal("document", originalDocument)
+})
 
 test("JsonViewer summarizes very long string values", () => {
   const longValue = "lookup-key-".repeat(500)
@@ -24,6 +74,16 @@ test("JsonViewer summarizes very long string values", () => {
   expect(html).not.toContain(longValue)
 })
 
+test("JsonViewer includes the field name in long string context", () => {
+  const longValue = "lookup-key-".repeat(500)
+
+  const html = renderToStaticMarkup(
+    <JsonViewer value={{ responses_item_owner_lookup_keys_json: longValue }} />,
+  )
+
+  expect(html).toContain("Long string: responses_item_owner_lookup_keys_json")
+})
+
 test("JsonViewer keeps short string values inline", () => {
   const html = renderToStaticMarkup(
     <JsonViewer value={{ short_field: "short value" }} />,
@@ -42,4 +102,31 @@ test("JsonViewer shows a search match hint for summarized long strings", () => {
   )
 
   expect(html).toContain("Search matches inside this long value")
+})
+
+test("copyLongStringValue copies the full value and shows a JsonViewer success toast", async () => {
+  const longValue = "lookup-key-".repeat(500)
+
+  await copyLongStringValue(longValue, i18n.t, createNotifier())
+
+  expect(writeText).toHaveBeenCalledWith(longValue)
+  expect(successToasts).toEqual(["Long string copied"])
+  expect(errorToasts).toEqual([])
+})
+
+test("copyLongStringValue shows a JsonViewer failure toast when copying fails", async () => {
+  writeText = mock(async () => {
+    throw new Error("Clipboard blocked")
+  })
+  setGlobal("navigator", { clipboard: { writeText } })
+
+  await copyLongStringValue("lookup-key-", i18n.t, createNotifier())
+
+  expect(writeText).toHaveBeenCalledWith("lookup-key-")
+  expect(successToasts).toEqual([])
+  expect(errorToasts).toHaveLength(1)
+  expect(errorToasts[0]?.message).toBe("Failed to copy long string")
+  expect(String((errorToasts[0]?.options as { description?: string }).description)).toContain(
+    "Clipboard blocked",
+  )
 })

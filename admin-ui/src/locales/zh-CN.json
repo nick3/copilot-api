@@ -454,6 +454,8 @@
     "longStringChars": "个字符",
     "longStringViewFull": "查看完整",
     "longStringCopy": "复制",
+    "longStringCopied": "已复制长字符串",
+    "longStringCopyFailed": "复制长字符串失败",
     "longStringSearchMatch": "搜索命中该长值内部内容"
   },
   "settingsPage": {
