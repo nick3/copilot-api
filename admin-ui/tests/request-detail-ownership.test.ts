@@ -65,3 +65,21 @@ test("buildRequestDetailResponsesItemOwnerRows uses placeholder metadata for emp
     },
   ])
 })
+
+test("buildRequestDetailResponsesItemOwnerRows preserves raw fallback text while normalizing preview lines", () => {
+  const raw = "  key-a  \n\n key-b "
+
+  const rows = buildRequestDetailResponsesItemOwnerRows({
+    responses_item_owner_lookup_keys_json: raw,
+  })
+
+  expect(rows[0]?.value).toEqual({
+    raw,
+    lines: ["key-a", "key-b"],
+    count: 2,
+    charCount: 18,
+    previewLines: ["key-a", "key-b"],
+    hiddenCount: 0,
+    empty: false,
+  })
+})
