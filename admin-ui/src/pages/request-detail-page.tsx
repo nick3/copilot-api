@@ -1,6 +1,8 @@
 import {
   ArrowLeftIcon,
+  CopyIcon,
   DownloadIcon,
+  EyeIcon,
   LoaderCircleIcon,
   PlayIcon,
   RefreshCwIcon,
@@ -16,13 +18,26 @@ import {
   getAdminRequestDetail,
   getDevMode,
 } from "@/lib/admin-api"
+import { copyText as writeClipboardText } from "@/lib/clipboard"
 import { fmtDurationSeconds, fmtLocalDateTime, fmtNum } from "@/lib/format"
 import { i18n } from "@/lib/i18n"
-import { buildRequestDetailResponsesItemOwnerRows } from "@/lib/request-detail-ownership"
+import {
+  buildRequestDetailResponsesItemOwnerRows,
+  type RequestDetailResponsesItemOwnerRow,
+} from "@/lib/request-detail-ownership"
+import { cn } from "@/lib/utils"
 import { JsonViewer } from "@/components/json/json-viewer"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { InlineAlert } from "@/components/ui/inline-alert"
 import {
   Card,
   CardContent,
@@ -30,7 +45,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { InlineAlert } from "@/components/ui/inline-alert"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
@@ -146,6 +167,234 @@ function FieldLabel({
   )
 }
 
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => {
+    return typeof window !== "undefined" ? window.matchMedia(query).matches : true
+  })
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined
+    }
+
+    const mediaQuery = window.matchMedia(query)
+    const update = () => setMatches(mediaQuery.matches)
+
+    update()
+    mediaQuery.addEventListener("change", update)
+
+    return () => mediaQuery.removeEventListener("change", update)
+  }, [query])
+
+  return matches
+}
+
+function OwnerKeysSummaryValue({
+  row,
+  onView,
+  onCopy,
+  onDownload,
+}: {
+  row: RequestDetailResponsesItemOwnerRow
+  onView: () => void
+  onCopy: () => void
+  onDownload: () => void
+}): React.JSX.Element {
+  const { t } = useTranslation()
+
+  if (row.value.empty) {
+    return <>{row.value.raw}</>
+  }
+
+  return (
+    <div className="space-y-2 py-0.5">
+      <div className="font-sans text-[11px] text-muted-foreground">
+        {t("requestDetailPage.ownerKeys.summary", {
+          keyCount: fmtNum(row.value.count),
+          charCount: fmtNum(row.value.charCount),
+        })}
+      </div>
+
+      <div className="rounded-md border bg-muted/15 p-2">
+        <div className="font-mono text-[11px] leading-5 whitespace-pre-wrap break-all">
+          {row.value.previewLines.join("\n")}
+        </div>
+        {row.value.hiddenCount > 0 ? (
+          <div className="mt-2 font-sans text-[11px] text-muted-foreground">
+            {t("requestDetailPage.ownerKeys.morePreview", {
+              hiddenCount: fmtNum(row.value.hiddenCount),
+            })}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="flex flex-wrap gap-2 font-sans">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1.5 px-2 text-[11px]"
+          onClick={onView}
+        >
+          <EyeIcon className="size-3.5" />
+          {t("requestDetailPage.ownerKeys.viewAll")}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1.5 px-2 text-[11px]"
+          onClick={onCopy}
+        >
+          <CopyIcon className="size-3.5" />
+          {t("common.copy")}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1.5 px-2 text-[11px]"
+          onClick={onDownload}
+        >
+          <DownloadIcon className="size-3.5" />
+          {t("common.download")}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function OwnerKeysViewer({
+  row,
+  open,
+  isDesktop,
+  onOpenChange,
+  onCopy,
+  onDownload,
+}: {
+  row: RequestDetailResponsesItemOwnerRow | null
+  open: boolean
+  isDesktop: boolean
+  onOpenChange: (open: boolean) => void
+  onCopy: () => void
+  onDownload: () => void
+}): React.JSX.Element | null {
+  const { t } = useTranslation()
+  const [filter, setFilter] = useState("")
+  const [wrapLines, setWrapLines] = useState(true)
+
+  if (!row || row.value.empty) {
+    return null
+  }
+
+  const normalizedFilter = filter.trim().toLowerCase()
+  const filteredLines = normalizedFilter
+    ? row.value.lines.filter((line) =>
+        line.toLowerCase().includes(normalizedFilter),
+      )
+    : row.value.lines
+  const title = t(row.labelKey)
+  const description = t("requestDetailPage.ownerKeys.viewerDescription")
+
+  const viewerBody = (
+    <div className="flex min-h-0 flex-1 flex-col gap-3 px-4 pb-4 sm:px-6 sm:pb-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Input
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+          placeholder={t("requestDetailPage.ownerKeys.searchPlaceholder")}
+          aria-label={t("requestDetailPage.ownerKeys.searchPlaceholder")}
+          className="h-8 sm:max-w-sm"
+        />
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            aria-pressed={wrapLines}
+            onClick={() => setWrapLines((value) => !value)}
+          >
+            {wrapLines ?
+              t("requestDetailPage.ownerKeys.preserveLineBreaks")
+            : t("requestDetailPage.ownerKeys.wrapLines")}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={onCopy}
+          >
+            <CopyIcon className="size-3.5" />
+            {t("requestDetailPage.ownerKeys.copyAll")}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={onDownload}
+          >
+            <DownloadIcon className="size-3.5" />
+            {t("requestDetailPage.ownerKeys.downloadAll")}
+          </Button>
+        </div>
+      </div>
+
+      <div className="text-xs text-muted-foreground">
+        {t("requestDetailPage.ownerKeys.viewerStats", {
+          shownCount: fmtNum(filteredLines.length),
+          totalCount: fmtNum(row.value.count),
+          charCount: fmtNum(row.value.charCount),
+        })}
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto rounded-md border bg-muted/10 p-3">
+        {filteredLines.length > 0 ? (
+          <div
+            className={cn(
+              "font-mono text-xs leading-5",
+              wrapLines ?
+                "whitespace-pre-wrap break-all"
+              : "overflow-x-auto whitespace-pre",
+            )}
+          >
+            {filteredLines.join("\n")}
+          </div>
+        ) : (
+          <div className="flex h-full min-h-24 items-center justify-center text-sm text-muted-foreground">
+            {t("requestDetailPage.ownerKeys.noMatches")}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+
+  if (isDesktop) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden p-0 sm:max-w-4xl">
+          <DialogHeader className="border-b px-4 pt-4 pb-4 sm:px-6">
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>{description}</DialogDescription>
+          </DialogHeader>
+          {viewerBody}
+        </DialogContent>
+      </Dialog>
+    )
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="bottom"
+        className="flex h-[85vh] flex-col gap-0 rounded-t-xl p-0"
+      >
+        <SheetHeader className="border-b px-4 py-4 text-left">
+          <SheetTitle>{title}</SheetTitle>
+          <SheetDescription>{description}</SheetDescription>
+        </SheetHeader>
+        {viewerBody}
+      </SheetContent>
+    </Sheet>
+  )
+}
+
 /* ------------------------------------------------------------------ */
 /*  Main Component                                                    */
 /* ------------------------------------------------------------------ */
@@ -166,6 +415,14 @@ export function RequestDetailPage(): React.JSX.Element {
   const [search, setSearch] = useState("")
   const [devModeEnabled, setDevModeEnabled] = useState(false)
   const [hasOutbound, setHasOutbound] = useState(false)
+  const [activeOwnerKeysRowId, setActiveOwnerKeysRowId] = useState<
+    RequestDetailResponsesItemOwnerRow["id"] | null
+  >(null)
+  const isDesktop = useMediaQuery("(min-width: 640px)")
+
+  useEffect(() => {
+    setActiveOwnerKeysRowId(null)
+  }, [requestId])
 
   useEffect(() => {
     let cancelled = false
@@ -242,13 +499,13 @@ export function RequestDetailPage(): React.JSX.Element {
       .finally(() => setLoading(false))
   }
 
-  async function copyRaw(): Promise<void> {
-    if (!item) return
-
+  async function copyText(
+    value: string,
+    successMessage: string,
+  ): Promise<void> {
     try {
-      const raw = JSON.stringify(item, null, 2)
-      await navigator.clipboard.writeText(raw)
-      toast.success(t("requestDetailPage.toast.copiedJson"))
+      await writeClipboardText(value)
+      toast.success(successMessage)
     } catch (err) {
       toast.error(t("requestDetailPage.toast.copyFailed"), {
         description: String(err),
@@ -256,26 +513,65 @@ export function RequestDetailPage(): React.JSX.Element {
     }
   }
 
-  function downloadRaw(): void {
-    if (!item) return
-
+  function downloadText(
+    value: string,
+    fileName: string,
+    mimeType: string,
+    successMessage: string,
+  ): void {
     try {
-      const raw = JSON.stringify(item, null, 2)
-      const blob = new Blob([raw], { type: "application/json" })
+      const blob = new Blob([value], { type: mimeType })
       const url = URL.createObjectURL(blob)
 
-      const a = document.createElement("a")
-      a.href = url
-      a.download = `${item.request_id}.json`
-      a.click()
+      const anchor = document.createElement("a")
+      anchor.href = url
+      anchor.download = fileName
+      anchor.click()
 
       URL.revokeObjectURL(url)
-      toast.success(t("requestDetailPage.toast.downloadedJson"))
+      toast.success(successMessage)
     } catch (err) {
       toast.error(t("requestDetailPage.toast.downloadFailed"), {
         description: String(err),
       })
     }
+  }
+
+  async function copyRaw(): Promise<void> {
+    if (!item) return
+
+    await copyText(
+      JSON.stringify(item, null, 2),
+      t("requestDetailPage.toast.copiedJson"),
+    )
+  }
+
+  function downloadRaw(): void {
+    if (!item) return
+
+    downloadText(
+      JSON.stringify(item, null, 2),
+      `${item.request_id}.json`,
+      "application/json",
+      t("requestDetailPage.toast.downloadedJson"),
+    )
+  }
+
+  async function copyOwnerKeys(row: RequestDetailResponsesItemOwnerRow): Promise<void> {
+    if (row.value.empty) return
+
+    await copyText(row.value.raw, t("requestDetailPage.toast.copiedText"))
+  }
+
+  function downloadOwnerKeys(row: RequestDetailResponsesItemOwnerRow): void {
+    if (row.value.empty) return
+
+    downloadText(
+      row.value.raw,
+      `${requestId}-${row.id}-owner-keys.txt`,
+      "text/plain;charset=utf-8",
+      t("requestDetailPage.toast.downloadedText"),
+    )
   }
 
   /* Loading state */
@@ -339,6 +635,9 @@ export function RequestDetailPage(): React.JSX.Element {
   }
 
   const quota = getQuotaLabel(item)
+  const ownerKeyRows = buildRequestDetailResponsesItemOwnerRows(item)
+  const activeOwnerKeysRow =
+    ownerKeyRows.find((row) => row.id === activeOwnerKeysRowId) ?? null
 
   return (
     <div className="space-y-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-300">
@@ -525,7 +824,7 @@ export function RequestDetailPage(): React.JSX.Element {
                     </TableCell>
                   </TableRow>
                 ) : null}
-                {buildRequestDetailResponsesItemOwnerRows(item).map((row) => (
+                {ownerKeyRows.map((row) => (
                   <TableRow key={row.labelKey}>
                     <TableCell className="text-muted-foreground">
                       <FieldLabel
@@ -533,8 +832,13 @@ export function RequestDetailPage(): React.JSX.Element {
                         tooltip={t(row.tooltipKey)}
                       />
                     </TableCell>
-                    <TableCell className="font-mono text-xs whitespace-pre-wrap break-words">
-                      {row.value}
+                    <TableCell className="font-mono text-xs">
+                      <OwnerKeysSummaryValue
+                        row={row}
+                        onView={() => setActiveOwnerKeysRowId(row.id)}
+                        onCopy={() => void copyOwnerKeys(row)}
+                        onDownload={() => downloadOwnerKeys(row)}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -821,6 +1125,28 @@ export function RequestDetailPage(): React.JSX.Element {
           </CardContent>
         </Card>
       </div>
+
+      <OwnerKeysViewer
+        key={activeOwnerKeysRow?.id ?? "closed"}
+        row={activeOwnerKeysRow}
+        open={activeOwnerKeysRow !== null}
+        isDesktop={isDesktop}
+        onOpenChange={(open) => {
+          if (!open) {
+            setActiveOwnerKeysRowId(null)
+          }
+        }}
+        onCopy={() => {
+          if (activeOwnerKeysRow) {
+            void copyOwnerKeys(activeOwnerKeysRow)
+          }
+        }}
+        onDownload={() => {
+          if (activeOwnerKeysRow) {
+            downloadOwnerKeys(activeOwnerKeysRow)
+          }
+        }}
+      />
     </div>
   )
 }

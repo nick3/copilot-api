@@ -279,8 +279,10 @@
     "searchPlaceholder": "搜索键或值…",
     "toast": {
       "copiedJson": "已复制 JSON",
+      "copiedText": "已复制文本",
       "copyFailed": "复制失败",
       "downloadedJson": "已下载 JSON",
+      "downloadedText": "已下载文本",
       "downloadFailed": "下载失败"
     },
     "sections": {
@@ -358,6 +360,19 @@
       "before": "之前",
       "after": "之后",
       "diff": "变化"
+    },
+    "ownerKeys": {
+      "summary": "{{keyCount}} 条键 · {{charCount}} 个字符",
+      "morePreview": "另有 {{hiddenCount}} 条未展开",
+      "viewAll": "查看全部",
+      "viewerDescription": "完整的 Responses Item Owner 键列表，支持搜索、复制和下载。",
+      "searchPlaceholder": "过滤键…",
+      "wrapLines": "自动换行",
+      "preserveLineBreaks": "保留原样",
+      "copyAll": "复制全部",
+      "downloadAll": "下载全部",
+      "viewerStats": "显示 {{shownCount}} / {{totalCount}} 条 · {{charCount}} 个字符",
+      "noMatches": "没有匹配的键。"
     },
     "replay": {
       "button": "重放",

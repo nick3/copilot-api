@@ -279,8 +279,10 @@
     "searchPlaceholder": "Search key or value…",
     "toast": {
       "copiedJson": "Copied JSON",
+      "copiedText": "Copied text",
       "copyFailed": "Copy failed",
       "downloadedJson": "Downloaded JSON",
+      "downloadedText": "Downloaded text",
       "downloadFailed": "Download failed"
     },
     "sections": {
@@ -358,6 +360,19 @@
       "before": "Before",
       "after": "After",
       "diff": "Change"
+    },
+    "ownerKeys": {
+      "summary": "{{keyCount}} keys · {{charCount}} chars",
+      "morePreview": "{{hiddenCount}} more hidden",
+      "viewAll": "View all",
+      "viewerDescription": "Full Responses Item Owner key list with search, copy, and download controls.",
+      "searchPlaceholder": "Filter keys…",
+      "wrapLines": "Wrap lines",
+      "preserveLineBreaks": "Preserve layout",
+      "copyAll": "Copy all",
+      "downloadAll": "Download all",
+      "viewerStats": "Showing {{shownCount}} / {{totalCount}} keys · {{charCount}} chars",
+      "noMatches": "No matching keys."
     },
     "replay": {
       "button": "Replay",
