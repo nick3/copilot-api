@@ -449,7 +449,15 @@
     "collapseAll": "Collapse all",
     "statusCollapsed": "collapsed",
     "statusExpanded": "expanded",
-    "statusDepth": "depth<{{depth}}"
+    "statusDepth": "depth<{{depth}}",
+    "longStringLabel": "Long string",
+    "longStringLabelWithName": "Long string: {{name}}",
+    "longStringChars": "chars",
+    "longStringViewFull": "View full",
+    "longStringCopy": "Copy",
+    "longStringCopied": "Long string copied",
+    "longStringCopyFailed": "Failed to copy long string",
+    "longStringSearchMatch": "Search matches inside this long value"
   },
   "settingsPage": {
     "subtitle": "Manage server configuration and feature flags.",
