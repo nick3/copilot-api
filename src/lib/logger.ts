@@ -5,6 +5,7 @@ import util from "node:util"
 
 import { getLogLevel, type LogLevel } from "./config"
 import { PATHS } from "./paths"
+import { registerProcessCleanup } from "./process-cleanup"
 import { requestContext } from "./request-context"
 
 const LOG_RETENTION_DAYS = 7
@@ -31,11 +32,6 @@ const logBuffers = new Map<string, Array<string>>()
 let runtimeInitialized = false
 let flushInterval: ReturnType<typeof setInterval> | undefined
 let cleanupInterval: ReturnType<typeof setInterval> | undefined
-
-// Stored so tests can remove them during teardown
-let exitHandler: (() => void) | undefined
-let sigintHandler: (() => void) | undefined
-let sigtermHandler: (() => void) | undefined
 
 const ensureLogDirectory = () => {
   if (!fs.existsSync(logDir)) {
@@ -162,19 +158,7 @@ const initializeLoggerRuntime = () => {
   cleanupInterval = setInterval(cleanupOldLogs, CLEANUP_INTERVAL_MS)
   maybeUnref(cleanupInterval)
 
-  exitHandler = cleanup
-  sigintHandler = () => {
-    cleanup()
-    process.exit(0)
-  }
-  sigtermHandler = () => {
-    cleanup()
-    process.exit(0)
-  }
-
-  process.once("exit", exitHandler)
-  process.once("SIGINT", sigintHandler)
-  process.once("SIGTERM", sigtermHandler)
+  registerProcessCleanup(cleanup)
 }
 
 const getLogStream = (filePath: string): fs.WriteStream => {
@@ -254,19 +238,6 @@ export const resetLoggerRuntimeForTests = (
   }
   logStreams.clear()
   logBuffers.clear()
-
-  if (exitHandler) {
-    process.off("exit", exitHandler)
-    exitHandler = undefined
-  }
-  if (sigintHandler) {
-    process.off("SIGINT", sigintHandler)
-    sigintHandler = undefined
-  }
-  if (sigtermHandler) {
-    process.off("SIGTERM", sigtermHandler)
-    sigtermHandler = undefined
-  }
 
   runtimeInitialized = false
   logDir = overrideLogDir ?? path.join(PATHS.APP_DIR, "logs")

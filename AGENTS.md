@@ -23,7 +23,7 @@ It is a fork of `caozhiyuan/copilot-api`, created because the original repositor
 - **Dev admin:**  
   `bun run dev:admin`
 - **Lint:**  
-  `bun run lint` (root project, excludes `admin-ui`, uses `@echristian/eslint-config`)
+  `bun run lint` (root project, excludes `admin-ui`, uses the local flat config in `eslint.config.js`)
 - **Lint admin:**  
   `bun run lint:admin`
 - **Lint & Fix staged files:**  
@@ -58,7 +58,7 @@ It is a fork of `caozhiyuan/copilot-api`, created because the original repositor
 - **Testing:**  
    Use Bun's built-in test runner. Place tests in `tests/`, name as `*.test.ts`.
 - **Linting:**  
-  Uses `@echristian/eslint-config` (see npm for details). Includes stylistic, unused imports, regex, and package.json rules.
+  Uses the local flat config in `eslint.config.js`. Includes JavaScript recommended rules, TypeScript recommended type-checked rules, unused import cleanup, and Prettier.
 - **Paths:**  
   Use path aliases (`~/*`) for imports from `src/`.
 

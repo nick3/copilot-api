@@ -29,6 +29,7 @@ import {
 } from "~/lib/handler-utils"
 import { createHandlerLogger, debugJson } from "~/lib/logger"
 import { findEndpointModel } from "~/lib/models"
+import { parseProviderModelAlias } from "~/lib/provider-model"
 import { checkRateLimit } from "~/lib/rate-limit"
 import {
   extractResponsesUsageFromResult,
@@ -54,6 +55,12 @@ import {
   extractResponsesResultOwnerKeys,
   extractResponsesStreamEventOwnerKeys,
 } from "~/routes/messages/responses-item-ownership"
+import {
+  handleProviderMessagesForProvider,
+  type ProviderMessagesInstrumentation,
+  type ProviderStreamError,
+  type UsageTokens,
+} from "~/routes/provider/messages/handler"
 import {
   buildErrorEvent,
   createResponsesStreamState,
@@ -168,8 +175,149 @@ type InstrumentationContext = {
   premiumUnlimitedBefore?: boolean
 }
 
+function normalizeProviderAliasUsage(usage: UsageTokens): NormalizedUsage {
+  const tokensInput =
+    usage.inputTokens === undefined ? undefined : Math.max(0, usage.inputTokens)
+  const tokensCachedInput = usage.cacheReadInputTokens
+  const tokensTotal =
+    usage.inputTokens === undefined && usage.outputTokens === undefined ?
+      undefined
+    : (tokensInput ?? 0)
+      + (usage.outputTokens ?? 0)
+      + (usage.cacheCreationInputTokens ?? 0)
+      + (tokensCachedInput ?? 0)
+
+  return {
+    tokensCachedInput,
+    tokensInput,
+    tokensOutput: usage.outputTokens,
+    tokensTotal,
+    usageJson: JSON.stringify({
+      input_tokens: usage.inputTokens,
+      output_tokens: usage.outputTokens,
+      cache_creation_input_tokens: usage.cacheCreationInputTokens,
+      cache_read_input_tokens: usage.cacheReadInputTokens,
+    }),
+  }
+}
+
+async function handleProviderAliasCompletion(
+  c: Context,
+  options: {
+    payload: AnthropicMessagesPayload
+    provider: string
+    providerModel: string
+  },
+): Promise<Response> {
+  const { payload, provider, providerModel } = options
+  const requestId = randomUUID()
+  const startedAtMs = Date.now()
+  const method = c.req.raw.method
+  const path = new URL(c.req.url, "http://local").pathname
+  const { ip: clientIp, source: clientIpSource } = getClientIpInfo(c)
+  const userAgent = c.req.header("user-agent") ?? undefined
+  const streamRequested = Boolean(payload.stream)
+  const originalModel = payload.model
+  const rawUserId = payload.metadata?.user_id
+  const userId = typeof rawUserId === "string" ? rawUserId : undefined
+  const { safetyIdentifier, sessionId: promptCacheKey } =
+    parseUserIdMetadata(userId)
+  const markerInspection = inspectSubagentMarkerFromFirstUser(payload)
+  const isSubagent = markerInspection.kind === "valid"
+
+  let requestRecorded = false
+  const insertProviderAliasLog = (
+    record: Omit<
+      RequestLogInsert,
+      | "requestId"
+      | "startedAtMs"
+      | "method"
+      | "path"
+      | "clientIp"
+      | "clientIpSource"
+      | "userAgent"
+      | "userId"
+      | "safetyIdentifier"
+      | "promptCacheKey"
+      | "isSubagent"
+      | "clientModel"
+      | "upstreamEndpoint"
+      | "stream"
+      | "upstreamModel"
+    >,
+  ): void => {
+    if (requestRecorded) {
+      logger.warn("provider alias request already recorded", { requestId })
+      return
+    }
+    requestRecorded = true
+    const finishedAtMs = Date.now()
+    getRequestHistoryStore().insert({
+      requestId,
+      startedAtMs,
+      finishedAtMs,
+      durationMs: finishedAtMs - startedAtMs,
+      method,
+      path,
+      clientIp,
+      clientIpSource,
+      userAgent,
+      userId,
+      safetyIdentifier: safetyIdentifier ?? undefined,
+      promptCacheKey: promptCacheKey ?? undefined,
+      isSubagent,
+      clientModel: originalModel,
+      upstreamEndpoint: `/providers/${provider}/messages`,
+      stream: streamRequested,
+      upstreamModel: providerModel,
+      ...record,
+    })
+  }
+  const instrumentation: ProviderMessagesInstrumentation = {
+    onComplete: (usage: UsageTokens) => {
+      insertProviderAliasLog({
+        ...normalizeProviderAliasUsage(usage),
+        httpStatus: 200,
+      })
+    },
+    onError: (error: ProviderStreamError) => {
+      insertProviderAliasLog({
+        httpStatus: error.httpStatus,
+        errorName: error.errorName,
+        errorStatus: error.errorStatus,
+        errorMessage: error.errorMessage,
+        upstreamErrorMessageRaw: error.upstreamErrorMessageRaw,
+      })
+    },
+  }
+
+  payload.model = providerModel
+
+  try {
+    return await handleProviderMessagesForProvider(c, {
+      instrumentation,
+      payload,
+      provider,
+    })
+  } catch (error) {
+    const observableError = await extractErrorObservability(error)
+    instrumentation.onError?.(observableError)
+    throw error
+  }
+}
+
 // eslint-disable-next-line max-lines-per-function, complexity
 export async function handleCompletion(c: Context) {
+  const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
+  const providerModelAlias = parseProviderModelAlias(anthropicPayload.model)
+  if (providerModelAlias) {
+    return await handleProviderAliasCompletion(c, {
+      payload: anthropicPayload,
+      provider: providerModelAlias.provider,
+      providerModel: providerModelAlias.model,
+    })
+  }
+
   await checkRateLimit(state)
   const store = getRequestHistoryStore()
   const requestId = randomUUID()
@@ -178,7 +326,6 @@ export async function handleCompletion(c: Context) {
   const path = new URL(c.req.url, "http://local").pathname
   const { ip: clientIp, source: clientIpSource } = getClientIpInfo(c)
   const userAgent = c.req.header("user-agent") ?? undefined
-  const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
   sanitizeIdeTools(anthropicPayload)
   debugJson(logger, "Anthropic request payload:", anthropicPayload)
 
@@ -1404,10 +1551,13 @@ async function handleMessagesNonStreaming(params: {
 }
 
 const parseMessagesStreamUsage = (data: string): NormalizedUsage | null => {
-  if (!data) return null
+  if (!data || data === "[DONE]") return null
 
   try {
     const parsed = JSON.parse(data) as AnthropicStreamEventData
+    if (parsed.type === "error") {
+      throw new Error(parsed.error.message)
+    }
     if (parsed.type !== "message_delta" || !parsed.usage) {
       return null
     }
@@ -1415,7 +1565,7 @@ const parseMessagesStreamUsage = (data: string): NormalizedUsage | null => {
     return normalizeMessagesUsage(parsed.usage)
   } catch (error) {
     logger.warn("Failed to parse messages stream event", error)
-    return null
+    throw new Error("Failed to parse messages stream event", { cause: error })
   }
 }
 

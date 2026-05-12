@@ -647,8 +647,9 @@ test("cleanupStatsRetention removes old stats", () => {
   const store = new StatsStore(db)
 
   // Insert a row with an old date
-  const oldDate = new Date("2025-01-01T10:00:00").getTime()
-  const recentDate = new Date("2026-04-10T10:00:00").getTime()
+  const now = Date.now()
+  const oldDate = now - 60 * 24 * 60 * 60 * 1000
+  const recentDate = now - 7 * 24 * 60 * 60 * 1000
 
   store.upsertDailyStats({
     startedAtMs: oldDate,
@@ -694,12 +695,13 @@ test("cleanupStatsRetention preserves baseline snapshot per account", () => {
   initAdminDb(db)
   const store = new StatsStore(db)
 
+  const now = Date.now()
   // Very old snapshot (should be deleted)
-  const veryOld = new Date("2024-01-01T10:00:00").getTime()
+  const veryOld = now - 90 * 24 * 60 * 60 * 1000
   // Old snapshot but latest before cutoff (should be PRESERVED as baseline)
-  const oldLatest = new Date("2025-01-01T10:00:00").getTime()
+  const oldLatest = now - 60 * 24 * 60 * 60 * 1000
   // Recent snapshot (should be preserved)
-  const recent = new Date("2026-04-10T10:00:00").getTime()
+  const recent = now - 7 * 24 * 60 * 60 * 1000
 
   store.insertQuotaSnapshot({
     accountId: "acct-a",

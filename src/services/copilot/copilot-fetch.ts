@@ -6,11 +6,13 @@ import {
   isCaptureOtherEnabled,
 } from "~/lib/dev-mode"
 import { getRequestOutboundStore } from "~/lib/request-outbound"
+import { requestContext } from "~/lib/request-context"
 
 export type CopilotFetchCtx = {
   requestId?: string
   capturable?: boolean
   callSite: string
+  fetchImpl?: typeof fetch
 }
 
 const pendingCaptures = new Map<string, PersistInput>()
@@ -123,7 +125,9 @@ export async function copilotFetch(
     ...snapshotBody(init),
   }
 
-  const response = await fetch(input, init)
+  const fetchImpl =
+    ctx.fetchImpl ?? requestContext.getStore()?.fetchImpl ?? fetch
+  const response = await fetchImpl(input, init)
 
   const shouldCapture =
     ctx.requestId !== undefined

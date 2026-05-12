@@ -223,6 +223,7 @@ export const createMessages = async (
     sessionId?: string
     compactType?: CompactType
     requestId?: string
+    fetchImpl?: typeof fetch
   },
 ): Promise<CreateMessagesReturn> => {
   const ctx = account ?? accountFromState()
@@ -250,6 +251,7 @@ export const createMessages = async (
     {
       requestId: options?.requestId,
       callSite: "messages",
+      fetchImpl: options?.fetchImpl,
     },
   )
 

@@ -1,3 +1,4 @@
+import type { ToolContentSupportType } from "~/lib/config"
 import type { Model } from "~/services/copilot/get-models"
 
 import { getAvailableModels } from "~/lib/models"
@@ -14,6 +15,7 @@ import {
 import {
   type AnthropicAssistantContentBlock,
   type AnthropicAssistantMessage,
+  type AnthropicDocumentBlock,
   type AnthropicMessagesPayload,
   type AnthropicResponse,
   type AnthropicTextBlock,
@@ -29,6 +31,33 @@ import { mapOpenAIStopReasonToAnthropic } from "./utils"
 
 // Compatible with opencode, it will filter out blocks where the thinking text is empty, so we need add a default thinking text
 export const THINKING_TEXT = "Thinking..."
+export const RICH_TOOL_RESULT_MOVED_TEXT =
+  "Rich tool result content was moved to a user message because this upstream does not support it in tool messages."
+const COPILOT_TOOL_CONTENT_SUPPORT_TYPE: Array<ToolContentSupportType> = [
+  "array",
+  "image",
+]
+
+interface TranslationCapabilities {
+  supportPdf: boolean
+  toolContentSupportType: Array<ToolContentSupportType>
+}
+
+interface ToolContentSupport {
+  array: boolean
+  image: boolean
+  pdf: boolean
+}
+
+interface ToolResultMessages {
+  movedUserMessage?: Message
+  toolMessage: Message
+}
+
+interface TranslateToOpenAIOptions {
+  supportPdf?: boolean
+  toolContentSupportType?: Array<ToolContentSupportType>
+}
 
 type MappableContentBlock =
   | AnthropicUserContentBlock
@@ -38,16 +67,22 @@ type MappableContentBlock =
 // Payload translation
 export function translateToOpenAI(
   payload: AnthropicMessagesPayload,
+  options: TranslateToOpenAIOptions = {},
 ): ChatCompletionsPayload {
   const modelId = payload.model
   const model = getAvailableModels().find((m) => m.id === modelId)
   const thinkingBudget = getThinkingBudget(payload, model)
+  const capabilities = {
+    supportPdf: options.supportPdf ?? false,
+    toolContentSupportType:
+      options.toolContentSupportType ?? COPILOT_TOOL_CONTENT_SUPPORT_TYPE,
+  }
   return {
     model: modelId,
     messages: translateAnthropicMessagesToOpenAI(
       payload,
       modelId,
-      thinkingBudget,
+      capabilities,
     ),
     max_tokens: payload.max_tokens,
     stop: payload.stop_sequences,
@@ -86,13 +121,13 @@ function getThinkingBudget(
 function translateAnthropicMessagesToOpenAI(
   payload: AnthropicMessagesPayload,
   modelId: string,
-  _thinkingBudget: number | undefined,
+  capabilities: TranslationCapabilities,
 ): Array<Message> {
   const systemMessages = handleSystemPrompt(payload.system)
   const otherMessages = payload.messages.flatMap((message) =>
     message.role === "user" ?
-      handleUserMessage(message)
-    : handleAssistantMessage(message, modelId),
+      handleUserMessage(message, capabilities)
+    : handleAssistantMessage(message, modelId, capabilities),
   )
   return [...systemMessages, ...otherMessages]
 }
@@ -116,7 +151,10 @@ function handleSystemPrompt(
   }
 }
 
-function handleUserMessage(message: AnthropicUserMessage): Array<Message> {
+function handleUserMessage(
+  message: AnthropicUserMessage,
+  capabilities: TranslationCapabilities,
+): Array<Message> {
   const newMessages: Array<Message> = []
 
   if (Array.isArray(message.content)) {
@@ -129,18 +167,22 @@ function handleUserMessage(message: AnthropicUserMessage): Array<Message> {
     )
 
     // Tool results must come first to maintain protocol: tool_use -> tool_result -> user
+    const movedToolResultUserMessages: Array<Message> = []
     for (const block of toolResultBlocks) {
-      newMessages.push({
-        role: "tool",
-        tool_call_id: block.tool_use_id,
-        content: mapContent(block.content),
-      })
+      const result = handleToolResultBlock(block, capabilities)
+      newMessages.push(result.toolMessage)
+      if (result.movedUserMessage) {
+        movedToolResultUserMessages.push(result.movedUserMessage)
+      }
     }
+    newMessages.push(...movedToolResultUserMessages)
 
     if (otherBlocks.length > 0) {
       newMessages.push({
         role: "user",
-        content: mapContent(otherBlocks),
+        content: mapContent(otherBlocks, {
+          supportPdf: capabilities.supportPdf,
+        }),
       })
     }
   } else {
@@ -153,9 +195,123 @@ function handleUserMessage(message: AnthropicUserMessage): Array<Message> {
   return newMessages
 }
 
+function handleToolResultBlock(
+  block: AnthropicToolResultBlock,
+  capabilities: TranslationCapabilities,
+): ToolResultMessages {
+  if (typeof block.content === "string") {
+    return {
+      toolMessage: createToolMessage(block.tool_use_id, block.content),
+    }
+  }
+
+  if (!Array.isArray(block.content)) {
+    return {
+      toolMessage: createToolMessage(block.tool_use_id, ""),
+    }
+  }
+
+  const support = getToolContentSupport(capabilities)
+  const hasImage = block.content.some((block) => block.type === "image")
+  const hasDocument = block.content.some((block) => block.type === "document")
+  const content = mapContent(block.content, {
+    supportPdf: capabilities.supportPdf,
+  })
+
+  const hasPdfFile = hasDocument && capabilities.supportPdf
+  const shouldMoveImageToUserMessage = hasImage && !support.image
+  const shouldMovePdfToUserMessage = hasPdfFile && !support.pdf
+  if (shouldMoveImageToUserMessage || shouldMovePdfToUserMessage) {
+    return {
+      movedUserMessage: createToolResultUserMessage(
+        block,
+        capabilities.supportPdf,
+      ),
+      toolMessage: createToolMessage(
+        block.tool_use_id,
+        getTextToolContent(content) || RICH_TOOL_RESULT_MOVED_TEXT,
+      ),
+    }
+  }
+
+  const hasRichContent = hasImage || hasPdfFile
+  if (support.array || hasRichContent) {
+    return {
+      toolMessage: createToolMessage(block.tool_use_id, content),
+    }
+  }
+
+  return {
+    toolMessage: createToolMessage(
+      block.tool_use_id,
+      getTextToolContent(content),
+    ),
+  }
+}
+
+function getTextToolContent(content: Message["content"]): string {
+  if (!Array.isArray(content)) {
+    return content ?? ""
+  }
+
+  return content
+    .flatMap((part) =>
+      part.type === "text" && part.text.length > 0 ? [part.text] : [],
+    )
+    .join("\n")
+}
+
+function getToolContentSupport(
+  capabilities: TranslationCapabilities,
+): ToolContentSupport {
+  return {
+    array: capabilities.toolContentSupportType.includes("array"),
+    image: capabilities.toolContentSupportType.includes("image"),
+    pdf:
+      capabilities.supportPdf
+      && capabilities.toolContentSupportType.includes("pdf"),
+  }
+}
+
+function createToolMessage(
+  toolCallId: string,
+  content: Message["content"],
+): Message {
+  return {
+    role: "tool",
+    tool_call_id: toolCallId,
+    content,
+  }
+}
+
+function createToolResultUserMessage(
+  block: AnthropicToolResultBlock,
+  supportPdf: boolean,
+): Message {
+  const prefix: TextPart = {
+    type: "text",
+    text: `Tool result for ${block.tool_use_id}:`,
+  }
+  const content = mapContent(block.content, {
+    supportPdf,
+  })
+  if (Array.isArray(content)) {
+    return {
+      role: "user",
+      content: [prefix, ...content],
+    }
+  }
+
+  return {
+    role: "user",
+    content: [prefix, { type: "text", text: content ?? "" }],
+  }
+}
+
 function handleAssistantMessage(
   message: AnthropicAssistantMessage,
   modelId: string,
+  capabilities: TranslationCapabilities,
 ): Array<Message> {
   if (!Array.isArray(message.content)) {
     return [
@@ -198,7 +354,9 @@ function handleAssistantMessage(
       [
         {
           role: "assistant",
-          content: mapContent(message.content),
+          content: mapContent(message.content, {
+            supportPdf: capabilities.supportPdf,
+          }),
           reasoning_text: allThinkingContent,
           reasoning_opaque: signature,
           tool_calls: toolUseBlocks.map((toolUse) => ({
@@ -214,7 +372,9 @@ function handleAssistantMessage(
     : [
         {
           role: "assistant",
-          content: mapContent(message.content),
+          content: mapContent(message.content, {
+            supportPdf: capabilities.supportPdf,
+          }),
           reasoning_text: allThinkingContent,
           reasoning_opaque: signature,
         },
@@ -223,6 +383,7 @@ function handleAssistantMessage(
 
 function mapContent(
   content: string | Array<MappableContentBlock>,
+  options: { supportPdf?: boolean } = {},
 ): string | Array<ContentPart> | null {
   if (typeof content === "string") {
     return content
@@ -248,7 +409,11 @@ function mapContent(
         break
       }
       case "document": {
-        contentParts.push(createDocumentTextPart())
+        contentParts.push(
+          options.supportPdf ?
+            createDocumentFilePart(block)
+          : createDocumentTextPart(),
+        )
         break
       }
       case "tool_reference": {
@@ -261,13 +426,26 @@ function mapContent(
       // No default
     }
   }
+  if (contentParts.length === 0) {
+    return ""
+  }
   return contentParts
 }
 
 function createDocumentTextPart(): TextPart {
   return {
     type: "text",
-    text: "A PDF document was attached, but this api cannot send PDF inputs directly. Analyze using other tools.",
+    text: "PDF/document content is not supported by this Chat Completions upstream. Use the available text extracted from the document.",
+  }
+}
+
+function createDocumentFilePart(block: AnthropicDocumentBlock): ContentPart {
+  return {
+    type: "file",
+    file: {
+      file_data: `data:${block.source.media_type};base64,${block.source.data}`,
+      filename: block.title ?? "document.pdf",
+    },
   }
 }
 
@@ -345,7 +523,7 @@ export function translateToAnthropic(
   for (const choice of response.choices) {
     const textBlocks = getAnthropicTextBlocks(choice.message.content)
     const thinkBlocks = getAnthropicThinkBlocks(
-      choice.message.reasoning_text,
+      getOpenAIReasoningText(choice.message),
       choice.message.reasoning_opaque,
     )
     const toolUseBlocks = getAnthropicToolUseBlocks(choice.message.tool_calls)
@@ -366,18 +544,40 @@ export function translateToAnthropic(
     content: assistantContentBlocks,
     stop_reason: mapOpenAIStopReasonToAnthropic(stopReason),
     stop_sequence: null,
-    usage: {
-      input_tokens:
-        (response.usage?.prompt_tokens ?? 0)
-        - (response.usage?.prompt_tokens_details?.cached_tokens ?? 0),
-      output_tokens: response.usage?.completion_tokens ?? 0,
-      ...(response.usage?.prompt_tokens_details?.cached_tokens
-        !== undefined && {
-        cache_read_input_tokens:
-          response.usage.prompt_tokens_details.cached_tokens,
-      }),
-    },
+    usage: mapOpenAIChatCompletionUsage(response),
   }
+}
+
+function mapOpenAIChatCompletionUsage(
+  response: ChatCompletionResponse,
+): AnthropicResponse["usage"] {
+  const promptDetails = response.usage?.prompt_tokens_details
+  const promptTokens = response.usage?.prompt_tokens ?? 0
+  const cachedTokens = promptDetails?.cached_tokens ?? 0
+  const cacheCreationTokens = promptDetails?.cache_creation_input_tokens ?? 0
+  const usage: AnthropicResponse["usage"] = {
+    input_tokens: Math.max(
+      0,
+      promptTokens - cachedTokens - cacheCreationTokens,
+    ),
+    output_tokens: response.usage?.completion_tokens ?? 0,
+  }
+
+  if (promptDetails?.cache_creation_input_tokens !== undefined) {
+    usage.cache_creation_input_tokens = cacheCreationTokens
+  }
+  if (promptDetails?.cached_tokens !== undefined) {
+    usage.cache_read_input_tokens = cachedTokens
+  }
+
+  return usage
+}
+
+function getOpenAIReasoningText(message: {
+  reasoning_content?: string | null
+  reasoning_text?: string | null
+}): string | null | undefined {
+  return message.reasoning_text ?? message.reasoning_content
 }
 
 function getAnthropicTextBlocks(

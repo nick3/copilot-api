@@ -69,7 +69,7 @@
 - **支持 opencode OAuth**：可通过设置环境变量 `COPILOT_API_OAUTH_APP=opencode` 或使用命令行参数 `--oauth-app=opencode` 来启用 opencode GitHub Copilot 认证。
 - **支持 GitHub Enterprise**：可通过设置环境变量 `COPILOT_API_ENTERPRISE_URL`（例如 `company.ghe.com`）或命令行参数 `--enterprise-url=company.ghe.com` 连接到 GHE.com。
 - **自定义数据目录**：可通过环境变量 `COPILOT_API_HOME` 或命令行参数 `--api-home=/path/to/dir` 修改默认数据目录（存放 token 和配置）。
-- **多 Provider Anthropic 代理路由**：可以添加全局 provider 配置，并通过 `/:provider/v1/messages` 与 `/:provider/v1/models` 调用外部 Anthropic 兼容 API。
+- **多 Provider Messages 代理路由**：可以添加全局 provider 配置，并通过 `/:provider/v1/messages` 与 `/:provider/v1/models` 调用外部 Anthropic 或 OpenAI 兼容 API，也可以把 `model` 写成 `"provider/model"` 后直接发到顶层 `/v1/messages`。
 - **精确的 Claude Token 计数**：可以选择将 Claude 模型的 `/v1/messages/count_tokens` 请求转发到 Anthropic 的免费 token counting 端点，以获得精确计数，而不是依赖 GPT tokenizer 估算。
 - **GPT 上下文管理**：可通过 `responsesApiContextManagementModels` 为长上下文 GPT 对话启用可配置的上下文压缩，在接近 token 限制时减少不必要的 Premium 请求。详见 [配置](#configuration-configjson)。
 
@@ -133,6 +133,7 @@
 ## 前置要求
 
 - Bun（>= 1.2.x）
+- 如果要通过 `npx` 运行已发布 CLI，需要 Node.js
 - 已订阅 Copilot 的 GitHub 账号（个人版、Business 或 Enterprise）
 
 ## 安装
@@ -404,15 +405,53 @@ Copilot API 现在使用子命令结构，主要命令包括：
             "topP": 0.95
           }
         }
+      },
+      "dashscope": {
+        "type": "openai-compatible",
+        "enabled": true,
+        "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode",
+        "apiKey": "sk-your-dashscope-key",
+        "models": {
+          "qwen3.6-plus": {
+            "temperature": 1,
+            "topP": 0.95,
+            "topK": 20,
+            "extraBody": {
+              "preserve_thinking": true
+            },
+            "contextCache": true
+          },
+          "glm-5.1": {
+            "temperature": 0.7,
+            "topP": 0.95,
+            "contextCache": true,
+            "extraBody": {
+              "preserve_thinking": true
+            }
+          }
+        }
       }
     }
   }
   ```
-- **responsesApiContextManagementModels：** 需要注入 Responses API `context_management` 压缩指令的模型 ID 列表。适用于支持服务端上下文管理的模型，并且你希望代理在后续轮次中只保留最新的压缩承载内容。
+- **providers：** 全局上游 provider 映射。每个 provider key（例如 `custom`）都会变成一个路由前缀（`/custom/v1/messages`）。支持 `type: "anthropic"` 和 `type: "openai-compatible"`。顶层 Anthropic 客户端也可以在 `/v1/messages` 和 `/v1/messages/count_tokens` 中使用 `model: "custom/model-id"`；代理会在转发上游前移除 `custom/` 前缀。`GET /v1/models` 不聚合 provider 模型；provider 模型列表请使用 `GET /custom/v1/models`。
+  - `enabled`：可选，若省略则默认为 `true`。
+  - `baseUrl`：provider API 的基础 URL，不要带结尾的 endpoint。Anthropic provider 不要带 `/v1/messages`；OpenAI 兼容 provider 不要带 `/v1/chat/completions`。
+  - `apiKey`：作为上游凭据值使用。
+  - `authType`：可选，控制 `apiKey` 如何发送到上游。支持 `x-api-key` 和 `authorization`。Anthropic provider 默认 `x-api-key`；OpenAI 兼容 provider 默认 `authorization`。当设置为 `authorization` 时，代理会发送 `Authorization: Bearer <apiKey>`。
+  - `adjustInputTokens`：可选，当为 `true` 时，代理会在 usage 响应里用 `input_tokens` 减去 `cache_read_input_tokens` 和 `cache_creation_input_tokens`。
+  - `models`：可选，按模型 ID 配置的映射。每个键为请求中的模型名，值支持：
+    - `temperature`：可选，当请求未指定时使用的默认温度。
+    - `topP`：可选，当请求未指定时使用的默认 `top_p`。
+    - `topK`：可选，当请求未指定时使用的默认 `top_k`。
+    - `extraBody`：可选，按模型合入上游请求体的动态字段；请求体显式同名字段优先。OpenAI 兼容 provider 可用它配置 `enable_thinking`、`preserve_thinking`、`reasoning_effort` 等字段。
+    - `contextCache`：可选，OpenAI 兼容 provider 默认 `true`，用于启用阿里云百炼/DashScope 的显式缓存（explicit context cache），会按其 Context Cache 格式在最多 4 个 content block 上注入 `cache_control: { "type": "ephemeral" }`。缓存断点策略与 opencode 主链路保持一致：前 2 条 system 消息 + 最后 2 条非 system 消息。标记字符串 content 时会把 `system` / `user` / `assistant` / `tool` 消息转换为 text content part 数组；已有数组 content 则标记最后一个 part。如果模型本身已经支持隐式缓存，或上游不支持该显式缓存扩展字段，可在模型配置中设为 `false`。
+    - `supportPdf`：可选，控制该模型是否支持 PDF/document content。默认 `false`，不支持时会把 PDF 转成提示文本；设为 `true` 时会把 PDF/document 转成 OpenAI Chat Completions 的 file part。
+    - `toolContentSupportType`：可选，配置该模型的 tool result content 支持能力，值为 `array`、`image`、`pdf` 的数组。provider 侧未配置时默认只发送 string tool content。若 `supportPdf` 为 `true` 但这里不包含 `pdf`，tool result 里的 file part 会被转成 user role 消息。Copilot 主链路不使用这个 provider 默认，仍按 array + image 且不支持 PDF 的能力处理。
+- **responsesApiContextManagementModels：** 需要启用 Responses API `context_management` 压缩指令的 GPT 模型 ID 列表。默认是 `[]`，需要你显式开启。一个不错的起点是 `["gpt-5-mini", "gpt-5.3-codex", "gpt-5.4-mini", "gpt-5.4"]`。启用后，请求体会带上 `context_management`，并在后续轮次中仅保留最新的压缩承载内容。实际压缩由服务端完成，看起来会在 usage 接近模型 `maxPromptTokens` 的约 90% 时开始，因此特别适合长任务场景，同时不会额外消耗 premium requests。
 - **smallModel：** 用于无工具预热消息、compact/background 请求以及其他短小维护型轮次（例如 Claude Code 或 OpenCode 发出的 housekeeping 请求）的回退模型，用来避免消耗 premium requests；默认是 `gpt-5-mini`。如果原始模型名被屏蔽，而这里指向的是某个别名目标模型，则会解析为首选别名。
 - **accountAffinity：** 是否根据 session 标识启用粘性账号路由。开启后，同一 session 针对同一模型的请求会优先路由到上次成功处理它的账号。该策略同时适用于免费模型和付费模型。默认值为 `true`。设为 `false` 则所有模型都改为顺序路由。
-- **apiKey（已弃用）：** 兼容迁移的旧单 key 字段。优先使用 `auth.apiKeys`。当 `auth.apiKeys` 为空时，服务端会回退到 `COPILOT_API_KEY`，再回退到 `apiKey`。
-- **modelReasoningEfforts：** 按模型配置发送到 Copilot Responses API 的 `reasoning.effort`。可选值包括 `none`、`minimal`、`low`、`medium`、`high` 和 `xhigh`。若某模型未配置，则默认使用 `high`。
+- **apiKey（已弃用）：** 兼容迁移的旧单 key 字段。优先使用 `auth.apiKeys`。当 `auth.apiKeys` 为空时，服务端会回退到 `COPILOT_API_KEY`，再回退到 `apiKey`。- **modelReasoningEfforts：** 按模型配置发送到 Copilot Responses API 的 `reasoning.effort`。可选值包括 `none`、`minimal`、`low`、`medium`、`high` 和 `xhigh`。若某模型未配置，则默认使用 `high`。
 - **modelAliases：** `alias -> { target, allowOriginal? }` 的映射（也仍然接受旧的字符串写法）。别名 key 会先做标准化（trim + lowercase），且不能为空；别名不能映射回自己（大小写不敏感），冲突的标准化别名会被拒绝。`allowOriginal` 可为单个别名覆盖全局默认值。如果多个别名映射到同一个 target，只要其中任意一个设置了 `allowOriginal: true`，原始模型名就会被允许（allow-wins）。Admin UI/API 会拒绝被屏蔽的键（`__proto__`、`constructor`、`prototype`）。下游请求可以直接使用这些别名。
 - **allowOriginalModelNamesForAliases：** 对未显式设置 `allowOriginal` 的别名所采用的全局默认值。当其为 `false`（默认）时，target 原名默认被屏蔽，除非某个别名显式允许；当其为 `true` 时，target 原名默认可用，除非所有别名都显式阻止。
 - **useFunctionApplyPatch：** 当为 `true`（默认）时，`POST /v1/responses` 会把 `tools` 中形如 `{ "type": "custom", "name": "apply_patch" }` 的条目转换为 OpenAI 风格的 `function` 工具（带参数 schema），以便与上游更好兼容。设为 `false` 则保留自定义工具原样。
@@ -469,10 +508,10 @@ curl http://localhost:4141/v1/models \
 
 | 端点 | 方法 | 说明 |
 | --- | --- | --- |
-| `POST /v1/messages` | `POST` | 为给定对话创建模型响应。 |
-| `POST /v1/messages/count_tokens` | `POST` | 计算一组消息的 token 数。 |
-| `POST /:provider/v1/messages` | `POST` | 将 Anthropic Messages API 代理到已配置的 provider。 |
-| `GET /:provider/v1/models` | `GET` | 将 Anthropic Models API 代理到已配置的 provider。 |
+| `POST /v1/messages` | `POST` | 为给定对话创建模型响应。支持已配置 provider 的 `provider/model` 别名。 |
+| `POST /v1/messages/count_tokens` | `POST` | 计算一组消息的 token 数。支持已配置 provider 的 `provider/model` 别名。 |
+| `POST /:provider/v1/messages` | `POST` | 将 Anthropic Messages 请求代理到已配置的 Anthropic 或 OpenAI 兼容 provider。 |
+| `GET /:provider/v1/models` | `GET` | 将模型列表请求代理到已配置的 provider。 |
 | `POST /:provider/v1/messages/count_tokens` | `POST` | 为 provider 路由请求在本地计算 token 数。 |
 
 ### 使用量监控端点
@@ -616,6 +655,9 @@ npx @nick3/copilot-api@latest --oauth-app=opencode start
 
 # 组合多个全局选项
 npx @nick3/copilot-api@latest --api-home=/custom/path --oauth-app=opencode --enterprise-url=company.ghe.com start
+
+# 用 Bun 而不是 Node.js 运行已发布 CLI
+bunx --bun @nick3/copilot-api@latest start
 ```
 
 ### Opencode OAuth 认证
@@ -636,6 +678,67 @@ npx @nick3/copilot-api@latest auth
 ```sh
 COPILOT_API_OAUTH_APP=opencode npx @nick3/copilot-api@latest start
 ```
+
+## 与 Claude Code 一起使用
+
+这个代理可以为 [Claude Code](https://docs.anthropic.com/en/claude-code) 提供后端能力。Claude Code 是 Anthropic 提供的实验性面向开发者的对话式 AI 助手。
+
+有两种方式可以把 Claude Code 配置为使用这个代理：
+
+### 通过 `--claude-code` 标志进行交互式配置
+
+执行带 `--claude-code` 的 `start` 命令开始：
+
+```sh
+npx @nick3/copilot-api@latest start --claude-code
+```
+
+你会被提示选择一个主模型，以及一个用于后台任务的 “small, fast” 模型。选择完成后，会有一条命令被复制到剪贴板中。该命令会设置 Claude Code 使用该代理所需的环境变量。
+
+在新的终端中粘贴并执行这条命令，即可启动 Claude Code。
+
+<a id="manual-configuration-with-settingsjson"></a>
+
+### 通过 `settings.json` 手动配置
+
+另一种方式是在项目根目录中创建 `.claude/settings.json` 文件，并写入 Claude Code 所需的环境变量。这样你就不需要每次都运行交互式配置了。
+
+下面是一个 `.claude/settings.json` 示例：
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://localhost:4141",
+    "ANTHROPIC_AUTH_TOKEN": "dummy",
+    "ANTHROPIC_MODEL": "gpt-5.4",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "gpt-5.4",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-5-mini",
+    "DISABLE_NON_ESSENTIAL_MODEL_CALLS": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
+    "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION": "false",
+    "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "true",
+    "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
+    "CLAUDE_PLUGIN_ENABLE_QUESTION_RULES": "true"
+  },
+  "permissions": {
+    "deny": [
+      "WebSearch", 
+      "mcp__ide__executeCode"
+    ]
+  }
+}
+```
+
+- 请根据需要替换 `ANTHROPIC_MODEL`、`ANTHROPIC_DEFAULT_OPUS_MODEL`、`ANTHROPIC_DEFAULT_SONNET_MODEL` 和 `ANTHROPIC_DEFAULT_HAIKU_MODEL`。配置完成后，请安装 claude code 插件，见 [插件集成](#plugin-integrations)。如果你配置的是 Claude 模型，建议把这些模型配置都设为相同，以保持与 github-copilot claude agent 行为一致。
+- 将 `CLAUDE_CODE_ATTRIBUTION_HEADER` 设为 `0` 可以阻止 Claude Code 在 system prompt 中附加计费和版本信息，从而避免 prompt cache 失效。
+- 关闭 `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` 和 `CLAUDE_CODE_ENABLE_AWAY_SUMMARY` 可以避免不必要地消耗额度。
+- `permissions` 中禁止 `WebSearch`，因为 GitHub Copilot API 不支持原生 web search（部分 gpt 模型支持 websearch，但本项目目前尚未适配）；建议安装 mcp 的 `mcp_server_fetch` 工具或其他搜索工具作为替代。
+- 如果使用的不是 Claude 模型，请不要启用 `ENABLE_TOOL_SEARCH`。如果使用的是 Claude 模型，则可以启用 `ENABLE_TOOL_SEARCH`。当前 Claude Code 使用的是客户端 tool search 模式，在该模式下每次加载 defer tools 都需要额外请求一次。
+
+更多选项见：[Claude Code settings](https://docs.anthropic.com/en/docs/claude-code/settings#environment-variables)
+
+也可以参考 IDE 集成说明：[Add Claude Code to your IDE](https://docs.anthropic.com/en/docs/claude-code/ide-integrations)
 
 ## 与 OpenCode 一起使用
 
@@ -792,83 +895,6 @@ UI 会把 token 保存在 `sessionStorage` 中，并通过 `x-admin-token` 请�
   - Windows：`%USERPROFILE%\.local\share\copilot-api\admin.sqlite`
 - 默认保留最多 14 天日志，数据库上限为 200,000 行（更旧的数据会自动清理）。
 - 出于安全考虑，admin DB 只保存元数据，不保存 GitHub/Copilot token，也不保存请求/响应正文。
-
-## 与 Claude Code 一起使用
-
-这个代理可以为 [Claude Code](https://docs.anthropic.com/en/claude-code) 提供后端能力。Claude Code 是 Anthropic 提供的实验性面向开发者的对话式 AI 助手。
-
-有两种方式可以把 Claude Code 配置为使用这个代理：
-
-### 通过 `--claude-code` 标志进行交互式配置
-
-执行带 `--claude-code` 的 `start` 命令开始：
-
-```sh
-npx @nick3/copilot-api@latest start --claude-code
-```
-
-你会被提示选择一个主模型，以及一个用于后台任务的 “small, fast” 模型。选择完成后，会有一条命令被复制到剪贴板中。该命令会设置 Claude Code 使用该代理所需的环境变量。
-
-在新的终端中粘贴并执行这条命令，即可启动 Claude Code。
-
-> **API Key 提示：** 如果启用了请求鉴权（推荐 `auth.apiKeys`；旧的 `COPILOT_API_KEY` / `apiKey` 也仍可用），请将 `ANTHROPIC_AUTH_TOKEN` 设置为其中一个可用 API key。
-
-<a id="manual-configuration-with-settingsjson"></a>
-
-### 通过 `settings.json` 手动配置
-
-另一种方式是在项目根目录中创建 `.claude/settings.json` 文件，并写入 Claude Code 所需的环境变量。这样你就不需要每次都运行交互式配置了。
-
-下面是一个 `.claude/settings.json` 示例：
-
-> **API Key 提示：** 如果启用了请求鉴权，请将 `ANTHROPIC_AUTH_TOKEN` 设为你的某个 API key，这样 Claude Code 才能发送 `x-api-key`。如果未启用鉴权，则任意值都可以。
-
-```json
-{
-  "env": {
-    "ANTHROPIC_BASE_URL": "http://localhost:4141",
-    "ANTHROPIC_AUTH_TOKEN": "dummy",
-    "ANTHROPIC_MODEL": "gpt-5.4",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "gpt-5.4",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-5-mini",
-    "DISABLE_NON_ESSENTIAL_MODEL_CALLS": "1",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-    "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
-    "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION": "false",
-    "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "true",
-    "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
-    "CLAUDE_PLUGIN_ENABLE_QUESTION_RULES": "true"
-  },
-  "permissions": {
-    "deny": [
-      "WebSearch",
-      "mcp__ide__executeCode"
-    ]
-  }
-}
-```
-
-- 请根据需要替换 `ANTHROPIC_MODEL`、`ANTHROPIC_DEFAULT_OPUS_MODEL`、`ANTHROPIC_DEFAULT_SONNET_MODEL` 和 `ANTHROPIC_DEFAULT_HAIKU_MODEL`。配置完成后，请安装 Claude Code 插件，见 [插件集成](#plugin-integrations)。如果你配置的是 Claude 模型，建议把这些模型配置尽量设为一致，以保持与 GitHub Copilot Claude agent 行为一致。
-- 将 `CLAUDE_CODE_ATTRIBUTION_HEADER` 设为 `0` 可以阻止 Claude Code 在 system prompt 中附加计费和版本信息，从而避免 prompt cache 失效。
-- 关闭 `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` 和 `CLAUDE_CODE_ENABLE_AWAY_SUMMARY` 可以避免不必要地消耗额度。
-- `permissions` 中默认禁止 `WebSearch`，因为当前项目下 GitHub Copilot API 还不支持原生 web search。你可以继续在 Claude Code 的 `permissions` 中拒绝 `WebSearch`，或在 `config.json` 中将 `useResponsesApiWebSearch` 设为 `false`。如果需要搜索能力，建议使用 `mcp_server_fetch` 等替代工具。
-- 请不要启用 `ENABLE_TOOL_SEARCH`。Claude Code 当前使用的是客户端 tool search 模式；每次加载 deferred tools 都需要额外请求，会影响缓存命中率，而且本项目目前与该模式仍存在兼容性问题，启用后也可能引发错误。
-
-<a id="claudemd-or-agentsmd-recommended-content"></a>
-
-### CLAUDE.md 或 AGENTS.md 推荐内容
-
-如果你想手动加入这些提醒，请在 Claude Code 的 `CLAUDE.md`，或 opencode/codex 的 `AGENTS.md` 中加入以下内容：
-
-```
-- Prohibited from directly asking questions to users, MUST use question tool.
-- Once you can confirm that the task is complete, MUST use question tool to make user confirm. The user may respond with feedback if they are not satisfied with the result, which you can use to make improvements and try again, after try again, MUST use question tool to make user confirm again.
-```
-
-更多选项见：[Claude Code settings](https://docs.anthropic.com/en/docs/claude-code/settings#environment-variables)
-
-也可以参考 IDE 集成说明：[Add Claude Code to your IDE](https://docs.anthropic.com/en/docs/claude-code/ide-integrations)
-
 <a id="plugin-integrations"></a>
 
 ## 插件集成

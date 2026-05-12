@@ -4,6 +4,7 @@ import { defineCommand } from "citty"
 import consola from "consola"
 import fs from "node:fs/promises"
 import os from "node:os"
+import { fileURLToPath } from "node:url"
 
 import { PATHS } from "./lib/paths"
 
@@ -28,7 +29,9 @@ interface RunDebugOptions {
 
 async function getPackageVersion(): Promise<string> {
   try {
-    const packageJsonPath = new URL("../package.json", import.meta.url).pathname
+    const packageJsonPath = fileURLToPath(
+      new URL("../package.json", import.meta.url),
+    )
     // @ts-expect-error https://github.com/sindresorhus/eslint-plugin-unicorn/blob/v59.0.1/docs/rules/prefer-json-parse-buffer.md
     // JSON.parse() can actually parse buffers
     const packageJson = JSON.parse(await fs.readFile(packageJsonPath)) as {

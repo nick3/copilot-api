@@ -87,6 +87,7 @@ export const translateAnthropicMessagesToResponsesPayload = (
     tool_choice: toolChoice,
     metadata: payload.metadata ? { ...payload.metadata } : null,
     prompt_cache_key: promptCacheKey,
+    //prompt_cache_retention: "24h",  not work in gpt-5.4
     stream: payload.stream ?? null,
     store: false,
     parallel_tool_calls: true,

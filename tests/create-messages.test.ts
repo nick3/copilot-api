@@ -42,8 +42,7 @@ const fetchMock = mock((_url: string, opts: FetchOpts) => {
   }
 })
 
-// @ts-expect-error - Mock fetch doesn't implement all fetch properties
-;(globalThis as unknown as { fetch: typeof fetch }).fetch = fetchMock
+const fetchImpl = fetchMock as unknown as typeof fetch
 
 const basePayload = (
   content: AnthropicUserMessage["content"],
@@ -63,10 +62,15 @@ function getLastHeaders(): Record<string, string> {
   return lastCall[1].headers
 }
 
+const callCreateMessages = (
+  payload: AnthropicMessagesPayload,
+  options: Parameters<typeof createMessages>[2] = {},
+) => createMessages(payload, accountContext, { ...options, fetchImpl })
+
 test("respects explicit initiator override", async () => {
   const payload = basePayload([{ type: "text", text: "hello" }])
 
-  await createMessages(payload, accountContext, {
+  await callCreateMessages(payload, {
     initiator: "agent",
   })
 
@@ -76,7 +80,7 @@ test("respects explicit initiator override", async () => {
 test("falls back to user initiator for regular user prompt", async () => {
   const payload = basePayload([{ type: "text", text: "hello" }])
 
-  await createMessages(payload, accountContext)
+  await callCreateMessages(payload)
 
   expect(getLastHeaders()["x-initiator"]).toBe("user")
 })
@@ -90,7 +94,7 @@ test("falls back to agent initiator for pure tool_result continuation", async ()
     },
   ])
 
-  await createMessages(payload, accountContext)
+  await callCreateMessages(payload)
 
   expect(getLastHeaders()["x-initiator"]).toBe("agent")
 })
@@ -98,7 +102,7 @@ test("falls back to agent initiator for pure tool_result continuation", async ()
 test("sets interaction headers for subagent session", async () => {
   const payload = basePayload([{ type: "text", text: "hello" }])
 
-  await createMessages(payload, accountContext, {
+  await callCreateMessages(payload, {
     upstreamRequestId: "request-2",
     sessionId: "session-2",
     subagentMarker: {
@@ -119,7 +123,7 @@ test("sets interaction headers for subagent session", async () => {
 test("keeps subagent interaction type for compact subagent requests", async () => {
   const payload = basePayload([{ type: "text", text: "hello" }])
 
-  await createMessages(payload, accountContext, {
+  await callCreateMessages(payload, {
     upstreamRequestId: "request-compact-subagent",
     sessionId: "session-compact-subagent",
     subagentMarker: {
@@ -141,7 +145,7 @@ test("keeps subagent interaction type for compact subagent requests", async () =
 test("forces agent initiator for compact requests", async () => {
   const payload = basePayload([{ type: "text", text: "hello" }])
 
-  await createMessages(payload, accountContext, {
+  await callCreateMessages(payload, {
     compactType: COMPACT_REQUEST,
   })
 
@@ -156,7 +160,7 @@ test("drops interleaved thinking beta for adaptive thinking requests", async () 
     },
   } satisfies AnthropicMessagesPayload
 
-  await createMessages(payload, accountContext, {
+  await callCreateMessages(payload, {
     anthropicBetaHeader:
       "interleaved-thinking-2025-05-14,context-management-2025-06-27",
   })
@@ -189,7 +193,7 @@ test("enables vision headers for images nested inside tool results", async () =>
     },
   ])
 
-  await createMessages(payload, accountContext)
+  await callCreateMessages(payload)
 
   expect(getLastHeaders()["copilot-vision-request"]).toBe("true")
 })
@@ -211,7 +215,7 @@ test("captures final outbound headers after messages-proxy overrides", async () 
       parentSessionId: undefined,
     },
     async () => {
-      await createMessages(payload, accountContext, {
+      await callCreateMessages(payload, {
         upstreamRequestId: "request-original",
       })
 

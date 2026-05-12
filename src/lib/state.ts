@@ -4,6 +4,7 @@ import type { AccountContext, AccountType } from "./types/account"
 
 export interface State {
   githubToken?: string
+  userName?: string
   copilotToken?: string
 
   accountType: AccountType

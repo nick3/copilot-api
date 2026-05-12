@@ -3,11 +3,35 @@ import type { Context } from "hono"
 import consola from "consola"
 
 import { getAnthropicApiKey, getClaudeTokenMultiplier } from "~/lib/config"
+import {
+  createFallbackModel,
+  parseProviderModelAlias,
+} from "~/lib/provider-model"
 import { getTokenCount } from "~/lib/tokenizer"
+import { handleProviderCountTokensForProvider } from "~/routes/provider/messages/count-tokens-handler"
+import { type Model } from "~/services/copilot/get-models"
 
 import { findEndpointModel } from "../../lib/models"
 import { type AnthropicMessagesPayload } from "./anthropic-types"
 import { translateToOpenAI } from "./non-stream-translation"
+
+export const resolveCountTokensModel = (
+  modelId: string,
+  findModel: (sdkModelId: string) => Model | undefined = findEndpointModel,
+): { fallback: boolean; model: Model } => {
+  const selectedModel = findModel(modelId)
+  if (selectedModel) {
+    return {
+      fallback: false,
+      model: selectedModel,
+    }
+  }
+
+  return {
+    fallback: true,
+    model: createFallbackModel(modelId.trim()),
+  }
+}
 
 /**
  * Forwards token counting to Anthropic's real /v1/messages/count_tokens endpoint.
@@ -62,64 +86,67 @@ async function countTokensViaAnthropic(
  * endpoint for accurate counts. Otherwise falls back to GPT tokenizer estimation.
  */
 export async function handleCountTokens(c: Context) {
-  try {
-    const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
-
-    // Try Anthropic's real endpoint first (Claude models only)
-    const anthropicResult = await countTokensViaAnthropic(c, anthropicPayload)
-    if (anthropicResult) return anthropicResult
-
-    // Fallback: GPT tokenizer estimation (also used for non-Claude models)
-    const anthropicBeta = c.req.header("anthropic-beta")
-
-    const openAIPayload = translateToOpenAI(anthropicPayload)
-
-    const selectedModel = findEndpointModel(anthropicPayload.model)
-    anthropicPayload.model = selectedModel?.id ?? anthropicPayload.model
-
-    if (!selectedModel) {
-      consola.warn("Model not found, returning default token count")
-      return c.json({
-        input_tokens: 1,
-      })
-    }
-
-    const tokenCount = await getTokenCount(openAIPayload, selectedModel)
-
-    if (anthropicPayload.tools && anthropicPayload.tools.length > 0) {
-      let addToolSystemPromptCount = false
-      if (anthropicBeta) {
-        const toolsLength = anthropicPayload.tools.length
-        addToolSystemPromptCount = !anthropicPayload.tools.some(
-          (tool) =>
-            tool.name.startsWith("mcp__")
-            || (tool.name === "Skill" && toolsLength === 1),
-        )
-      }
-      if (addToolSystemPromptCount) {
-        if (anthropicPayload.model.startsWith("claude")) {
-          // https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/overview#pricing
-          tokenCount.input = tokenCount.input + 346
-        } else if (anthropicPayload.model.startsWith("grok")) {
-          tokenCount.input = tokenCount.input + 120
-        }
-      }
-    }
-
-    let finalTokenCount = tokenCount.input + tokenCount.output
-    if (anthropicPayload.model.startsWith("claude")) {
-      finalTokenCount = Math.round(finalTokenCount * getClaudeTokenMultiplier())
-    }
-
-    consola.info("Token count:", finalTokenCount)
-
-    return c.json({
-      input_tokens: finalTokenCount,
-    })
-  } catch (error) {
-    consola.error("Error counting tokens:", error)
-    return c.json({
-      input_tokens: 1,
+  const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
+  const providerModelAlias = parseProviderModelAlias(anthropicPayload.model)
+  if (providerModelAlias) {
+    anthropicPayload.model = providerModelAlias.model
+    return await handleProviderCountTokensForProvider(c, {
+      payload: anthropicPayload,
+      provider: providerModelAlias.provider,
     })
   }
+
+  // Try Anthropic's real endpoint first (Claude models only)
+  const anthropicResult = await countTokensViaAnthropic(c, anthropicPayload)
+  if (anthropicResult) return anthropicResult
+
+  // Fallback: GPT tokenizer estimation (also used for non-Claude models)
+  const anthropicBeta = c.req.header("anthropic-beta")
+
+  const openAIPayload = translateToOpenAI(anthropicPayload)
+
+  const requestedModel = anthropicPayload.model
+  const resolve = resolveCountTokensModel(requestedModel)
+
+  const selectedModel = resolve.model
+  anthropicPayload.model = selectedModel.id
+
+  if (resolve.fallback) {
+    consola.warn(
+      `Model '${requestedModel}' not found, using o200k_base fallback tokenizer`,
+    )
+  }
+
+  const tokenCount = await getTokenCount(openAIPayload, selectedModel)
+
+  if (anthropicPayload.tools && anthropicPayload.tools.length > 0) {
+    let addToolSystemPromptCount = false
+    if (anthropicBeta) {
+      const toolsLength = anthropicPayload.tools.length
+      addToolSystemPromptCount = !anthropicPayload.tools.some(
+        (tool) =>
+          tool.name.startsWith("mcp__")
+          || (tool.name === "Skill" && toolsLength === 1),
+      )
+    }
+    if (addToolSystemPromptCount) {
+      if (anthropicPayload.model.startsWith("claude")) {
+        // https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/overview#pricing
+        tokenCount.input = tokenCount.input + 346
+      } else if (anthropicPayload.model.startsWith("grok")) {
+        tokenCount.input = tokenCount.input + 120
+      }
+    }
+  }
+
+  let finalTokenCount = tokenCount.input + tokenCount.output
+  if (anthropicPayload.model.startsWith("claude")) {
+    finalTokenCount = Math.round(finalTokenCount * getClaudeTokenMultiplier())
+  }
+
+  consola.info("Token count:", finalTokenCount)
+
+  return c.json({
+    input_tokens: finalTokenCount,
+  })
 }

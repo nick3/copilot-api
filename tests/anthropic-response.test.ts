@@ -8,7 +8,10 @@ import type {
 
 import { type AnthropicStreamState } from "~/routes/messages/anthropic-types"
 import { translateToAnthropic } from "~/routes/messages/non-stream-translation"
-import { translateChunkToAnthropicEvents } from "~/routes/messages/stream-translation"
+import {
+  flushPendingAnthropicStreamEvents,
+  translateChunkToAnthropicEvents,
+} from "~/routes/messages/stream-translation"
 
 const anthropicUsageSchema = z.object({
   input_tokens: z.number().int(),
@@ -188,6 +191,44 @@ describe("OpenAI to Anthropic Non-Streaming Response Translation", () => {
 
     expect(isValidAnthropicResponse(anthropicResponse)).toBe(true)
     expect(anthropicResponse.stop_reason).toBe("max_tokens")
+  })
+
+  test("should translate OpenAI cache creation usage details", () => {
+    const openAIResponse: ChatCompletionResponse = {
+      id: "chatcmpl-cache",
+      object: "chat.completion",
+      created: 1677652288,
+      model: "qwen-plus",
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content: "cached answer",
+          },
+          finish_reason: "stop",
+          logprobs: null,
+        },
+      ],
+      usage: {
+        prompt_tokens: 100,
+        completion_tokens: 10,
+        total_tokens: 110,
+        prompt_tokens_details: {
+          cache_creation_input_tokens: 20,
+          cached_tokens: 12,
+        },
+      },
+    }
+
+    const anthropicResponse = translateToAnthropic(openAIResponse)
+
+    expect(anthropicResponse.usage).toEqual({
+      cache_creation_input_tokens: 20,
+      cache_read_input_tokens: 12,
+      input_tokens: 68,
+      output_tokens: 10,
+    })
   })
 })
 
@@ -399,5 +440,237 @@ describe("OpenAI to Anthropic Streaming Response Translation", () => {
     for (const event of translatedStream) {
       expect(isValidAnthropicStreamEvent(event)).toBe(true)
     }
+  })
+})
+
+describe("OpenAI stream interleaved tool/content translation", () => {
+  test("should defer content while a tool call is still streaming", () => {
+    const openAIStream: Array<ChatCompletionChunk> = [
+      {
+        id: "cmpl-tool-content",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          {
+            index: 0,
+            delta: { role: "assistant" },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-tool-content",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_weather",
+                  type: "function",
+                  function: { name: "get_weather", arguments: "" },
+                },
+              ],
+            },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-tool-content",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [{ index: 0, function: { arguments: '{"loc' } }],
+            },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-tool-content",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          {
+            index: 0,
+            delta: { content: "I will check that." },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-tool-content",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                { index: 0, function: { arguments: 'ation": "Paris"}' } },
+              ],
+            },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-tool-content",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          { index: 0, delta: {}, finish_reason: "tool_calls", logprobs: null },
+        ],
+      },
+    ]
+
+    const streamState: AnthropicStreamState = {
+      messageStartSent: false,
+      contentBlockIndex: 0,
+      contentBlockOpen: false,
+      toolCalls: {},
+      thinkingBlockOpen: false,
+    }
+    const translatedStream = openAIStream.flatMap((chunk) =>
+      translateChunkToAnthropicEvents(chunk, streamState),
+    )
+
+    const lateToolDeltaIndex = translatedStream.findIndex(
+      (event) =>
+        event.type === "content_block_delta"
+        && event.index === 0
+        && event.delta.type === "input_json_delta"
+        && event.delta.partial_json === 'ation": "Paris"}',
+    )
+    const toolStopIndex = translatedStream.findIndex(
+      (event) => event.type === "content_block_stop" && event.index === 0,
+    )
+    const deferredTextStartIndex = translatedStream.findIndex(
+      (event) =>
+        event.type === "content_block_start"
+        && event.index === 1
+        && event.content_block.type === "text",
+    )
+
+    expect(lateToolDeltaIndex).toBeGreaterThan(-1)
+    expect(toolStopIndex).toBeGreaterThan(lateToolDeltaIndex)
+    expect(deferredTextStartIndex).toBeGreaterThan(toolStopIndex)
+    expect(translatedStream).toContainEqual({
+      type: "content_block_delta",
+      index: 1,
+      delta: {
+        type: "text_delta",
+        text: "I will check that.",
+      },
+    })
+  })
+})
+
+describe("OpenAI usage-only stream translation", () => {
+  test("should emit final Anthropic usage from an OpenAI usage-only chunk", () => {
+    const openAIStream: Array<ChatCompletionChunk> = [
+      {
+        id: "cmpl-usage",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "qwen-plus",
+        choices: [
+          {
+            index: 0,
+            delta: { role: "assistant" },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-usage",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "qwen-plus",
+        choices: [
+          {
+            index: 0,
+            delta: { content: "Hello" },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-usage",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "qwen-plus",
+        choices: [
+          { index: 0, delta: {}, finish_reason: "stop", logprobs: null },
+        ],
+      },
+      {
+        id: "cmpl-usage",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "qwen-plus",
+        choices: [],
+        usage: {
+          prompt_tokens: 100,
+          completion_tokens: 20,
+          total_tokens: 120,
+          prompt_tokens_details: {
+            cache_creation_input_tokens: 3,
+            cached_tokens: 12,
+          },
+        },
+      },
+    ]
+
+    const streamState: AnthropicStreamState = {
+      messageStartSent: false,
+      contentBlockIndex: 0,
+      contentBlockOpen: false,
+      toolCalls: {},
+      thinkingBlockOpen: false,
+    }
+    const translatedStream = openAIStream.flatMap((chunk) =>
+      translateChunkToAnthropicEvents(chunk, streamState),
+    )
+    translatedStream.push(...flushPendingAnthropicStreamEvents(streamState))
+
+    const messageDeltaEvents = translatedStream.filter(
+      (event) => event.type === "message_delta",
+    )
+    expect(messageDeltaEvents).toHaveLength(1)
+    expect(messageDeltaEvents[0]).toEqual({
+      type: "message_delta",
+      delta: {
+        stop_reason: "end_turn",
+        stop_sequence: null,
+      },
+      usage: {
+        input_tokens: 85,
+        output_tokens: 20,
+        cache_creation_input_tokens: 3,
+        cache_read_input_tokens: 12,
+      },
+    })
+    expect(translatedStream.at(-1)).toEqual({ type: "message_stop" })
   })
 })

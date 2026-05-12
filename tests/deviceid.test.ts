@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test"
+import { expect, mock, test } from "bun:test"
 
 import { getVSCodeDeviceId } from "../src/lib/deviceid"
 
@@ -27,10 +27,6 @@ class FailingWinreg {
     callback(failingRegistryError)
   }
 }
-
-afterEach(() => {
-  mock.restore()
-})
 
 test("getVSCodeDeviceId falls back to an ephemeral UUID when persistence fails", async () => {
   await mock.module("winreg", () => ({

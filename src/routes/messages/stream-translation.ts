@@ -5,6 +5,7 @@ import {
 } from "~/services/copilot/create-chat-completions"
 
 import {
+  type AnthropicMessageDeltaEvent,
   type AnthropicStreamEventData,
   type AnthropicStreamState,
 } from "./anthropic-types"
@@ -28,6 +29,7 @@ export function translateChunkToAnthropicEvents(
   const events: Array<AnthropicStreamEventData> = []
 
   if (chunk.choices.length === 0) {
+    completePendingMessage(state, events, chunk)
     return events
   }
 
@@ -45,6 +47,36 @@ export function translateChunkToAnthropicEvents(
   handleFinish(choice, state, { events, chunk })
 
   return events
+}
+
+export function flushPendingAnthropicStreamEvents(
+  state: AnthropicStreamState,
+): Array<AnthropicStreamEventData> {
+  const events: Array<AnthropicStreamEventData> = []
+  completePendingMessage(state, events)
+  return events
+}
+
+function completePendingMessage(
+  state: AnthropicStreamState,
+  events: Array<AnthropicStreamEventData>,
+  chunk?: ChatCompletionChunk,
+): void {
+  if (!state.pendingMessageDelta) {
+    return
+  }
+
+  if (chunk?.usage) {
+    state.pendingMessageDelta.usage = getAnthropicUsageFromOpenAIChunk(
+      chunk,
+      state,
+    )
+  }
+
+  events.push(state.pendingMessageDelta, {
+    type: "message_stop",
+  })
+  state.pendingMessageDelta = undefined
 }
 
 function handleFinish(
@@ -70,29 +102,79 @@ function handleFinish(
       }
     }
 
-    events.push(
-      {
-        type: "message_delta",
-        delta: {
-          stop_reason: mapOpenAIStopReasonToAnthropic(choice.finish_reason),
-          stop_sequence: null,
-        },
-        usage: {
-          input_tokens:
-            (chunk.usage?.prompt_tokens ?? 0)
-            - (chunk.usage?.prompt_tokens_details?.cached_tokens ?? 0),
-          output_tokens: chunk.usage?.completion_tokens ?? 0,
-          ...(chunk.usage?.prompt_tokens_details?.cached_tokens
-            !== undefined && {
-            cache_read_input_tokens:
-              chunk.usage.prompt_tokens_details.cached_tokens,
-          }),
-        },
+    flushDeferredContent(state, events)
+
+    state.pendingMessageDelta = {
+      type: "message_delta",
+      delta: {
+        stop_reason: mapOpenAIStopReasonToAnthropic(choice.finish_reason),
+        stop_sequence: null,
       },
-      {
-        type: "message_stop",
-      },
-    )
+      usage: getAnthropicUsageFromOpenAIChunk(chunk, state),
+    }
+    if (chunk.usage) {
+      completePendingMessage(state, events, chunk)
+    }
+  }
+}
+
+function getAnthropicUsageFromOpenAIChunk(
+  chunk: ChatCompletionChunk,
+  state?: AnthropicStreamState,
+): NonNullable<AnthropicMessageDeltaEvent["usage"]> {
+  const { cacheCreationTokens, inputTokens, cacheReadTokens } =
+    getOpenAIChunkUsageTokens(chunk, state)
+
+  return {
+    input_tokens: inputTokens,
+    output_tokens: chunk.usage?.completion_tokens ?? 0,
+    ...(chunk.usage?.prompt_tokens_details?.cache_creation_input_tokens
+      !== undefined && {
+      cache_creation_input_tokens: cacheCreationTokens,
+    }),
+    ...(cacheReadTokens !== undefined && {
+      cache_read_input_tokens: cacheReadTokens,
+    }),
+  }
+}
+
+function getOpenAIChunkUsageTokens(
+  chunk: ChatCompletionChunk,
+  state?: AnthropicStreamState,
+): {
+  cacheCreationTokens: number
+  cachedTokens: number
+  inputTokens: number
+  cacheReadTokens?: number
+} {
+  const promptTokens = chunk.usage?.prompt_tokens
+  const cachedTokens = chunk.usage?.prompt_tokens_details?.cached_tokens ?? 0
+  const cacheCreationTokens =
+    chunk.usage?.prompt_tokens_details?.cache_creation_input_tokens ?? 0
+  if (promptTokens !== undefined) {
+    return {
+      cacheCreationTokens,
+      cachedTokens,
+      inputTokens: Math.max(
+        0,
+        promptTokens - cachedTokens - cacheCreationTokens,
+      ),
+      cacheReadTokens: chunk.usage?.prompt_tokens_details?.cached_tokens,
+    }
+  }
+
+  const historicalInputTokens = state?.historicalInputTokens
+  const historicalOutputTokens = state?.historicalOutputTokens ?? 0
+  const historicalTotalTokens =
+    historicalInputTokens !== undefined ?
+      historicalInputTokens + historicalOutputTokens
+    : undefined
+
+  return {
+    cacheCreationTokens,
+    cachedTokens,
+    inputTokens: historicalTotalTokens ?? state?.estimatedInputTokens ?? 0,
+    cacheReadTokens: state?.historicalCachedInputTokens,
   }
 }
 
@@ -182,14 +264,9 @@ function handleContent(
   if (delta.content && delta.content.length > 0) {
     closeThinkingBlockIfOpen(state, events)
 
-    if (isToolBlockOpen(state)) {
-      // A tool block was open, so close it before starting a text block.
-      events.push({
-        type: "content_block_stop",
-        index: state.contentBlockIndex,
-      })
-      state.contentBlockIndex++
-      state.contentBlockOpen = false
+    if (isToolBlockOpen(state) || hasToolCallDelta(delta)) {
+      state.deferredContent = `${state.deferredContent ?? ""}${delta.content}`
+      return
     }
 
     if (!state.contentBlockOpen) {
@@ -240,28 +317,57 @@ function handleContent(
   }
 }
 
+function hasToolCallDelta(delta: Delta): boolean {
+  return Boolean(delta.tool_calls && delta.tool_calls.length > 0)
+}
+
+function flushDeferredContent(
+  state: AnthropicStreamState,
+  events: Array<AnthropicStreamEventData>,
+): void {
+  if (!state.deferredContent) {
+    return
+  }
+
+  if (!state.contentBlockOpen) {
+    events.push({
+      type: "content_block_start",
+      index: state.contentBlockIndex,
+      content_block: {
+        type: "text",
+        text: "",
+      },
+    })
+    state.contentBlockOpen = true
+  }
+
+  events.push(
+    {
+      type: "content_block_delta",
+      index: state.contentBlockIndex,
+      delta: {
+        type: "text_delta",
+        text: state.deferredContent,
+      },
+    },
+    {
+      type: "content_block_stop",
+      index: state.contentBlockIndex,
+    },
+  )
+  state.deferredContent = undefined
+  state.contentBlockOpen = false
+  state.contentBlockIndex++
+}
+
 function handleMessageStart(
   state: AnthropicStreamState,
   events: Array<AnthropicStreamEventData>,
   chunk: ChatCompletionChunk,
 ) {
   if (!state.messageStartSent) {
-    const cachedTokens = chunk.usage?.prompt_tokens_details?.cached_tokens
-    const upstreamPromptTokens = chunk.usage?.prompt_tokens
-    const historicalInputTokens = state.historicalInputTokens
-    const historicalOutputTokens = state.historicalOutputTokens ?? 0
-    const historicalTotalTokens =
-      historicalInputTokens !== undefined ?
-        historicalInputTokens + historicalOutputTokens
-      : undefined
-    const inputTokens =
-      upstreamPromptTokens !== undefined ?
-        upstreamPromptTokens - (cachedTokens ?? 0)
-      : (historicalTotalTokens ?? state.estimatedInputTokens ?? 0)
-    const cacheReadTokens =
-      upstreamPromptTokens !== undefined ? cachedTokens : (
-        state.historicalCachedInputTokens
-      )
+    const { cacheCreationTokens, inputTokens, cacheReadTokens } =
+      getOpenAIChunkUsageTokens(chunk, state)
 
     events.push({
       type: "message_start",
@@ -276,6 +382,10 @@ function handleMessageStart(
         usage: {
           input_tokens: inputTokens,
           output_tokens: 0, // Will be updated in message_delta when finished
+          ...(chunk.usage?.prompt_tokens_details?.cache_creation_input_tokens
+            !== undefined && {
+            cache_creation_input_tokens: cacheCreationTokens,
+          }),
           ...(cacheReadTokens !== undefined && {
             cache_read_input_tokens: cacheReadTokens,
           }),
@@ -331,13 +441,15 @@ function handleThinkingText(
   state: AnthropicStreamState,
   events: Array<AnthropicStreamEventData>,
 ) {
-  if (delta.reasoning_text && delta.reasoning_text.length > 0) {
+  const reasoningText = delta.reasoning_text ?? delta.reasoning_content
+  if (reasoningText && reasoningText.length > 0) {
     // compatible with copilot API returning content->reasoning_text->reasoning_opaque in different deltas
     // this is an extremely abnormal situation, probably a server-side bug
     // only occurs in the claude model, with a very low probability of occurrence
     if (state.contentBlockOpen) {
-      delta.content = delta.reasoning_text
+      delta.content = reasoningText
       delta.reasoning_text = undefined
+      delta.reasoning_content = undefined
       return
     }
 
@@ -358,7 +470,7 @@ function handleThinkingText(
       index: state.contentBlockIndex,
       delta: {
         type: "thinking_delta",
-        thinking: delta.reasoning_text,
+        thinking: reasoningText,
       },
     })
   }

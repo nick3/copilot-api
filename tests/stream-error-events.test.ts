@@ -103,8 +103,16 @@ async function withMockedStreamingEndpoint<T>(params: {
   endpoint: string
   upstreamPath: string
   assert: (response: Response) => Promise<T>
+  createResponse?: () => Response
 }): Promise<T> {
-  const { route, request, endpoint, upstreamPath, assert } = params
+  const {
+    route,
+    request,
+    endpoint,
+    upstreamPath,
+    assert,
+    createResponse = createBrokenSseResponse,
+  } = params
 
   const originalSelect =
     accountsManager.selectAccountForRequest.bind(accountsManager)
@@ -140,7 +148,7 @@ async function withMockedStreamingEndpoint<T>(params: {
     }
 
     if (url.includes(upstreamPath)) {
-      return createBrokenSseResponse()
+      return createResponse()
     }
 
     return new Response("not found", { status: 404 })
@@ -158,6 +166,48 @@ async function withMockedStreamingEndpoint<T>(params: {
     fetchHolder.fetch = originalFetch
   }
 }
+
+test("messages route emits Anthropic error event for malformed stream JSON", async () => {
+  await withMockedStreamingEndpoint({
+    route: {
+      fetch: (request) => Promise.resolve(messageRoutes.fetch(request)),
+    },
+    endpoint: "/v1/messages",
+    upstreamPath: "/v1/messages",
+    createResponse: () =>
+      new Response("data: {not-json}\n\n", {
+        status: 200,
+        headers: {
+          "content-type": "text/event-stream",
+        },
+      }),
+    request: new Request("http://local/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-test",
+        stream: true,
+        max_tokens: 16,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    }),
+    assert: async (response) => {
+      expect(response.status).toBe(200)
+
+      const events = parseSse(await response.text())
+      const errorEvent = events.at(-1)
+
+      expect(errorEvent?.event).toBe("error")
+      expect(JSON.parse(errorEvent?.data ?? "null")).toEqual({
+        type: "error",
+        error: {
+          type: "api_error",
+          message: "Failed to parse messages stream event",
+        },
+      })
+    },
+  })
+})
 
 test("messages route emits Anthropic error event when translated stream fails", async () => {
   await withMockedStreamingEndpoint({

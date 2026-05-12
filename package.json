@@ -1,12 +1,15 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@nick3/copilot-api",
-  "version": "1.9.2",
-  "description": "Turn GitHub Copilot into OpenAI/Anthropic API compatible server. Usable with Claude Code Or Codex Or Opencode!",
+  "version": "1.9.15",
+  "description": "OpenAI and Anthropic-compatible gateway for GitHub Copilot or third-party providers.",
   "keywords": [
-    "proxy",
+    "dashboard",
+    "multi-provider",
     "github-copilot",
-    "openai-compatible"
+    "ai-gateway",
+    "openai-compatible",
+    "anthropic-compatible"
   ],
   "homepage": "https://github.com/nick3/copilot-api",
   "bugs": "https://github.com/nick3/copilot-api/issues",
@@ -45,6 +48,9 @@
   "lint-staged": {
     "*": "bun run lint --fix"
   },
+  "overrides": {
+    "rolldown": "1.0.0-rc.18"
+  },
   "dependencies": {
     "citty": "^0.1.6",
     "clipboardy": "^5.0.0",
@@ -53,26 +59,33 @@
     "gpt-tokenizer": "^3.0.1",
     "hono": "^4.9.9",
     "proxy-from-env": "^1.1.0",
-    "srvx": "^0.8.9",
+    "srvx": "^0.11.15",
     "tiny-invariant": "^1.3.3",
     "undici": "^7.16.0",
     "winreg": "^1.2.5",
     "zod": "^4.1.11"
   },
   "devDependencies": {
-    "@echristian/eslint-config": "^0.0.54",
+    "@eslint/js": "^9.37.0",
     "@types/bun": "^1.2.23",
     "@types/proxy-from-env": "^1.0.4",
     "@types/winreg": "^1.2.36",
     "baseline-browser-mapping": "^2.9.19",
     "bumpp": "^10.2.3",
     "eslint": "^9.37.0",
+    "eslint-config-flat-gitignore": "^2.1.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "eslint-plugin-unused-imports": "^4.2.0",
+    "globals": "^16.3.0",
     "knip": "^5.64.1",
     "lint-staged": "^16.2.3",
+    "prettier": "^3.6.2",
     "prettier-plugin-packagejson": "^2.5.19",
     "simple-git-hooks": "^2.13.1",
     "tsdown": "^0.15.6",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.41.0"
   },
   "engines": {
     "node": ">=20"

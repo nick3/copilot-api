@@ -32,6 +32,7 @@ export interface ResponsesPayload {
   stream?: boolean | null
   safety_identifier?: string | null
   prompt_cache_key?: string | null
+  prompt_cache_retention?: "in_memory" | "24h" | null
   parallel_tool_calls?: boolean | null
   store?: boolean | null
   reasoning?: Reasoning | null
@@ -375,6 +376,7 @@ interface ResponsesRequestOptions {
   sessionId?: string
   compactType?: CompactType
   requestId?: string
+  fetchImpl?: typeof fetch
 }
 
 export const createResponses = async (
@@ -387,6 +389,7 @@ export const createResponses = async (
     sessionId,
     compactType,
     requestId,
+    fetchImpl,
   }: ResponsesRequestOptions,
   account?: AccountContext,
 ): Promise<CreateResponsesReturn> => {
@@ -422,6 +425,7 @@ export const createResponses = async (
     {
       requestId,
       callSite: "responses",
+      fetchImpl,
     },
   )
 

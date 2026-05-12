@@ -60,7 +60,6 @@ async function withConfig(config: TestConfig, run: () => Promise<void>) {
   try {
     await run()
   } finally {
-    // eslint-disable-next-line unicorn/prefer-ternary
     if (original === null) {
       await fs.rm(PATHS.CONFIG_PATH, { force: true })
     } else {

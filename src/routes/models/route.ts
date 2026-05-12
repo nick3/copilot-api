@@ -11,15 +11,19 @@ modelRoutes.get("/", async (c) => {
     const blockedTargets = getAliasTargetSet()
     const models = getAvailableModels()
       .filter((model) => !blockedTargets.has(model.id.toLowerCase()))
-      .map((model) => ({
-        id: model.id,
-        object: "model",
-        type: "model",
-        created: 0, // No date available from source
-        created_at: new Date(0).toISOString(), // No date available from source
-        owned_by: model.vendor,
-        display_name: model.name,
-      }))
+      .map((model) => {
+        const is1m =
+          model.capabilities.limits?.max_context_window_tokens === 1_000_000
+        return {
+          id: is1m ? `${model.id}[1m]` : model.id,
+          object: "model",
+          type: "model",
+          created: 0,
+          created_at: new Date(0).toISOString(),
+          owned_by: model.vendor,
+          display_name: model.name,
+        }
+      })
 
     const aliasItems = Object.keys(getModelAliases())
     const aliasModels = aliasItems.map((alias) => ({

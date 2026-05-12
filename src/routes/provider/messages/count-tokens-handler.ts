@@ -1,58 +1,90 @@
-import type { Context } from "hono"
+import type { Context, Env } from "hono"
 
-import type { Model } from "~/services/copilot/get-models"
-
+import { getProviderConfig, type ResolvedProviderConfig } from "~/lib/config"
 import { createHandlerLogger } from "~/lib/logger"
-import { getAvailableModels } from "~/lib/models"
+import { findEndpointModel } from "~/lib/models"
+import { createFallbackModel } from "~/lib/provider-model"
 import { getTokenCount } from "~/lib/tokenizer"
 import { type AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
 import { translateToOpenAI } from "~/routes/messages/non-stream-translation"
 
 const logger = createHandlerLogger("provider-count-tokens-handler")
 
-const createFallbackModel = (modelId: string): Model => ({
-  capabilities: {
-    family: "provider",
-    limits: {},
-    object: "model_capabilities",
-    supports: {},
-    tokenizer: "o200k_base",
-    type: "chat",
-  },
-  id: modelId,
-  model_picker_enabled: false,
-  name: modelId,
-  object: "model",
-  preview: false,
-  vendor: "provider",
-  version: "unknown",
-})
+type ProviderConfigResolver = (
+  provider: string,
+) => ResolvedProviderConfig | null
 
-export async function handleProviderCountTokens(c: Context): Promise<Response> {
+const resolveProviderConfig = (
+  c: Context,
+  provider: string,
+): ResolvedProviderConfig | null => {
+  const resolver = c.get("providerConfigResolver" as never) as
+    | ProviderConfigResolver
+    | undefined
+  return (resolver ?? getProviderConfig)(provider)
+}
+
+export async function handleProviderCountTokens(
+  c: Context<Env, "/:provider">,
+): Promise<Response> {
   const provider = c.req.param("provider")
+  const payload = await c.req.json<AnthropicMessagesPayload>()
+  return await handleProviderCountTokensForProvider(c, { payload, provider })
+}
+
+export async function handleProviderCountTokensForProvider(
+  c: Context,
+  options: {
+    payload: AnthropicMessagesPayload
+    provider: string
+  },
+): Promise<Response> {
+  const { payload: anthropicPayload, provider } = options
+  const providerConfig = resolveProviderConfig(c, provider)
+  if (!providerConfig) {
+    return c.json(
+      {
+        error: {
+          message: `Provider '${provider}' not found or disabled`,
+          type: "invalid_request_error",
+        },
+      },
+      404,
+    )
+  }
+
+  if (
+    typeof anthropicPayload.model !== "string"
+    || !Array.isArray(anthropicPayload.messages)
+  ) {
+    return c.json(
+      {
+        error: {
+          message: "Invalid Anthropic messages count_tokens payload",
+          type: "invalid_request_error",
+        },
+      },
+      400,
+    )
+  }
+
+  const modelId = anthropicPayload.model.trim()
+  const modelConfig = providerConfig.models?.[modelId]
+  const translationOptions =
+    providerConfig.type === "openai-compatible" ?
+      {
+        supportPdf: modelConfig?.supportPdf,
+        toolContentSupportType: modelConfig?.toolContentSupportType ?? [],
+      }
+    : undefined
 
   try {
-    const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
-    const openAIPayload = translateToOpenAI(anthropicPayload)
-    const modelId = anthropicPayload.model.trim()
-
-    let selectedModel = getAvailableModels().find(
-      (model) => model.id === modelId,
+    const openAIPayload = translateToOpenAI(
+      anthropicPayload,
+      translationOptions,
     )
-
-    if (!selectedModel && modelId) {
-      selectedModel = createFallbackModel(modelId)
-    }
-
-    if (!selectedModel) {
-      logger.warn("provider.count_tokens.model_not_found", {
-        provider,
-        model: anthropicPayload.model,
-      })
-      return c.json({
-        input_tokens: 1,
-      })
-    }
+    const selectedModel =
+      findEndpointModel(modelId) ?? createFallbackModel(modelId)
 
     const tokenCount = await getTokenCount(openAIPayload, selectedModel)
     const finalTokenCount = tokenCount.input + tokenCount.output
@@ -71,8 +103,14 @@ export async function handleProviderCountTokens(c: Context): Promise<Response> {
       provider,
       error,
     })
-    return c.json({
-      input_tokens: 1,
-    })
+    return c.json(
+      {
+        error: {
+          message: "Failed to count provider tokens",
+          type: "internal_server_error",
+        },
+      },
+      500,
+    )
   }
 }

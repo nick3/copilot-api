@@ -4,7 +4,10 @@ import { z } from "zod"
 import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
 
 import { COMPACT_REQUEST } from "../src/lib/compact"
-import { translateToOpenAI } from "../src/routes/messages/non-stream-translation"
+import {
+  RICH_TOOL_RESULT_MOVED_TEXT,
+  translateToOpenAI,
+} from "../src/routes/messages/non-stream-translation"
 import { getCompactType } from "../src/routes/messages/preprocess"
 
 // Zod schema for a single message in the chat completion request.
@@ -293,11 +296,419 @@ describe("Anthropic to OpenAI tool and document content translation", () => {
           },
           {
             type: "text",
-            text: "A PDF document was attached, but this api cannot send PDF inputs directly. Analyze using other tools.",
+            text: "PDF/document content is not supported by this Chat Completions upstream. Use the available text extracted from the document.",
           },
         ],
       },
     ])
+  })
+})
+
+describe("tool content support translation", () => {
+  test("keeps Copilot chat translation compatible with array and image tool results", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool_image",
+              content: [
+                {
+                  type: "text",
+                  text: "screenshot",
+                },
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: "image/png",
+                    data: "image-data",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    expect(openAIPayload.messages).toEqual([
+      {
+        role: "tool",
+        tool_call_id: "tool_image",
+        content: [
+          {
+            type: "text",
+            text: "screenshot",
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: "data:image/png;base64,image-data",
+            },
+          },
+        ],
+      },
+    ])
+  })
+
+  test("keeps Copilot image tool content while downgrading unsupported PDFs", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool_pdf",
+              content: [
+                {
+                  type: "text",
+                  text: "screenshot",
+                },
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: "image/png",
+                    data: "image-data",
+                  },
+                },
+                {
+                  type: "text",
+                  text: "PDF file read: report.pdf",
+                },
+                {
+                  type: "document",
+                  source: {
+                    type: "base64",
+                    media_type: "application/pdf",
+                    data: "pdf-data",
+                  },
+                  title: "report.pdf",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    expect(openAIPayload.messages).toEqual([
+      {
+        role: "tool",
+        tool_call_id: "tool_pdf",
+        content: [
+          {
+            type: "text",
+            text: "screenshot",
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: "data:image/png;base64,image-data",
+            },
+          },
+          {
+            type: "text",
+            text: "PDF file read: report.pdf",
+          },
+          {
+            type: "text",
+            text: "PDF/document content is not supported by this Chat Completions upstream. Use the available text extracted from the document.",
+          },
+        ],
+      },
+    ])
+  })
+})
+
+describe("provider tool content support translation", () => {
+  test("uses string-only tool content when provider support is empty", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "qwen-plus",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool_text",
+              content: [
+                {
+                  type: "text",
+                  text: "line one",
+                },
+                {
+                  type: "text",
+                  text: "line two",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload, {
+      toolContentSupportType: [],
+    })
+
+    expect(openAIPayload.messages).toEqual([
+      {
+        role: "tool",
+        tool_call_id: "tool_text",
+        content: "line one\nline two",
+      },
+    ])
+  })
+
+  test("rewrites provider image tool results when image support is not configured", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "qwen-plus",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool_image",
+              content: [
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: "image/jpeg",
+                    data: "image-data",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload, {
+      toolContentSupportType: [],
+    })
+
+    expect(openAIPayload.messages).toEqual([
+      {
+        role: "tool",
+        tool_call_id: "tool_image",
+        content: RICH_TOOL_RESULT_MOVED_TEXT,
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "Tool result for tool_image:",
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: "data:image/jpeg;base64,image-data",
+            },
+          },
+        ],
+      },
+    ])
+  })
+
+  test("keeps a matching tool message before moved rich tool content", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "qwen-plus",
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool_image",
+              name: "read_image",
+              input: { path: "screenshot.png" },
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool_image",
+              content: [
+                {
+                  type: "text",
+                  text: "screenshot captured",
+                },
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: "image/png",
+                    data: "image-data",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload, {
+      toolContentSupportType: [],
+    })
+
+    expect(openAIPayload.messages).toHaveLength(3)
+    expect(openAIPayload.messages[0]).toMatchObject({
+      role: "assistant",
+      tool_calls: [
+        {
+          id: "tool_image",
+          type: "function",
+          function: {
+            name: "read_image",
+            arguments: '{"path":"screenshot.png"}',
+          },
+        },
+      ],
+    })
+    expect(openAIPayload.messages[1]).toEqual({
+      role: "tool",
+      tool_call_id: "tool_image",
+      content: "screenshot captured",
+    })
+    expect(openAIPayload.messages[2]).toEqual({
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: "Tool result for tool_image:",
+        },
+        {
+          type: "text",
+          text: "screenshot captured",
+        },
+        {
+          type: "image_url",
+          image_url: {
+            url: "data:image/png;base64,image-data",
+          },
+        },
+      ],
+    })
+  })
+})
+
+describe("provider tool result ordering", () => {
+  test("keeps all tool result messages contiguous before moved rich user content", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "qwen-plus",
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool_image",
+              name: "read_image",
+              input: { path: "screenshot.png" },
+            },
+            {
+              type: "tool_use",
+              id: "tool_text",
+              name: "read_text",
+              input: { path: "log.txt" },
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool_image",
+              content: [
+                {
+                  type: "text",
+                  text: "screenshot captured",
+                },
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: "image/png",
+                    data: "image-data",
+                  },
+                },
+              ],
+            },
+            {
+              type: "tool_result",
+              tool_use_id: "tool_text",
+              content: [
+                {
+                  type: "text",
+                  text: "line one",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload, {
+      toolContentSupportType: [],
+    })
+
+    expect(openAIPayload.messages).toHaveLength(4)
+    expect(openAIPayload.messages[1]).toEqual({
+      role: "tool",
+      tool_call_id: "tool_image",
+      content: "screenshot captured",
+    })
+    expect(openAIPayload.messages[2]).toEqual({
+      role: "tool",
+      tool_call_id: "tool_text",
+      content: "line one",
+    })
+    expect(openAIPayload.messages[3]).toEqual({
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: "Tool result for tool_image:",
+        },
+        {
+          type: "text",
+          text: "screenshot captured",
+        },
+        {
+          type: "image_url",
+          image_url: {
+            url: "data:image/png;base64,image-data",
+          },
+        },
+      ],
+    })
   })
 })
 

@@ -1,16 +1,27 @@
 import { describe, expect, test } from "bun:test"
+import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 interface DebugInfo {
+  version: string
   paths: {
     APP_DIR: string
     GITHUB_TOKEN_PATH: string
   }
 }
 
+interface PackageJson {
+  version: string
+}
+
 const cwd = fileURLToPath(new URL("../", import.meta.url))
 const decoder = new TextDecoder()
+const packageJson = JSON.parse(
+  // @ts-expect-error https://github.com/sindresorhus/eslint-plugin-unicorn/blob/v59.0.1/docs/rules/prefer-json-parse-buffer.md
+  // JSON.parse() can actually parse buffers
+  fs.readFileSync(new URL("../package.json", import.meta.url)),
+) as PackageJson
 const baseEnv = {
   ...process.env,
   COPILOT_API_HOME: "",
@@ -37,6 +48,12 @@ const runDebugJson = (...args: Array<string>): DebugInfo => {
 }
 
 describe("root-level global CLI options", () => {
+  test("reports the package version", () => {
+    const info = runDebugJson()
+
+    expect(info.version).toBe(packageJson.version)
+  })
+
   test("supports --api-home=value before the subcommand", () => {
     const info = runDebugJson("--api-home=foo")
 

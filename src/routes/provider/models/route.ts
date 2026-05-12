@@ -1,6 +1,6 @@
-import { Hono } from "hono"
+import { type Context, Hono } from "hono"
 
-import { getProviderConfig } from "~/lib/config"
+import { getProviderConfig, type ResolvedProviderConfig } from "~/lib/config"
 import { forwardError } from "~/lib/error"
 import { createHandlerLogger } from "~/lib/logger"
 import {
@@ -10,13 +10,30 @@ import {
 
 const logger = createHandlerLogger("provider-models-handler")
 
+type ProviderConfigResolver = (
+  provider: string,
+) => ResolvedProviderConfig | null
+
+const getProviderFetch = (c: Context): typeof fetch =>
+  (c.get("providerFetch" as never) as typeof fetch | undefined) ?? fetch
+
+const resolveProviderConfig = (
+  c: Context,
+  provider: string,
+): ResolvedProviderConfig | null => {
+  const resolver = c.get("providerConfigResolver" as never) as
+    | ProviderConfigResolver
+    | undefined
+  return (resolver ?? getProviderConfig)(provider)
+}
+
 export const providerModelRoutes = new Hono()
 
 providerModelRoutes.get("/", async (c) => {
   const provider = c.req.param("provider") ?? ""
 
   try {
-    const providerConfig = getProviderConfig(provider)
+    const providerConfig = resolveProviderConfig(c, provider)
     if (!providerConfig) {
       return c.json(
         {
@@ -32,6 +49,7 @@ providerModelRoutes.get("/", async (c) => {
     const upstreamResponse = await forwardProviderModels(
       providerConfig,
       c.req.raw.headers,
+      getProviderFetch(c),
     )
 
     logger.debug("provider.models.response", {

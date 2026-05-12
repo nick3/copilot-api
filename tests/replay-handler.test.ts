@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test"
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test"
 import { Hono } from "hono"
 import fs from "node:fs/promises"
 import path from "node:path"
@@ -20,6 +20,8 @@ import { replayRoutes } from "../src/routes/admin-api/replay"
 
 type TestConfig = Record<string, unknown>
 
+type RestorableSpy = { mockRestore: () => void }
+
 let outboundRow: OutboundCaptureRow | null = null
 let mockAccount: AccountContext | null = null
 let lastFetchInit: RequestInit | null = null
@@ -27,9 +29,16 @@ let mockFetchResponse: Response = new Response('{"ok":true}', {
   status: 200,
   headers: { "content-type": "application/json" },
 })
+let outboundStoreSpy: RestorableSpy | null = null
+let redactedHeaderKeysSpy: RestorableSpy | null = null
+let accountContextSpy: RestorableSpy | null = null
+let copilotFetchSpy: RestorableSpy | null = null
 
 beforeEach(() => {
-  spyOn(outboundMod, "getRequestOutboundStore").mockImplementation(
+  outboundStoreSpy = spyOn(
+    outboundMod,
+    "getRequestOutboundStore",
+  ).mockImplementation(
     () =>
       ({
         insert: () => {},
@@ -40,17 +49,19 @@ beforeEach(() => {
       }) as ReturnType<typeof outboundMod.getRequestOutboundStore>,
   )
 
-  spyOn(outboundMod, "getRedactedHeaderKeys").mockImplementation(
-    (headers: Record<string, string>) =>
-      Object.keys(headers).filter((k) => k.toLowerCase() === "authorization"),
+  redactedHeaderKeysSpy = spyOn(
+    outboundMod,
+    "getRedactedHeaderKeys",
+  ).mockImplementation((headers: Record<string, string>) =>
+    Object.keys(headers).filter((k) => k.toLowerCase() === "authorization"),
   )
 
-  spyOn(
+  accountContextSpy = spyOn(
     accountsMod.accountsManager,
     "getAccountContextById",
   ).mockImplementation((_id: string) => mockAccount)
 
-  spyOn(copilotFetchMod, "copilotFetch").mockImplementation(
+  copilotFetchSpy = spyOn(copilotFetchMod, "copilotFetch").mockImplementation(
     (_url: string | URL, init: RequestInit) => {
       lastFetchInit = init
       return Promise.resolve(mockFetchResponse)
@@ -59,7 +70,14 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  mock.restore()
+  copilotFetchSpy?.mockRestore()
+  accountContextSpy?.mockRestore()
+  redactedHeaderKeysSpy?.mockRestore()
+  outboundStoreSpy?.mockRestore()
+  copilotFetchSpy = null
+  accountContextSpy = null
+  redactedHeaderKeysSpy = null
+  outboundStoreSpy = null
   outboundRow = null
   mockAccount = null
   lastFetchInit = null

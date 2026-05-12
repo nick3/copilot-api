@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
+import type { ResolvedProviderConfig } from "~/lib/config"
 import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
 import type { ChatCompletionsPayload } from "~/services/copilot/create-chat-completions"
 import type { Model } from "~/services/copilot/get-models"
@@ -164,8 +165,30 @@ describe("account-managed model sources", () => {
     }
     const expected = await getTokenCount(openAIPayload, providerModel)
 
+    const getTestProviderConfig = (
+      provider: string,
+    ): ResolvedProviderConfig | null =>
+      provider === "test" ?
+        {
+          apiKey: "provider-key",
+          authType: "authorization",
+          baseUrl: "https://provider.example",
+          models: {
+            [providerModel.id]: {
+              toolContentSupportType: [],
+            },
+          },
+          name: "test",
+          type: "openai-compatible",
+        }
+      : null
+
     await withMockedModels([providerModel], async () => {
       const app = new Hono()
+      app.use("*", async (c, next) => {
+        c.set("providerConfigResolver" as never, getTestProviderConfig as never)
+        await next()
+      })
       app.post(
         "/providers/:provider/messages/count_tokens",
         handleProviderCountTokens,

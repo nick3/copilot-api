@@ -64,13 +64,17 @@ export interface ModelConfig {
   temperature?: number
   topP?: number
   topK?: number
+  extraBody?: Record<string, unknown>
+  contextCache?: boolean
+  supportPdf?: boolean
+  toolContentSupportType?: Array<ToolContentSupportType>
 }
 
 export const PROVIDER_TYPE_ANTHROPIC = "anthropic" as const
 
-export type ProviderType = typeof PROVIDER_TYPE_ANTHROPIC
-
+export type ProviderType = "anthropic" | "openai-compatible"
 export type ProviderAuthType = "authorization" | "x-api-key"
+export type ToolContentSupportType = "array" | "image" | "pdf"
 
 export interface ProviderConfig {
   type?: string
@@ -828,11 +832,22 @@ export function normalizeProviderBaseUrl(url: string): string {
   return url.trim().replace(/\/+$/u, "")
 }
 
-function resolveProviderAuthType(
+function getDefaultProviderAuthType(
+  providerType: ProviderType,
+): ProviderAuthType {
+  return providerType === "openai-compatible" ? "authorization" : "x-api-key"
+}
+
+export function resolveProviderAuthType(
   providerName: string,
-  authType?: string,
-): ProviderAuthType | null {
-  if (authType === undefined || authType === "x-api-key") {
+  authType: string | undefined,
+  providerType: ProviderType,
+): ProviderAuthType {
+  if (authType === undefined) {
+    return getDefaultProviderAuthType(providerType)
+  }
+
+  if (authType === "x-api-key") {
     return "x-api-key"
   }
 
@@ -841,9 +856,9 @@ function resolveProviderAuthType(
   }
 
   consola.warn(
-    `Provider ${providerName} has invalid authType '${authType}', ignoring provider`,
+    `Provider ${providerName} has invalid authType '${authType}', falling back to ${getDefaultProviderAuthType(providerType)}`,
   )
-  return null
+  return getDefaultProviderAuthType(providerType)
 }
 
 export function getProviderConfig(name: string): ResolvedProviderConfig | null {
@@ -863,19 +878,20 @@ export function getProviderConfig(name: string): ResolvedProviderConfig | null {
   }
 
   const type = provider.type ?? PROVIDER_TYPE_ANTHROPIC
-  if (type !== PROVIDER_TYPE_ANTHROPIC) {
+  if (type !== PROVIDER_TYPE_ANTHROPIC && type !== "openai-compatible") {
     consola.warn(
-      `Provider ${providerName} is ignored because only anthropic type is supported`,
+      `Provider ${providerName} is ignored because type '${type}' is not supported`,
     )
     return null
   }
 
   const baseUrl = normalizeProviderBaseUrl(provider.baseUrl ?? "")
   const apiKey = (provider.apiKey ?? "").trim()
-  const authType = resolveProviderAuthType(providerName, provider.authType)
-  if (!authType) {
-    return null
-  }
+  const authType = resolveProviderAuthType(
+    providerName,
+    provider.authType,
+    type,
+  )
   if (!baseUrl || !apiKey) {
     consola.warn(
       `Provider ${providerName} is enabled but missing baseUrl or apiKey`,
@@ -885,7 +901,7 @@ export function getProviderConfig(name: string): ResolvedProviderConfig | null {
 
   return {
     name: providerName,
-    type: PROVIDER_TYPE_ANTHROPIC,
+    type,
     baseUrl,
     apiKey,
     authType,

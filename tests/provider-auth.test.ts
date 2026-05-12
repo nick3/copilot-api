@@ -5,6 +5,7 @@ import path from "node:path"
 import {
   getProviderConfig,
   mergeConfigWithDefaults,
+  resolveProviderAuthType,
   type ResolvedProviderConfig,
 } from "~/lib/config"
 import { PATHS } from "~/lib/paths"
@@ -79,7 +80,7 @@ describe("getProviderConfig", () => {
     )
   })
 
-  test("returns null for invalid authType", async () => {
+  test("falls back to provider default for invalid authType", async () => {
     await withConfig(
       {
         providers: {
@@ -93,7 +94,15 @@ describe("getProviderConfig", () => {
         },
       },
       () => {
-        expect(getProviderConfig("custom")).toBeNull()
+        expect(getProviderConfig("custom")).toEqual({
+          name: "custom",
+          type: "anthropic",
+          baseUrl: "https://example.com",
+          apiKey: "provider-key",
+          authType: "x-api-key",
+          adjustInputTokens: undefined,
+          models: undefined,
+        })
       },
     )
   })
@@ -132,5 +141,38 @@ describe("buildProviderUpstreamHeaders", () => {
       authorization: "Bearer provider-key",
       "user-agent": "test-client",
     })
+  })
+
+  test("does not forward Anthropic-only headers to OpenAI-compatible providers", () => {
+    const headers = buildProviderUpstreamHeaders(
+      createProviderConfig({
+        authType: "authorization",
+        type: "openai-compatible",
+      }),
+      new Headers({
+        accept: "application/json",
+        "anthropic-version": "2023-06-01",
+      }),
+    )
+
+    expect(headers).toEqual({
+      "content-type": "application/json",
+      accept: "application/json",
+      authorization: "Bearer provider-key",
+    })
+  })
+})
+
+describe("resolveProviderAuthType", () => {
+  test("falls back to OpenAI-compatible default for invalid authType", () => {
+    expect(
+      resolveProviderAuthType("dash", "invalid-auth-type", "openai-compatible"),
+    ).toBe("authorization")
+  })
+
+  test("falls back to Anthropic default for invalid authType", () => {
+    expect(
+      resolveProviderAuthType("custom", "invalid-auth-type", "anthropic"),
+    ).toBe("x-api-key")
   })
 })

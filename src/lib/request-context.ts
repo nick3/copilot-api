@@ -16,6 +16,7 @@ export interface RequestContext {
   sessionAffinity: string | undefined
   parentSessionId: string | undefined
   outboundHeaders?: OutboundHeadersSnapshot
+  fetchImpl?: typeof fetch
 }
 
 const TRACE_ID_MAX_LENGTH = 64

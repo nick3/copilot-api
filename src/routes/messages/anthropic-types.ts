@@ -232,6 +232,8 @@ export interface AnthropicStreamState {
   historicalInputTokens?: number
   historicalOutputTokens?: number
   historicalCachedInputTokens?: number
+  pendingMessageDelta?: AnthropicMessageDeltaEvent
+  deferredContent?: string
   toolCalls: {
     [openAIToolIndex: number]: {
       id: string

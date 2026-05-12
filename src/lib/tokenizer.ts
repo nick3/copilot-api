@@ -56,6 +56,11 @@ const calculateContentPartsTokens = (
   for (const part of contentParts) {
     if (part.type === "image_url") {
       tokens += encoder.encode(part.image_url.url).length + 85
+    } else if (part.type === "file") {
+      tokens += encoder.encode(part.file.file_data).length
+      if (part.file.filename) {
+        tokens += encoder.encode(part.file.filename).length
+      }
     } else if (part.text) {
       tokens += encoder.encode(part.text).length
     }

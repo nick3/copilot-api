@@ -42,8 +42,7 @@ const fetchMock = mock((_url: string, opts: FetchOpts) => {
   }
 })
 
-// @ts-expect-error - Mock fetch doesn't implement all fetch properties
-;(globalThis as unknown as { fetch: typeof fetch }).fetch = fetchMock
+const fetchImpl = fetchMock as unknown as typeof fetch
 
 function getLastHeaders(): Record<string, string> {
   const lastCall = fetchMock.mock.calls.at(-1)
@@ -60,8 +59,13 @@ const basePayload = (input: ResponsesPayload["input"]): ResponsesPayload => ({
   input,
 })
 
+const callCreateResponses = (
+  payload: ResponsesPayload,
+  options: Parameters<typeof createResponses>[1],
+) => createResponses(payload, { ...options, fetchImpl })
+
 test("keeps x-initiator as user for ordinary responses requests", async () => {
-  await createResponses(basePayload([{ role: "user", content: "hello" }]), {
+  await callCreateResponses(basePayload([{ role: "user", content: "hello" }]), {
     vision: false,
     initiator: "user",
   })
@@ -70,7 +74,7 @@ test("keeps x-initiator as user for ordinary responses requests", async () => {
 })
 
 test("forces agent initiator for compact responses requests", async () => {
-  await createResponses(basePayload([{ role: "user", content: "hello" }]), {
+  await callCreateResponses(basePayload([{ role: "user", content: "hello" }]), {
     vision: false,
     initiator: "user",
     compactType: COMPACT_REQUEST,
@@ -80,7 +84,7 @@ test("forces agent initiator for compact responses requests", async () => {
 })
 
 test("keeps subagent interaction type for compact responses requests", async () => {
-  await createResponses(basePayload([{ role: "user", content: "hello" }]), {
+  await callCreateResponses(basePayload([{ role: "user", content: "hello" }]), {
     vision: false,
     initiator: "user",
     upstreamRequestId: "request-compact-responses",
@@ -102,7 +106,7 @@ test("keeps subagent interaction type for compact responses requests", async () 
 })
 
 test("forces agent initiator for subagent responses requests", async () => {
-  await createResponses(basePayload([{ role: "user", content: "hello" }]), {
+  await callCreateResponses(basePayload([{ role: "user", content: "hello" }]), {
     vision: false,
     initiator: "user",
     upstreamRequestId: "request-3",

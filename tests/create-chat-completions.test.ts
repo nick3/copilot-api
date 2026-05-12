@@ -13,7 +13,6 @@ type FetchOpts = {
   body?: string
 }
 
-const originalFetch = globalThis.fetch
 const originalState = {
   accountType: state.accountType,
   copilotToken: state.copilotToken,
@@ -36,8 +35,6 @@ beforeEach(() => {
   state.vsCodeVersion = "1.0.0"
   state.accountType = "individual"
   fetchMock.mockClear()
-  ;(globalThis as unknown as { fetch: typeof fetch }).fetch =
-    fetchMock as unknown as typeof fetch
 })
 
 afterEach(() => {
@@ -45,7 +42,6 @@ afterEach(() => {
   state.copilotToken = originalState.copilotToken
   state.vsCodeVersion = originalState.vsCodeVersion
   state.accountType = originalState.accountType
-  ;(globalThis as unknown as { fetch: typeof fetch }).fetch = originalFetch
 })
 
 function getLastFetchCall(): FetchOpts {
@@ -61,6 +57,15 @@ function getLastUpstreamPayload(): Record<string, unknown> {
   return JSON.parse(body as string) as Record<string, unknown>
 }
 
+const callCreateChatCompletions = (
+  payload: ChatCompletionsPayload,
+  options: Parameters<typeof createChatCompletions>[2] = {},
+) =>
+  createChatCompletions(payload, undefined, {
+    ...options,
+    fetchImpl: fetchMock as unknown as typeof fetch,
+  })
+
 test("sets x-initiator to agent if tool/assistant present", async () => {
   const callCountBefore = fetchMock.mock.calls.length
 
@@ -72,7 +77,7 @@ test("sets x-initiator to agent if tool/assistant present", async () => {
     model: "gpt-test",
   }
 
-  await createChatCompletions(payload)
+  await callCreateChatCompletions(payload)
 
   expect(fetchMock.mock.calls.length).toBe(callCountBefore + 1)
   const { headers } = getLastFetchCall()
@@ -92,7 +97,7 @@ test("sets x-initiator to user if only user present", async () => {
     model: "gpt-test",
   }
 
-  await createChatCompletions(payload)
+  await callCreateChatCompletions(payload)
 
   expect(fetchMock.mock.calls.length).toBe(callCountBefore + 1)
   const { headers } = getLastFetchCall()
@@ -107,7 +112,7 @@ test("respects explicit initiator override", async () => {
     model: "gpt-test",
   }
 
-  await createChatCompletions(payload, undefined, { initiator: "agent" })
+  await callCreateChatCompletions(payload, { initiator: "agent" })
 
   expect(fetchMock.mock.calls.length).toBe(callCountBefore + 1)
   const { headers } = getLastFetchCall()
@@ -120,7 +125,7 @@ test("sets interaction headers for explicit session and subagent", async () => {
     model: "gpt-test",
   }
 
-  await createChatCompletions(payload, undefined, {
+  await callCreateChatCompletions(payload, {
     upstreamRequestId: "request-1",
     sessionId: "session-1",
     subagentMarker: {
@@ -144,7 +149,7 @@ test("forces agent initiator for compact chat requests", async () => {
     model: "gpt-test",
   }
 
-  await createChatCompletions(payload, undefined, {
+  await callCreateChatCompletions(payload, {
     compactType: COMPACT_REQUEST,
   })
 
@@ -158,7 +163,7 @@ test("keeps subagent interaction type for compact chat requests", async () => {
     model: "gpt-test",
   }
 
-  await createChatCompletions(payload, undefined, {
+  await callCreateChatCompletions(payload, {
     upstreamRequestId: "request-compact-chat",
     sessionId: "session-compact-chat",
     subagentMarker: {
@@ -185,7 +190,7 @@ test("injects reasoning_effort from config for gpt-5-mini when omitted", async (
     model: "gpt-5-mini",
   }
 
-  await createChatCompletions(payload)
+  await callCreateChatCompletions(payload)
 
   expect(fetchMock.mock.calls.length).toBe(callCountBefore + 1)
   const upstreamPayload = getLastUpstreamPayload()
@@ -203,7 +208,7 @@ test("does not override explicit reasoning_effort for gpt-5-mini", async () => {
     reasoning_effort: "high",
   }
 
-  await createChatCompletions(payload)
+  await callCreateChatCompletions(payload)
 
   expect(fetchMock.mock.calls.length).toBe(callCountBefore + 1)
   const upstreamPayload = getLastUpstreamPayload()
@@ -219,7 +224,7 @@ test("passes through reasoning_effort for non-gpt-5-mini models", async () => {
     reasoning_effort: "low",
   }
 
-  await createChatCompletions(payload)
+  await callCreateChatCompletions(payload)
 
   expect(fetchMock.mock.calls.length).toBe(callCountBefore + 1)
   const upstreamPayload = getLastUpstreamPayload()
@@ -234,7 +239,7 @@ test("does not inject reasoning_effort for non-gpt-5-mini models when omitted", 
     model: "gpt-test",
   }
 
-  await createChatCompletions(payload)
+  await callCreateChatCompletions(payload)
 
   expect(fetchMock.mock.calls.length).toBe(callCountBefore + 1)
   const upstreamPayload = getLastUpstreamPayload()
@@ -249,7 +254,7 @@ test("injects reasoning_effort for gpt-5-mini variant models when omitted", asyn
     model: "gpt-5-mini-2026-01-01",
   }
 
-  await createChatCompletions(payload)
+  await callCreateChatCompletions(payload)
 
   expect(fetchMock.mock.calls.length).toBe(callCountBefore + 1)
   const upstreamPayload = getLastUpstreamPayload()
