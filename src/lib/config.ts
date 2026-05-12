@@ -373,7 +373,7 @@ function mergeDefaultAccountAffinity(config: AppConfig): {
       next.accountAffinity = raw.freeModelLoadBalancing
     }
     delete next.freeModelLoadBalancing
-    return { mergedConfig: next as AppConfig, changed: true }
+    return { mergedConfig: next, changed: true }
   }
 
   if (hasNew) {

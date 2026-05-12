@@ -1,11 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import type { AnthropicStreamEventData } from "~/routes/messages/anthropic-types"
-import type {
-  ResponseOutputItemAddedEvent,
-  ResponseFunctionCallArgumentsDeltaEvent,
-  ResponseFunctionCallArgumentsDoneEvent,
-} from "~/services/copilot/create-responses"
+import type { ResponseOutputItemAddedEvent } from "~/services/copilot/create-responses"
 
 import {
   createResponsesStreamState,
@@ -39,7 +35,7 @@ describe("translateResponsesStreamEvent tool calls", () => {
           output_index: 1,
           sequence_number: 2,
           delta: '{"todos":',
-        } as ResponseFunctionCallArgumentsDeltaEvent,
+        },
         state,
       ),
       translateResponsesStreamEvent(
@@ -49,7 +45,7 @@ describe("translateResponsesStreamEvent tool calls", () => {
           output_index: 1,
           sequence_number: 3,
           delta: "[]}",
-        } as ResponseFunctionCallArgumentsDeltaEvent,
+        },
         state,
       ),
       translateResponsesStreamEvent(
@@ -60,7 +56,7 @@ describe("translateResponsesStreamEvent tool calls", () => {
           output_index: 1,
           sequence_number: 4,
           arguments: '{"todos":[]}',
-        } as ResponseFunctionCallArgumentsDoneEvent,
+        },
         state,
       ),
     ].flat()
@@ -114,7 +110,7 @@ describe("translateResponsesStreamEvent tool calls", () => {
           sequence_number: 2,
           arguments:
             '{"todos":[{"content":"Review src/routes/responses/translation.ts"}]}',
-        } as ResponseFunctionCallArgumentsDoneEvent,
+        },
         state,
       ),
     ].flat()

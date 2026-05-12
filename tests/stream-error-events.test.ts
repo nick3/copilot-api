@@ -131,10 +131,8 @@ async function withMockedStreamingEndpoint<T>(params: {
 
   const selectMock = () => Promise.resolve(selection)
 
-  accountsManager.selectAccountForRequest =
-    selectMock as typeof accountsManager.selectAccountForRequest
-  accountsManager.finalizeQuota =
-    (async () => {}) as typeof accountsManager.finalizeQuota
+  accountsManager.selectAccountForRequest = selectMock
+  accountsManager.finalizeQuota = async () => {}
 
   const fetchMock = mock((input: Request | URL | string) => {
     let url: string

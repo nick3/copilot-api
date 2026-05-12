@@ -17,12 +17,12 @@ afterEach(() => {
 })
 
 test("isDevModeEnabled returns false when devMode is undefined", () => {
-  configSpy = spyOn(config, "getConfig").mockReturnValue({} as config.AppConfig)
+  configSpy = spyOn(config, "getConfig").mockReturnValue({})
   expect(isDevModeEnabled()).toBe(false)
 })
 
 test("isCapture4xxEnabled returns false when devMode is undefined", () => {
-  configSpy = spyOn(config, "getConfig").mockReturnValue({} as config.AppConfig)
+  configSpy = spyOn(config, "getConfig").mockReturnValue({})
   expect(isCapture4xxEnabled()).toBe(false)
 })
 
@@ -34,7 +34,7 @@ test("isDevModeEnabled returns true when enabled", () => {
       capture5xx: false,
       captureOther: false,
     },
-  } as config.AppConfig)
+  })
   expect(isDevModeEnabled()).toBe(true)
 })
 
@@ -46,12 +46,12 @@ test("isCapture4xxEnabled returns true when capture4xx is true", () => {
       capture5xx: false,
       captureOther: false,
     },
-  } as config.AppConfig)
+  })
   expect(isCapture4xxEnabled()).toBe(true)
 })
 
 test("isCapture5xxEnabled returns false when devMode is undefined", () => {
-  configSpy = spyOn(config, "getConfig").mockReturnValue({} as config.AppConfig)
+  configSpy = spyOn(config, "getConfig").mockReturnValue({})
   expect(isCapture5xxEnabled()).toBe(false)
 })
 
@@ -63,12 +63,12 @@ test("isCapture5xxEnabled returns true when capture5xx is true", () => {
       capture5xx: true,
       captureOther: false,
     },
-  } as config.AppConfig)
+  })
   expect(isCapture5xxEnabled()).toBe(true)
 })
 
 test("isCaptureOtherEnabled returns false when devMode is undefined", () => {
-  configSpy = spyOn(config, "getConfig").mockReturnValue({} as config.AppConfig)
+  configSpy = spyOn(config, "getConfig").mockReturnValue({})
   expect(isCaptureOtherEnabled()).toBe(false)
 })
 
@@ -80,6 +80,6 @@ test("isCaptureOtherEnabled returns true when captureOther is true", () => {
       capture5xx: false,
       captureOther: true,
     },
-  } as config.AppConfig)
+  })
   expect(isCaptureOtherEnabled()).toBe(true)
 })

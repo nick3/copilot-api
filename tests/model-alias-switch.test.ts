@@ -13,8 +13,6 @@ import { getRequestHistoryStore } from "~/lib/request-history"
 import { maybeBlockOriginalModelName } from "~/routes/messages/utils"
 import { modelRoutes } from "~/routes/models/route"
 
-type ModelsResponse = { data: Array<Model>; object: string }
-
 type ModelAliasSpec = {
   target: string
   allowOriginal?: boolean
@@ -72,11 +70,10 @@ const withMockedModels = async (run: () => Promise<void>) => {
   const originalGetFirstAccountModels =
     accountsManager.getFirstAccountModels.bind(accountsManager)
 
-  accountsManager.getFirstAccountModels = () =>
-    ({
-      data: [buildModel("gpt-5-mini"), buildModel("gpt-4")],
-      object: "list",
-    }) as ModelsResponse
+  accountsManager.getFirstAccountModels = () => ({
+    data: [buildModel("gpt-5-mini"), buildModel("gpt-4")],
+    object: "list",
+  })
 
   try {
     await run()

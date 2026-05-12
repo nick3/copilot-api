@@ -38,16 +38,13 @@ beforeEach(() => {
   outboundStoreSpy = spyOn(
     outboundMod,
     "getRequestOutboundStore",
-  ).mockImplementation(
-    () =>
-      ({
-        insert: () => {},
-        getByRequestId: () => outboundRow,
-        hasOutboundForIds: () => new Set(),
-        cleanupOrphans: () => {},
-        meta: () => ({ dbPath: "", userVersion: 0 }),
-      }) as ReturnType<typeof outboundMod.getRequestOutboundStore>,
-  )
+  ).mockImplementation(() => ({
+    insert: () => {},
+    getByRequestId: () => outboundRow,
+    hasOutboundForIds: () => new Set(),
+    cleanupOrphans: () => {},
+    meta: () => ({ dbPath: "", userVersion: 0 }),
+  }))
 
   redactedHeaderKeysSpy = spyOn(
     outboundMod,

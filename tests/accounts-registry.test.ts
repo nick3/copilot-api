@@ -108,13 +108,13 @@ test("addAccountToRegistry accepts managed user logins with underscores", async 
   await withMockedFs(
     {
       readFile: (() => "   \n") as unknown as ReadFile,
-      writeFile: ((
+      writeFile: (
         _path: Parameters<WriteFile>[0],
         data: Parameters<WriteFile>[1],
       ) => {
         storedContent = toWrittenString(data)
         return Promise.resolve()
-      }) as unknown as WriteFile,
+      },
     },
     () =>
       addAccountToRegistry({
@@ -135,14 +135,11 @@ test("addAccountToRegistry accepts managed user logins with underscores", async 
 })
 
 test("loadRegistry returns empty registry on ENOENT", async () => {
-  const registry = await withMockedReadFile(
-    (() => {
-      const err = new Error("ENOENT") as NodeJS.ErrnoException
-      err.code = "ENOENT"
-      throw err
-    }) as unknown as ReadFile,
-    loadRegistry,
-  )
+  const registry = await withMockedReadFile(() => {
+    const err = new Error("ENOENT") as NodeJS.ErrnoException
+    err.code = "ENOENT"
+    throw err
+  }, loadRegistry)
 
   expect(registry).toEqual({ version: 2, accounts: [], clientIdentities: {} })
 })
@@ -218,14 +215,14 @@ test("loadRegistry migrates version 1 registry and backfills client identities",
   const registry = await withMockedFs(
     {
       readFile: (() => Promise.resolve(storedContent)) as unknown as ReadFile,
-      writeFile: ((
+      writeFile: (
         _path: Parameters<WriteFile>[0],
         data: Parameters<WriteFile>[1],
       ) => {
         storedContent = toWrittenString(data)
         writes.push(storedContent)
         return Promise.resolve()
-      }) as unknown as WriteFile,
+      },
     },
     loadRegistry,
   )
@@ -270,14 +267,14 @@ test("ensureAccountClientIdentity reuses existing identity for the same key", as
   await withMockedFs(
     {
       readFile: (() => Promise.resolve(storedContent)) as unknown as ReadFile,
-      writeFile: ((
+      writeFile: (
         _path: Parameters<WriteFile>[0],
         data: Parameters<WriteFile>[1],
       ) => {
         storedContent = toWrittenString(data)
         writeCount++
         return Promise.resolve()
-      }) as unknown as WriteFile,
+      },
     },
     async () => {
       const created = await ensureAccountClientIdentity({
@@ -320,14 +317,14 @@ test("ensureAccountClientIdentity deduplicates concurrent creation for the same 
         readCount++
         return readDeferred.promise
       }) as unknown as ReadFile,
-      writeFile: ((
+      writeFile: (
         _path: Parameters<WriteFile>[0],
         data: Parameters<WriteFile>[1],
       ) => {
         storedContent = toWrittenString(data)
         writeCount++
         return Promise.resolve()
-      }) as unknown as WriteFile,
+      },
     },
     async () => {
       const first = ensureAccountClientIdentity({
@@ -382,14 +379,14 @@ test("ensureAccountClientIdentity persists migration backfill and new identity i
   await withMockedFs(
     {
       readFile: (() => Promise.resolve(storedContent)) as unknown as ReadFile,
-      writeFile: ((
+      writeFile: (
         _path: Parameters<WriteFile>[0],
         data: Parameters<WriteFile>[1],
       ) => {
         storedContent = toWrittenString(data)
         writeCount++
         return Promise.resolve()
-      }) as unknown as WriteFile,
+      },
     },
     async () => {
       const created = await ensureAccountClientIdentity({

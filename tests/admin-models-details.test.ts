@@ -8,8 +8,6 @@ import { accountsManager } from "~/lib/accounts-manager"
 import { mergeConfigWithDefaults } from "~/lib/config"
 import { PATHS } from "~/lib/paths"
 
-type ModelsResponse = { data: Array<Model>; object: string }
-
 type ModelAliasSpec = {
   target: string
   allowOriginal?: boolean
@@ -87,11 +85,10 @@ const withMockedModels = async (
   const originalGetFirstAccountModels =
     accountsManager.getFirstAccountModels.bind(accountsManager)
 
-  accountsManager.getFirstAccountModels = () =>
-    ({
-      data: models,
-      object: "list",
-    }) as ModelsResponse
+  accountsManager.getFirstAccountModels = () => ({
+    data: models,
+    object: "list",
+  })
 
   try {
     await run()

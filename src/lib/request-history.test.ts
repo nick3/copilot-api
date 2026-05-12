@@ -276,7 +276,7 @@ describe("RequestHistoryStore", () => {
       outboundXInteractionType: "messages-proxy",
       outboundOpenaiIntent: "messages-proxy",
       outboundUserAgent: "vscode_claude_code/2.1.81",
-    } as never)
+    })
 
     const row = store.getByRequestId("r-outbound") as
       | (Record<string, unknown> & { request_id?: string })
@@ -323,7 +323,7 @@ describe("RequestHistoryStore", () => {
           path: "/v1/messages",
           stream: false,
           httpStatus: 200,
-        } as never)
+        })
 
         store.insert({
           requestId: "r-snapshot-2",
@@ -332,7 +332,7 @@ describe("RequestHistoryStore", () => {
           path: "/v1/messages",
           stream: false,
           httpStatus: 200,
-        } as never)
+        })
       },
     )
 

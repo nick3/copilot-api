@@ -14,8 +14,6 @@ import { translateToOpenAI } from "~/routes/messages/non-stream-translation"
 import { modelRoutes } from "~/routes/models/route"
 import { handleProviderCountTokens } from "~/routes/provider/messages/count-tokens-handler"
 
-type ModelsResponse = { data: Array<Model>; object: string }
-
 const buildModel = (id: string, overrides?: Partial<Model>): Model => ({
   id,
   name: id,
@@ -52,11 +50,10 @@ const withMockedModels = async (
   models: Array<Model>,
   run: () => Promise<void> | void,
 ) => {
-  accountsManager.getFirstAccountModels = () =>
-    ({
-      data: models,
-      object: "list",
-    }) as ModelsResponse
+  accountsManager.getFirstAccountModels = () => ({
+    data: models,
+    object: "list",
+  })
   clearLegacyModels()
   await run()
 }

@@ -45,7 +45,7 @@ export function initProxyFromEnv(): void {
             /* noop */
           }
           consola.debug(`HTTP proxy route: ${origin.hostname} via ${label}`)
-          return (agent as unknown as Dispatcher).dispatch(options, handler)
+          return agent.dispatch(options, handler)
         } catch {
           return (direct as unknown as Dispatcher).dispatch(options, handler)
         }
