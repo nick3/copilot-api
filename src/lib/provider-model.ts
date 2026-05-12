@@ -25,6 +25,18 @@ export const parseProviderModelAlias = (
   }
 }
 
+export const resolveExistingProviderModelAlias = (
+  model: string,
+  resolveProvider: (provider: string) => unknown,
+): ProviderModelAlias | null => {
+  const alias = parseProviderModelAlias(model)
+  if (!alias) {
+    return null
+  }
+
+  return resolveProvider(alias.provider) ? alias : null
+}
+
 export const createFallbackModel = (modelId: string): Model => ({
   capabilities: {
     family: "provider",

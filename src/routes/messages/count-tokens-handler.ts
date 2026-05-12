@@ -2,10 +2,14 @@ import type { Context } from "hono"
 
 import consola from "consola"
 
-import { getAnthropicApiKey, getClaudeTokenMultiplier } from "~/lib/config"
+import {
+  getAnthropicApiKey,
+  getClaudeTokenMultiplier,
+  getProviderConfig,
+} from "~/lib/config"
 import {
   createFallbackModel,
-  parseProviderModelAlias,
+  resolveExistingProviderModelAlias,
 } from "~/lib/provider-model"
 import { getTokenCount } from "~/lib/tokenizer"
 import { handleProviderCountTokensForProvider } from "~/routes/provider/messages/count-tokens-handler"
@@ -14,6 +18,13 @@ import { type Model } from "~/services/copilot/get-models"
 import { findEndpointModel } from "../../lib/models"
 import { type AnthropicMessagesPayload } from "./anthropic-types"
 import { translateToOpenAI } from "./non-stream-translation"
+
+const getProviderConfigResolver = (c: Context): typeof getProviderConfig => {
+  const resolver = c.get("providerConfigResolver" as never) as
+    | typeof getProviderConfig
+    | undefined
+  return resolver ?? getProviderConfig
+}
 
 export const resolveCountTokensModel = (
   modelId: string,
@@ -87,7 +98,10 @@ async function countTokensViaAnthropic(
  */
 export async function handleCountTokens(c: Context) {
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
-  const providerModelAlias = parseProviderModelAlias(anthropicPayload.model)
+  const providerModelAlias = resolveExistingProviderModelAlias(
+    anthropicPayload.model,
+    getProviderConfigResolver(c),
+  )
   if (providerModelAlias) {
     anthropicPayload.model = providerModelAlias.model
     return await handleProviderCountTokensForProvider(c, {

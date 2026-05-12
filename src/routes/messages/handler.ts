@@ -15,6 +15,7 @@ import {
 import { awaitApproval } from "~/lib/approval"
 import { COMPACT_REQUEST, type CompactType } from "~/lib/compact"
 import {
+  getProviderConfig,
   getSmallModel,
   isMessageStartInputTokensFallbackEnabled,
   isMessagesApiEnabled,
@@ -29,7 +30,7 @@ import {
 } from "~/lib/handler-utils"
 import { createHandlerLogger, debugJson } from "~/lib/logger"
 import { findEndpointModel } from "~/lib/models"
-import { parseProviderModelAlias } from "~/lib/provider-model"
+import { resolveExistingProviderModelAlias } from "~/lib/provider-model"
 import { checkRateLimit } from "~/lib/rate-limit"
 import {
   extractResponsesUsageFromResult,
@@ -124,6 +125,13 @@ const logger = createHandlerLogger("messages-handler")
 const CHAT_COMPLETIONS_ENDPOINT = "/chat/completions"
 const RESPONSES_ENDPOINT = "/responses"
 const MESSAGES_ENDPOINT = "/v1/messages"
+
+const getProviderConfigResolver = (c: Context): typeof getProviderConfig => {
+  const resolver = c.get("providerConfigResolver" as never) as
+    | typeof getProviderConfig
+    | undefined
+  return resolver ?? getProviderConfig
+}
 
 type AccountSelection = Awaited<
   ReturnType<(typeof accountsManager)["selectAccountForRequest"]>
@@ -309,7 +317,10 @@ async function handleProviderAliasCompletion(
 // eslint-disable-next-line max-lines-per-function, complexity
 export async function handleCompletion(c: Context) {
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
-  const providerModelAlias = parseProviderModelAlias(anthropicPayload.model)
+  const providerModelAlias = resolveExistingProviderModelAlias(
+    anthropicPayload.model,
+    getProviderConfigResolver(c),
+  )
   if (providerModelAlias) {
     return await handleProviderAliasCompletion(c, {
       payload: anthropicPayload,

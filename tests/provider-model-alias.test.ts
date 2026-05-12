@@ -5,7 +5,10 @@ import "./shared-admin-db-test-home"
 
 import type { RequestLogRow } from "../src/lib/request-history"
 import type { ResolvedProviderConfig } from "../src/lib/config"
+import type { AccountRuntime } from "../src/lib/types/account"
+import type { Model } from "../src/services/copilot/get-models"
 
+import { accountsManager } from "../src/lib/accounts-manager"
 import { getAdminDb } from "../src/lib/admin-db"
 import { state } from "../src/lib/state"
 
@@ -35,6 +38,14 @@ const { messageRoutes } = await import("../src/routes/messages/route")
 const { resolveCountTokensModel } =
   await import("../src/routes/messages/count-tokens-handler")
 
+const fetchHolder = globalThis as unknown as { fetch: typeof fetch }
+const originalFetch = fetchHolder.fetch
+
+const originalSelectAccountForRequest =
+  accountsManager.selectAccountForRequest.bind(accountsManager)
+const originalFinalizeQuota =
+  accountsManager.finalizeQuota.bind(accountsManager)
+
 const originalState = {
   lastRequestTimestamp: state.lastRequestTimestamp,
   rateLimitSeconds: state.rateLimitSeconds,
@@ -45,6 +56,55 @@ type SseEvent = {
   event?: string
   data: string
 }
+
+type AccountSelection = Awaited<
+  ReturnType<(typeof accountsManager)["selectAccountForRequest"]>
+>
+type AccountSelectionOk = Extract<AccountSelection, { ok: true }>
+
+const buildAccount = (): AccountRuntime => ({
+  accountType: "individual",
+  addedAt: Date.now(),
+  copilotToken: "copilot-token",
+  githubToken: "github-token",
+  id: "octocat",
+  premiumRemaining: 10,
+  unlimited: false,
+  vsCodeVersion: "1.0.0",
+})
+
+const buildModel = (id: string): Model => ({
+  capabilities: {
+    family: "test",
+    limits: {},
+    object: "model_capabilities",
+    supports: {},
+    tokenizer: "o200k_base",
+    type: "chat",
+  },
+  id,
+  model_picker_enabled: true,
+  name: id,
+  object: "model",
+  preview: false,
+  vendor: "upstream",
+  version: "test",
+})
+
+const buildSelection = (
+  endpoint: string,
+  modelId: string,
+): AccountSelectionOk => ({
+  account: buildAccount(),
+  affinityHit: false,
+  confirmAffinity: mock(() => {}),
+  confirmOwnership: mock(() => {}),
+  costUnits: 0,
+  endpoint,
+  ok: true,
+  selectedModel: buildModel(modelId),
+  selectionReason: "affinity_miss",
+})
 
 const createChatCompletionResponse = (): Response =>
   new Response(
@@ -133,6 +193,9 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  fetchHolder.fetch = originalFetch
+  accountsManager.selectAccountForRequest = originalSelectAccountForRequest
+  accountsManager.finalizeQuota = originalFinalizeQuota
   state.rateLimitSeconds = originalState.rateLimitSeconds
   state.rateLimitWait = originalState.rateLimitWait
   state.lastRequestTimestamp = originalState.lastRequestTimestamp
@@ -181,13 +244,50 @@ describe("provider/model aliases on top-level messages routes", () => {
     expect(row?.http_status).toBe(200)
   })
 
-  test("records missing provider aliases as request-history errors", async () => {
+  test("falls back to Copilot model aliases when slash prefix is not a provider", async () => {
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("/chat/completions", "gpt-5.4"))
+    accountsManager.finalizeQuota = () => Promise.resolve()
+    createUpstreamResponse = () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: "stop",
+              index: 0,
+              logprobs: null,
+              message: {
+                content: "copilot answer",
+                role: "assistant",
+              },
+            },
+          ],
+          created: 0,
+          id: "chatcmpl-copilot",
+          model: "gpt-5.4",
+          object: "chat.completion",
+          usage: {
+            completion_tokens: 2,
+            prompt_tokens: 8,
+            total_tokens: 10,
+          },
+        }),
+        {
+          headers: {
+            "content-type": "application/json",
+          },
+        },
+      )
+
+    state.rateLimitSeconds = undefined
+    fetchHolder.fetch = fetchMock as unknown as typeof fetch
+
     const app = createApp()
     const response = await app.request("/v1/messages", {
       body: JSON.stringify({
         max_tokens: 128,
         messages: [{ content: "hello", role: "user" }],
-        model: "missing/qwen-plus",
+        model: "copilot/gpt-5.4",
       }),
       headers: {
         "content-type": "application/json",
@@ -195,23 +295,22 @@ describe("provider/model aliases on top-level messages routes", () => {
       method: "POST",
     })
 
-    expect(response.status).toBe(404)
-    expect(await response.json()).toEqual({
-      error: {
-        message: "Provider 'missing' not found or disabled",
-        type: "invalid_request_error",
-      },
+    expect(response.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const upstreamBody = JSON.parse(
+      (fetchMock.mock.calls[0][1] as RequestInit).body as string,
+    ) as Record<string, unknown>
+    expect(upstreamBody.model).toBe("gpt-5.4")
+    expect(await response.json()).toMatchObject({
+      model: "gpt-5.4",
     })
 
     const row = getAdminDb()
       .query("SELECT * FROM request_log WHERE client_model = ? LIMIT 1;")
-      .get("missing/qwen-plus") as RequestLogRow | null
-    expect(row?.path).toBe("/v1/messages")
-    expect(row?.upstream_endpoint).toBe("/providers/missing/messages")
-    expect(row?.upstream_model).toBe("qwen-plus")
-    expect(row?.account_id).toBeNull()
-    expect(row?.http_status).toBe(404)
-    expect(row?.error_name).toBe("ProviderNotFoundError")
+      .get("copilot/gpt-5.4") as RequestLogRow | null
+    expect(row?.upstream_endpoint).toBe("/chat/completions")
+    expect(row?.upstream_model).toBe("gpt-5.4")
+    expect(row?.http_status).toBe(200)
   })
 
   test("records streaming provider aliases after the stream completes", async () => {
@@ -354,6 +453,26 @@ describe("provider/model aliases on top-level messages routes", () => {
     })
 
     expect(response.status).toBe(200)
+    const json = (await response.json()) as { input_tokens: number }
+    expect(json.input_tokens).toBeGreaterThan(0)
+  })
+
+  test("estimates count_tokens locally when slash prefix is not a provider", async () => {
+    const app = createApp()
+    const response = await app.request("/v1/messages/count_tokens", {
+      body: JSON.stringify({
+        max_tokens: 128,
+        messages: [{ content: "hello", role: "user" }],
+        model: "copilot/gpt-5.4",
+      }),
+      headers: {
+        "content-type": "application/json",
+      },
+      method: "POST",
+    })
+
+    expect(response.status).toBe(200)
+    expect(fetchMock).not.toHaveBeenCalled()
     const json = (await response.json()) as { input_tokens: number }
     expect(json.input_tokens).toBeGreaterThan(0)
   })
