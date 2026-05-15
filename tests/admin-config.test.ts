@@ -195,6 +195,29 @@ test("POST /api/admin/config updates useResponsesApiWebSearch", async () => {
   })
 })
 
+test("POST /api/admin/config updates useResponsesApiWebSocket", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ useResponsesApiWebSocket: false }),
+      }),
+    )
+
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as {
+      useResponsesApiWebSocket?: boolean
+    }
+    expect(body.useResponsesApiWebSocket).toBe(false)
+  })
+})
+
 test("POST /api/admin/config updates anthropicApiKey", async () => {
   await withConfig({}, async () => {
     const { server } = await import("../src/server")

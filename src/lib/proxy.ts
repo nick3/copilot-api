@@ -2,9 +2,13 @@ import consola from "consola"
 import { getProxyForUrl } from "proxy-from-env"
 import { Agent, ProxyAgent, setGlobalDispatcher, type Dispatcher } from "undici"
 
-export function initProxyFromEnv(): void {
-  if (typeof Bun !== "undefined") return
+let proxyEnvDispatcher: Dispatcher | undefined
 
+export function getProxyEnvDispatcher(): Dispatcher | undefined {
+  return proxyEnvDispatcher
+}
+
+export function initProxyFromEnv(): void {
   try {
     const direct = new Agent()
     const proxies = new Map<string, ProxyAgent>()
@@ -58,7 +62,14 @@ export function initProxyFromEnv(): void {
       },
     }
 
-    setGlobalDispatcher(dispatcher as unknown as Dispatcher)
+    proxyEnvDispatcher = dispatcher as unknown as Dispatcher
+
+    if (typeof Bun !== "undefined") {
+      consola.debug("WebSocket proxy configured from environment (per-URL)")
+      return
+    }
+
+    setGlobalDispatcher(proxyEnvDispatcher)
     consola.debug("HTTP proxy configured from environment (per-URL)")
   } catch (err) {
     consola.debug("Proxy setup skipped:", err)

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 
-import type { CompactType } from "./compact"
+import { COMPACT_REQUEST, type CompactType } from "./compact"
 import type { AccountContext } from "./types/account"
 
 import { getCachedOpencodeVersion } from "./opencode"
@@ -102,6 +102,10 @@ export const prepareForCompact = (
 ) => {
   if (compactType) {
     headers["x-initiator"] = "agent"
+    if (!isOpencodeOauthApp() && compactType === COMPACT_REQUEST) {
+      headers["x-interaction-type"] = "conversation-compaction"
+      headers["openai-intent"] = "conversation-agent"
+    }
   }
 }
 
@@ -141,13 +145,16 @@ const OPENCODE_VERSION = "opencode/1.14.29"
 const OPENCODE_LLM_USER_AGENT =
   "opencode/1.14.29 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.13, opencode/1.14.29"
 
-const COPILOT_VERSION = "0.46.0"
+const COPILOT_VERSION = "0.48.0"
 const EDITOR_PLUGIN_VERSION = `copilot-chat/${COPILOT_VERSION}`
 const USER_AGENT = `GitHubCopilotChat/${COPILOT_VERSION}`
 const CLAUDE_AGENT_USER_AGENT =
   "vscode_claude_code/2.1.112 (external, sdk-ts, agent-sdk/0.2.112)"
+const COPILOT_WEBSOCKET_VERSION = COPILOT_VERSION
+const EDITOR_WEBSOCKET_PLUGIN_VERSION = `copilot-chat/${COPILOT_WEBSOCKET_VERSION}`
 
-const API_VERSION = "2025-10-01"
+const API_VERSION = "2026-01-09"
+const WEBSOCKET_API_VERSION = API_VERSION
 
 export const copilotBaseUrl = (account: AccountContext): string => {
   const enterpriseDomain = getEnterpriseDomain()
@@ -259,6 +266,106 @@ export const copilotHeaders = (
   }
 
   return githubCopilotHeaders(account, vision, requestId)
+}
+
+export const copilotWebSocketHeaders = (
+  preparedHeaders: Record<string, string>,
+) => {
+  if (isOpencodeOauthApp()) {
+    return omitHeader(preparedHeaders, "x-initiator")
+  }
+
+  const requestId =
+    getPreparedHeader(preparedHeaders, "x-request-id") ?? randomUUID()
+  const source = createHeaderResolver(preparedHeaders)
+  const headers: Record<string, string> = {
+    Authorization: source("authorization"),
+    "X-Request-Id": requestId,
+    "OpenAI-Intent": source("openai-intent", "conversation-agent"),
+    "X-GitHub-Api-Version": source(
+      "x-github-api-version",
+      WEBSOCKET_API_VERSION,
+    ),
+    "X-Interaction-Id": source("x-interaction-id", requestId),
+    "X-Interaction-Type": source("x-interaction-type", "conversation-agent"),
+    "X-Agent-Task-Id": source("x-agent-task-id", requestId),
+  }
+
+  setPreparedHeader(
+    headers,
+    "VScode-SessionId",
+    preparedHeaders,
+    "vscode-sessionid",
+  )
+
+  setPreparedHeader(
+    headers,
+    "VScode-MachineId",
+    preparedHeaders,
+    "vscode-machineid",
+  )
+
+  Object.assign(headers, {
+    "Editor-Device-Id": source("editor-device-id"),
+    "Editor-Plugin-Version": source(
+      "editor-plugin-version",
+      EDITOR_WEBSOCKET_PLUGIN_VERSION,
+    ),
+    "Editor-Version": source("editor-version"),
+    "Copilot-Integration-Id": source("copilot-integration-id", "vscode-chat"),
+  })
+
+  setPreparedHeader(
+    headers,
+    "Copilot-Vision-Request",
+    preparedHeaders,
+    "copilot-vision-request",
+  )
+
+  headers["user-agent"] = "node"
+
+  return headers
+}
+
+const createHeaderResolver =
+  (headers: Record<string, string>) =>
+  (headerName: string, fallback: string = ""): string =>
+    getPreparedHeader(headers, headerName) ?? fallback
+
+const getPreparedHeader = (
+  headers: Record<string, string>,
+  headerName: string,
+): string | undefined => {
+  const normalizedHeaderName = headerName.toLowerCase()
+  const match = Object.entries(headers).find(
+    ([key]) => key.toLowerCase() === normalizedHeaderName,
+  )
+
+  return match?.[1]
+}
+
+const setPreparedHeader = (
+  target: Record<string, string>,
+  targetHeaderName: string,
+  source: Record<string, string>,
+  sourceHeaderName: string,
+): void => {
+  const value = getPreparedHeader(source, sourceHeaderName)
+  if (value) {
+    target[targetHeaderName] = value
+  }
+}
+
+const omitHeader = (
+  headers: Record<string, string>,
+  headerName: string,
+): Record<string, string> => {
+  const normalizedHeaderName = headerName.toLowerCase()
+  return Object.fromEntries(
+    Object.entries(headers).filter(
+      ([key]) => key.toLowerCase() !== normalizedHeaderName,
+    ),
+  )
 }
 
 const githubCopilotHeaders = (

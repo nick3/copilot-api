@@ -138,7 +138,8 @@ test("keeps subagent interaction type for compact subagent requests", async () =
   expect(headers["x-request-id"]).toBe("request-compact-subagent")
   expect(headers["x-agent-task-id"]).toBe("request-compact-subagent")
   expect(headers["x-interaction-id"]).toBe("session-compact-subagent")
-  expect(headers["x-interaction-type"]).toBe("conversation-subagent")
+  expect(headers["x-interaction-type"]).toBe("conversation-compaction")
+  expect(headers["openai-intent"]).toBe("conversation-agent")
   expect(headers["x-initiator"]).toBe("agent")
 })
 

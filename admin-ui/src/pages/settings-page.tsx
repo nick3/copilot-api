@@ -1938,6 +1938,7 @@ type AdvancedSettingsCardProps = {
   compactUseSmallModel: boolean
   messageStartInputTokensFallback: boolean
   useMessagesApi: boolean
+  useResponsesApiWebSocket: boolean
   useResponsesApiWebSearch: boolean
   responsesApiContextManagementModelsValue: string
   onToggleAccountAffinity: (value: boolean) => void
@@ -1949,11 +1950,12 @@ type AdvancedSettingsCardProps = {
   onToggleCompactUseSmallModel: (value: boolean) => void
   onToggleMessageStartInputTokensFallback: (value: boolean) => void
   onToggleUseMessagesApi: (value: boolean) => void
+  onToggleUseResponsesApiWebSocket: (value: boolean) => void
   onToggleUseResponsesApiWebSearch: (value: boolean) => void
   onResponsesApiContextManagementModelsChange: (value: string) => void
 }
 
-function AdvancedSettingsCard({
+export function AdvancedSettingsCard({
   accountAffinityEnabled,
   modelRefreshIntervalInput,
   modelRefreshIntervalIssue,
@@ -1965,6 +1967,7 @@ function AdvancedSettingsCard({
   compactUseSmallModel,
   messageStartInputTokensFallback,
   useMessagesApi,
+  useResponsesApiWebSocket,
   useResponsesApiWebSearch,
   responsesApiContextManagementModelsValue,
   onToggleAccountAffinity,
@@ -1976,6 +1979,7 @@ function AdvancedSettingsCard({
   onToggleCompactUseSmallModel,
   onToggleMessageStartInputTokensFallback,
   onToggleUseMessagesApi,
+  onToggleUseResponsesApiWebSocket,
   onToggleUseResponsesApiWebSearch,
   onResponsesApiContextManagementModelsChange,
 }: AdvancedSettingsCardProps): React.JSX.Element {
@@ -2067,6 +2071,21 @@ function AdvancedSettingsCard({
           <Switch
             checked={useFunctionApplyPatch}
             onCheckedChange={onToggleUseFunctionApplyPatch}
+          />
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="text-sm font-medium">
+              {t("settingsPage.advanced.useResponsesApiWebSocketLabel")}
+            </div>
+            <div className="text-muted-foreground text-xs">
+              {t("settingsPage.advanced.useResponsesApiWebSocketHint")}
+            </div>
+          </div>
+          <Switch
+            checked={useResponsesApiWebSocket}
+            onCheckedChange={onToggleUseResponsesApiWebSocket}
           />
         </div>
 
@@ -2602,9 +2621,11 @@ type SettingsPageViewProps = {
   compactUseSmallModel: boolean
   messageStartInputTokensFallback: boolean
   useMessagesApi: boolean
+  useResponsesApiWebSocket: boolean
   useResponsesApiWebSearch: boolean
   responsesApiContextManagementModelsValue: string
   onUseMessagesApiToggle: (value: boolean) => void
+  onUseResponsesApiWebSocketToggle: (value: boolean) => void
   onUseResponsesApiWebSearchToggle: (value: boolean) => void
   onResponsesApiContextManagementModelsChange: (value: string) => void
   providersItems: Array<ProviderItem>
@@ -2963,6 +2984,13 @@ function useSettingsPageState(): SettingsPageViewProps {
     [setDraft],
   )
 
+  const handleUseResponsesApiWebSocketToggle = useCallback(
+    (value: boolean) => {
+      setDraft((prev) => ({ ...prev, useResponsesApiWebSocket: value }))
+    },
+    [setDraft],
+  )
+
   const handleUseResponsesApiWebSearchToggle = useCallback(
     (value: boolean) => {
       setDraft((prev) => ({ ...prev, useResponsesApiWebSearch: value }))
@@ -3072,6 +3100,7 @@ function useSettingsPageState(): SettingsPageViewProps {
   const messageStartInputTokensFallback =
     draft.messageStartInputTokensFallback ?? false
   const useMessagesApi = draft.useMessagesApi ?? true
+  const useResponsesApiWebSocket = draft.useResponsesApiWebSocket ?? true
   const useResponsesApiWebSearch = draft.useResponsesApiWebSearch ?? true
 
   return {
@@ -3140,9 +3169,11 @@ function useSettingsPageState(): SettingsPageViewProps {
     compactUseSmallModel,
     messageStartInputTokensFallback,
     useMessagesApi,
+    useResponsesApiWebSocket,
     useResponsesApiWebSearch,
     responsesApiContextManagementModelsValue,
     onUseMessagesApiToggle: handleUseMessagesApiToggle,
+    onUseResponsesApiWebSocketToggle: handleUseResponsesApiWebSocketToggle,
     onUseResponsesApiWebSearchToggle: handleUseResponsesApiWebSearchToggle,
     onResponsesApiContextManagementModelsChange:
       handleResponsesApiContextManagementModelsChange,
@@ -3230,9 +3261,11 @@ function SettingsPageView({
   compactUseSmallModel,
   messageStartInputTokensFallback,
   useMessagesApi,
+  useResponsesApiWebSocket,
   useResponsesApiWebSearch,
   responsesApiContextManagementModelsValue,
   onUseMessagesApiToggle,
+  onUseResponsesApiWebSocketToggle,
   onUseResponsesApiWebSearchToggle,
   onResponsesApiContextManagementModelsChange,
   providersItems,
@@ -3472,6 +3505,7 @@ function SettingsPageView({
               compactUseSmallModel={compactUseSmallModel}
               messageStartInputTokensFallback={messageStartInputTokensFallback}
               useMessagesApi={useMessagesApi}
+              useResponsesApiWebSocket={useResponsesApiWebSocket}
               useResponsesApiWebSearch={useResponsesApiWebSearch}
               responsesApiContextManagementModelsValue={
                 responsesApiContextManagementModelsValue
@@ -3491,6 +3525,9 @@ function SettingsPageView({
                 onMessageStartInputTokensFallbackToggle
               }
               onToggleUseMessagesApi={onUseMessagesApiToggle}
+              onToggleUseResponsesApiWebSocket={
+                onUseResponsesApiWebSocketToggle
+              }
               onToggleUseResponsesApiWebSearch={
                 onUseResponsesApiWebSearchToggle
               }

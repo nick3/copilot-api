@@ -75,6 +75,7 @@ import {
   applyResponsesApiContextManagement,
   compactInputByLatestCompaction,
   getResponsesRequestOptions,
+  getResponsesTransportForModel,
 } from "~/routes/responses/utils"
 import { flushPendingCapture } from "~/services/copilot/copilot-fetch"
 import {
@@ -702,6 +703,8 @@ const handleWithResponsesApi = async (params: {
   debugJson(logger, "Translated Responses payload:", responsesPayload)
 
   const { vision, initiator } = getResponsesRequestOptions(responsesPayload)
+  const transport =
+    getResponsesTransportForModel(selectedModel, { compactType }) ?? "http"
   const isCompact = compactType !== 0
   const effectiveInitiator = resolveEffectiveInitiator(initiator, {
     isCompact,
@@ -724,6 +727,7 @@ const handleWithResponsesApi = async (params: {
         sessionId,
         compactType,
         requestId: instr.requestId,
+        transport,
       },
       ctx,
     )

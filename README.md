@@ -361,6 +361,7 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
     "modelRefreshIntervalHours": 24,
     "sessionAffinityRetentionDays": 7,
     "useMessagesApi": true,
+    "useResponsesApiWebSocket": true,
     "useResponsesApiWebSearch": true,
     "logLevel": "info"
   }
@@ -452,6 +453,7 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
 - **modelRefreshIntervalHours:** Interval for refreshing account model lists in the background. Set to `0` to disable refresh. Defaults to `24`.
 - **sessionAffinityRetentionDays:** Number of days to retain session affinity bindings. Defaults to `7`.
 - **useMessagesApi:** When `true` (default), Claude-family models that support Copilot's native `/v1/messages` endpoint may use the Messages API path. Set to `false` to skip the Messages API candidate and fall back to `/responses` (if supported) or `/chat/completions`.
+- **useResponsesApiWebSocket:** When `true` (default), Responses API requests use Copilot's WebSocket transport for models that advertise `ws:/responses`; models that only advertise `/responses` continue to use HTTP. Set to `false` to disable WebSocket routing.
 - **useResponsesApiWebSearch:** When `true` (default), `/v1/responses` keeps tools with `type: "web_search"` and forwards them upstream. Set to `false` to strip them before the Copilot request is sent.
 - **logLevel:** Controls handler file-log verbosity under `logs/*.log`. Allowed values: `error`, `warn`, `info`, `debug`. Defaults to `info`. Set it to `debug` when you need payload- or stream-level diagnostics written into file logs.
 - **anthropicApiKey:** Optional Anthropic API key used for accurate Claude token counting (see [Accurate Claude Token Counting](#accurate-claude-token-counting) below). Can also be set via the `ANTHROPIC_API_KEY` environment variable. If not set, token counting falls back to GPT tokenizer estimation.

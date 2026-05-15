@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 
 import {
+  getCopilotRateLimitUsageFromSnapshots,
   getCopilotRateLimitUsage,
   parseCopilotRateLimitHeader,
 } from "../src/lib/copilot-rate-limit"
@@ -33,5 +34,35 @@ test("getCopilotRateLimitUsage reads session and weekly headers", () => {
     type: "weekly",
     remaining: "95.9",
     resetAt: "2026-04-27T00:00:00Z",
+  })
+})
+
+test("getCopilotRateLimitUsageFromSnapshots reads websocket response completed snapshots", () => {
+  const snapshots = {
+    "5Hour-Session-RateLimits": {
+      entitlement: "0",
+      overage_count: 0,
+      overage_permitted: false,
+      percent_remaining: 99.6,
+      reset_date: "2026-05-13T17:54:08Z",
+    },
+    "Weekly-Session-RateLimits": {
+      entitlement: "0",
+      overage_count: 0,
+      overage_permitted: false,
+      percent_remaining: 94.2,
+      reset_date: "2026-05-18T00:00:00Z",
+    },
+  }
+
+  expect(getCopilotRateLimitUsageFromSnapshots(snapshots, "session")).toEqual({
+    remaining: "99.6",
+    resetAt: "2026-05-13T17:54:08Z",
+    type: "session",
+  })
+  expect(getCopilotRateLimitUsageFromSnapshots(snapshots, "weekly")).toEqual({
+    remaining: "94.2",
+    resetAt: "2026-05-18T00:00:00Z",
+    type: "weekly",
   })
 })

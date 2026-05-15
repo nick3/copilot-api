@@ -195,6 +195,7 @@ const CONFIG_KEYS = new Set<keyof AppConfig>([
   "modelRefreshIntervalHours",
   "sessionAffinityRetentionDays",
   "useMessagesApi",
+  "useResponsesApiWebSocket",
   "useResponsesApiWebSearch",
   "devMode",
   "quotaRefresh",
@@ -893,6 +894,7 @@ function applyOptionalBoolean(
     | "useFunctionApplyPatch"
     | "forceAgent"
     | "useMessagesApi"
+    | "useResponsesApiWebSocket"
     | "useResponsesApiWebSearch"
     | "compactUseSmallModel"
     | "messageStartInputTokensFallback"
@@ -1153,6 +1155,8 @@ const CONFIG_PATCH_HANDLERS: Partial<Record<string, ConfigPatchHandler>> = {
     applyOptionalNumber(next, "sessionAffinityRetentionDays", value),
   useMessagesApi: (next, value) =>
     applyOptionalBoolean(next, "useMessagesApi", value),
+  useResponsesApiWebSocket: (next, value) =>
+    applyOptionalBoolean(next, "useResponsesApiWebSocket", value),
   useResponsesApiWebSearch: (next, value) =>
     applyOptionalBoolean(next, "useResponsesApiWebSearch", value),
   devMode: applyDevModeConfig,

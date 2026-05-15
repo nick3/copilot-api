@@ -38,6 +38,7 @@ import {
   createResponses,
   type ResponsesPayload,
   type ResponsesResult,
+  type ResponsesTransport,
   type ResponseErrorEvent,
   type ResponseStreamEvent,
 } from "~/services/copilot/create-responses"
@@ -47,6 +48,7 @@ import {
   applyResponsesApiContextManagement,
   compactInputByLatestCompaction,
   getResponsesRequestOptions,
+  getResponsesTransportForModel,
   getStreamChunkFields,
   isAsyncIterable,
   removeWebSearchTool,
@@ -166,6 +168,7 @@ export const handleResponses = async (c: Context) => {
   const premiumRemainingBefore = account.premiumRemaining
   const premiumUnlimitedBefore = account.unlimited
 
+  const transport = getResponsesTransportForModel(selectedModel) ?? "http"
   const { vision, initiator } = getResponsesRequestOptions(upstreamPayload)
   request.initiator = initiator
   if (state.manualApprove) await awaitApproval()
@@ -190,6 +193,7 @@ export const handleResponses = async (c: Context) => {
       initiator,
       premiumRemainingBefore,
       premiumUnlimitedBefore,
+      transport,
     })
   }
 
@@ -205,6 +209,7 @@ export const handleResponses = async (c: Context) => {
     initiator,
     premiumRemainingBefore,
     premiumUnlimitedBefore,
+    transport,
   })
 }
 
@@ -451,6 +456,7 @@ async function handleStreamingResponses(params: {
   initiator: "agent" | "user"
   premiumRemainingBefore: number | undefined
   premiumUnlimitedBefore: boolean | undefined
+  transport: ResponsesTransport
 }): Promise<Response> {
   const {
     c,
@@ -464,6 +470,7 @@ async function handleStreamingResponses(params: {
     initiator,
     premiumRemainingBefore,
     premiumUnlimitedBefore,
+    transport,
   } = params
 
   let response: Awaited<ReturnType<typeof createResponses>>
@@ -477,6 +484,7 @@ async function handleStreamingResponses(params: {
         upstreamRequestId: request.upstreamRequestId,
         sessionId: request.upstreamSessionId,
         requestId: request.requestId,
+        transport,
       },
       accountCtx,
     )
@@ -797,6 +805,7 @@ async function handleNonStreamingResponses(params: {
   initiator: "agent" | "user"
   premiumRemainingBefore: number | undefined
   premiumUnlimitedBefore: boolean | undefined
+  transport: ResponsesTransport
 }): Promise<Response> {
   const {
     c,
@@ -810,6 +819,7 @@ async function handleNonStreamingResponses(params: {
     initiator,
     premiumRemainingBefore,
     premiumUnlimitedBefore,
+    transport,
   } = params
   const { account, reservation, selectedModel, endpoint, costUnits } = selection
   let usage: NormalizedUsage = {}
@@ -824,6 +834,7 @@ async function handleNonStreamingResponses(params: {
         upstreamRequestId: request.upstreamRequestId,
         sessionId: request.upstreamSessionId,
         requestId: request.requestId,
+        transport,
       },
       accountCtx,
     )

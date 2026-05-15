@@ -370,6 +370,7 @@ Copilot API 现在使用子命令结构，主要命令包括：
     "modelRefreshIntervalHours": 24,
     "sessionAffinityRetentionDays": 7,
     "useMessagesApi": true,
+    "useResponsesApiWebSocket": true,
     "useResponsesApiWebSearch": true,
     "logLevel": "info"
   }
@@ -461,6 +462,7 @@ Copilot API 现在使用子命令结构，主要命令包括：
 - **modelRefreshIntervalHours：** 后台刷新账号模型列表的间隔小时数。设为 `0` 可关闭自动刷新。默认值为 `24`。
 - **sessionAffinityRetentionDays：** session affinity 绑定的保留天数。默认值为 `7`。
 - **useMessagesApi：** 当为 `true`（默认）时，支持 Copilot 原生 `/v1/messages` 端点的 Claude 系模型会走 Messages API 路径。设为 `false` 时，将跳过 Messages API 候选，回退到 `/responses`（如支持）或 `/chat/completions`。
+- **useResponsesApiWebSocket：** 当为 `true`（默认）时，Responses API 请求会对声明了 `ws:/responses` 的模型使用 Copilot WebSocket transport；仅声明 `/responses` 的模型仍走 HTTP。设为 `false` 可禁用 WebSocket 路由。
 - **useResponsesApiWebSearch：** 当为 `true`（默认）时，`/v1/responses` 会保留 `type: "web_search"` 的工具并转发到上游。设为 `false` 则会在发送 Copilot 请求之前将其剥离。
 - **logLevel：** 控制 `logs/*.log` 下 handler 文件日志的详细级别。可选值：`error`、`warn`、`info`、`debug`。默认值为 `info`。如果你需要把 payload 级或 stream 级的调试内容写入文件日志，请显式设置为 `debug`。
 - **anthropicApiKey：** 可选的 Anthropic API key，用于精确的 Claude token 计数（见下文 [精确的 Claude Token 计数](#accurate-claude-token-counting)）。也可通过环境变量 `ANTHROPIC_API_KEY` 设置。未配置时会回退到 GPT tokenizer 估算。

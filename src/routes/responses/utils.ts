@@ -2,13 +2,25 @@ import type {
   ResponseContextManagementCompactionItem,
   ResponseInputItem,
   ResponsesPayload,
+  ResponsesTransport,
 } from "~/services/copilot/create-responses"
 
+import { COMPACT_REQUEST, type CompactType } from "~/lib/compact"
 import {
   getConfig,
   isForceAgentEnabled,
-  isResponsesApiContextManagementModel,
+  isResponsesApiContextManagementModel as isConfiguredResponsesApiContextManagementModel,
+  isResponsesApiWebSocketEnabled as isConfiguredResponsesApiWebSocketEnabled,
 } from "~/lib/config"
+
+export const RESPONSES_ENDPOINT = "/responses"
+export const RESPONSES_WS_ENDPOINT = "ws:/responses"
+
+export const responsesUtilsDependencies = {
+  isResponsesApiContextManagementModel:
+    isConfiguredResponsesApiContextManagementModel,
+  isResponsesApiWebSocketEnabled: isConfiguredResponsesApiWebSocketEnabled,
+}
 
 export const getResponsesRequestOptions = (
   payload: ResponsesPayload,
@@ -17,6 +29,35 @@ export const getResponsesRequestOptions = (
   const initiator = hasAgentInitiator(payload) ? "agent" : "user"
 
   return { vision, initiator }
+}
+
+export const getResponsesTransportForModel = (
+  selectedModel:
+    | {
+        supported_endpoints?: Array<string>
+      }
+    | undefined,
+  options: {
+    compactType?: CompactType
+  } = {},
+): ResponsesTransport | null => {
+  const supportedEndpoints = selectedModel?.supported_endpoints ?? []
+  const useWebSocket =
+    responsesUtilsDependencies.isResponsesApiWebSocketEnabled()
+
+  if (
+    options.compactType !== COMPACT_REQUEST
+    && useWebSocket
+    && supportedEndpoints.includes(RESPONSES_WS_ENDPOINT)
+  ) {
+    return "websocket"
+  }
+
+  if (supportedEndpoints.includes(RESPONSES_ENDPOINT)) {
+    return "http"
+  }
+
+  return null
 }
 
 export const hasAgentInitiator = (payload: ResponsesPayload): boolean => {
@@ -76,7 +117,11 @@ export const applyResponsesApiContextManagement = (
     return
   }
 
-  if (!isResponsesApiContextManagementModel(payload.model)) {
+  if (
+    !responsesUtilsDependencies.isResponsesApiContextManagementModel(
+      payload.model,
+    )
+  ) {
     return
   }
 

@@ -168,6 +168,7 @@ export type AdminConfig = {
   modelRefreshIntervalHours?: number
   sessionAffinityRetentionDays?: number
   useMessagesApi?: boolean
+  useResponsesApiWebSocket?: boolean
   useResponsesApiWebSearch?: boolean
 }
 

@@ -52,6 +52,7 @@ export interface AppConfig {
   modelRefreshIntervalHours?: number
   sessionAffinityRetentionDays?: number
   useMessagesApi?: boolean
+  useResponsesApiWebSocket?: boolean
   anthropicApiKey?: string
   useResponsesApiWebSearch?: boolean
   claudeTokenMultiplier?: number
@@ -163,6 +164,7 @@ const defaultConfig: AppConfig = {
   modelRefreshIntervalHours: 24,
   sessionAffinityRetentionDays: 7,
   useMessagesApi: true,
+  useResponsesApiWebSocket: true,
   useResponsesApiWebSearch: true,
   logLevel: "info",
   devMode: {
@@ -547,7 +549,7 @@ export function mergeConfigWithDefaults(): AppConfig {
 }
 
 export function getConfig(): AppConfig {
-  cachedConfig ??= readConfigFromDisk()
+  cachedConfig ??= mergeDefaultConfig(readConfigFromDisk()).mergedConfig
   return cachedConfig
 }
 
@@ -919,6 +921,11 @@ export function listEnabledProviders(): Array<string> {
 export function isMessagesApiEnabled(): boolean {
   const config = getConfig()
   return config.useMessagesApi ?? true
+}
+
+export function isResponsesApiWebSocketEnabled(): boolean {
+  const config = getConfig()
+  return config.useResponsesApiWebSocket ?? true
 }
 
 export function getAnthropicApiKey(): string | undefined {

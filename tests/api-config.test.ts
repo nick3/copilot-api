@@ -91,7 +91,7 @@ test("githubHeaders keeps GitHub REST headers minimal", () => {
 
   expect(headers.authorization).toBe("token ghu_test")
   expect(headers["user-agent"]).toContain("GitHubCopilotChat/")
-  expect(headers["x-github-api-version"]).toBe("2025-10-01")
+  expect(headers["x-github-api-version"]).toBe("2026-01-09")
   expect(headers.accept).toBeUndefined()
   expect(headers["content-type"]).toBeUndefined()
   expect(headers["editor-version"]).toBeUndefined()

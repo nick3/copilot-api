@@ -27,17 +27,18 @@ import {
   applyResponsesApiContextManagement,
   compactInputByLatestCompaction,
   getResponsesRequestOptions,
+  getResponsesTransportForModel,
 } from "~/routes/responses/utils"
 import {
-  createChatCompletions,
+  createChatCompletions as createCopilotChatCompletions,
   type ChatCompletionChunk,
   type ChatCompletionResponse,
   type ChatCompletionsPayload,
   type Message,
 } from "~/services/copilot/create-chat-completions"
-import { createMessages } from "~/services/copilot/create-messages"
+import { createMessages as createCopilotMessages } from "~/services/copilot/create-messages"
 import {
-  createResponses,
+  createResponses as createCopilotResponses,
   type ResponsesResult,
   type ResponseStreamEvent,
 } from "~/services/copilot/create-responses"
@@ -63,6 +64,12 @@ const COPILOT_CONTEXT_CACHE_CONTROL = {
   type: "ephemeral",
 } as const
 
+export const messagesApiFlowDependencies = {
+  createChatCompletions: createCopilotChatCompletions,
+  createMessages: createCopilotMessages,
+  createResponses: createCopilotResponses,
+}
+
 export interface FlowBaseOptions {
   logger: ConsolaInstance
   subagentMarker?: SubagentMarker | null
@@ -81,7 +88,7 @@ interface MessagesFlowOptions extends FlowBaseOptions {
 }
 
 interface ChatCompletionsFlowOptions extends FlowBaseOptions {
-  createChatCompletionsImpl?: typeof createChatCompletions
+  createChatCompletionsImpl?: typeof createCopilotChatCompletions
 }
 
 export const handleWithChatCompletions = async (
@@ -95,7 +102,7 @@ export const handleWithChatCompletions = async (
     requestId,
     sessionId,
     compactType,
-    createChatCompletionsImpl = createChatCompletions,
+    createChatCompletionsImpl = messagesApiFlowDependencies.createChatCompletions,
   } = options
   const openAIPayload = translateToOpenAI(anthropicPayload)
   prepareCopilotChatCompletionsPayload(openAIPayload)
@@ -189,16 +196,24 @@ export const handleWithResponsesApi = async (
   debugJson(logger, "Translated Responses payload:", responsesPayload)
 
   const { vision, initiator } = getResponsesRequestOptions(responsesPayload)
-  const response = await createResponses(responsesPayload, {
-    ...requestOptions,
-    vision,
-    initiator,
-    subagentMarker: requestOptions.subagentMarker,
-    upstreamRequestId: requestOptions.requestId,
-    sessionId: requestOptions.sessionId,
-    compactType: requestOptions.compactType,
-    requestId: requestOptions.requestId,
-  })
+  const transport =
+    getResponsesTransportForModel(selectedModel, {
+      compactType: requestOptions.compactType,
+    }) ?? "http"
+  const response = await messagesApiFlowDependencies.createResponses(
+    responsesPayload,
+    {
+      ...requestOptions,
+      vision,
+      initiator,
+      transport,
+      subagentMarker: requestOptions.subagentMarker,
+      upstreamRequestId: requestOptions.requestId,
+      sessionId: requestOptions.sessionId,
+      compactType: requestOptions.compactType,
+      requestId: requestOptions.requestId,
+    },
+  )
 
   if (responsesPayload.stream && isAsyncIterable(response)) {
     logger.debug("Streaming response from Copilot (Responses API)")
@@ -294,14 +309,18 @@ export const handleWithMessagesApi = async (
 
   debugJson(logger, "Translated Messages payload:", anthropicPayload)
 
-  const response = await createMessages(anthropicPayload, undefined, {
-    anthropicBetaHeader,
-    subagentMarker,
-    upstreamRequestId: requestId,
-    sessionId,
-    compactType,
-    requestId,
-  })
+  const response = await messagesApiFlowDependencies.createMessages(
+    anthropicPayload,
+    undefined,
+    {
+      anthropicBetaHeader,
+      subagentMarker,
+      upstreamRequestId: requestId,
+      sessionId,
+      compactType,
+      requestId,
+    },
+  )
 
   if (isAsyncIterable(response)) {
     logger.debug("Streaming response from Copilot (Messages API)")
@@ -398,7 +417,7 @@ const uniqueIndexes = (indexes: Array<number>): Array<number> => [
 ]
 
 const isNonStreaming = (
-  response: Awaited<ReturnType<typeof createChatCompletions>>,
+  response: Awaited<ReturnType<typeof createCopilotChatCompletions>>,
 ): response is ChatCompletionResponse => Object.hasOwn(response, "choices")
 
 const isAsyncIterable = <T>(value: unknown): value is AsyncIterable<T> =>
