@@ -1,20 +1,29 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
+import fs from "node:fs"
 
 import "./shared-admin-db-test-home"
 
 import type { RequestLogRow } from "../src/lib/request-history"
-import type { ResolvedProviderConfig } from "../src/lib/config"
 import type { AccountRuntime } from "../src/lib/types/account"
 import type { Model } from "../src/services/copilot/get-models"
 
 import { accountsManager } from "../src/lib/accounts-manager"
 import { getAdminDb } from "../src/lib/admin-db"
+import {
+  mergeConfigWithDefaults,
+  type ResolvedProviderConfig,
+} from "../src/lib/config"
+import { PATHS } from "../src/lib/paths"
 import { state } from "../src/lib/state"
+
+let providerConfigCalls: Array<string> = []
 
 const getTestProviderConfig = (
   provider: string,
 ): ResolvedProviderConfig | null => {
+  providerConfigCalls.push(provider)
+
   if (provider !== "dash") {
     return null
   }
@@ -182,11 +191,22 @@ const createApp = () => {
   return app
 }
 
+const writeTestConfig = (config: Record<string, unknown>): void => {
+  fs.writeFileSync(
+    PATHS.CONFIG_PATH,
+    `${JSON.stringify(config, null, 2)}\n`,
+    "utf8",
+  )
+  mergeConfigWithDefaults()
+}
+
 beforeEach(() => {
   createUpstreamResponse = createChatCompletionResponse
+  providerConfigCalls = []
   state.rateLimitSeconds = 60
   state.rateLimitWait = false
   state.lastRequestTimestamp = Date.now()
+  writeTestConfig({ auth: { apiKeys: [] }, providers: {} })
 
   getAdminDb().run("DELETE FROM request_log;")
   fetchMock.mockClear()
@@ -242,6 +262,49 @@ describe("provider/model aliases on top-level messages routes", () => {
     expect(row?.account_id).toBeNull()
     expect(row?.cost_units).toBeNull()
     expect(row?.http_status).toBe(200)
+  })
+
+  test("routes modelAliases provider targets on /v1/messages", async () => {
+    writeTestConfig({
+      auth: { apiKeys: [] },
+      modelAliases: {
+        "claude-opus-4-7": {
+          allowOriginal: true,
+          target: "dash/qwen-plus",
+        },
+      },
+      providers: {},
+    })
+
+    const app = createApp()
+    const response = await app.request("/v1/messages", {
+      body: JSON.stringify({
+        max_tokens: 128,
+        messages: [{ content: "hello", role: "user" }],
+        model: "claude-opus-4-7",
+      }),
+      headers: {
+        "content-type": "application/json",
+      },
+      method: "POST",
+    })
+
+    expect(response.status).toBe(200)
+    expect(providerConfigCalls).toContain("dash")
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    const [, init] = fetchMock.mock.calls[0]
+    const upstreamBody = JSON.parse((init as RequestInit).body as string) as {
+      model: string
+    }
+    expect(upstreamBody.model).toBe("qwen-plus")
+
+    const row = getAdminDb()
+      .query("SELECT * FROM request_log WHERE client_model = ? LIMIT 1;")
+      .get("claude-opus-4-7") as RequestLogRow | null
+    expect(row?.upstream_endpoint).toBe("/providers/dash/messages")
+    expect(row?.upstream_model).toBe("qwen-plus")
+    expect(row?.account_id).toBeNull()
   })
 
   test("falls back to Copilot model aliases when slash prefix is not a provider", async () => {
@@ -455,6 +518,37 @@ describe("provider/model aliases on top-level messages routes", () => {
     expect(response.status).toBe(200)
     const json = (await response.json()) as { input_tokens: number }
     expect(json.input_tokens).toBeGreaterThan(0)
+  })
+
+  test("routes modelAliases provider targets to count_tokens provider token counting", async () => {
+    writeTestConfig({
+      auth: { apiKeys: [] },
+      modelAliases: {
+        "claude-opus-4-7": {
+          allowOriginal: true,
+          target: "dash/qwen-plus",
+        },
+      },
+      providers: {},
+    })
+
+    const app = createApp()
+    const response = await app.request("/v1/messages/count_tokens", {
+      body: JSON.stringify({
+        max_tokens: 128,
+        messages: [{ content: "hello", role: "user" }],
+        model: "claude-opus-4-7",
+      }),
+      headers: {
+        "content-type": "application/json",
+      },
+      method: "POST",
+    })
+
+    expect(response.status).toBe(200)
+    const json = (await response.json()) as { input_tokens: number }
+    expect(json.input_tokens).toBeGreaterThan(0)
+    expect(providerConfigCalls).toContain("dash")
   })
 
   test("estimates count_tokens locally when slash prefix is not a provider", async () => {

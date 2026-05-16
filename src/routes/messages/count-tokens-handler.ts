@@ -6,6 +6,7 @@ import {
   getAnthropicApiKey,
   getClaudeTokenMultiplier,
   getProviderConfig,
+  resolveModelAlias,
 } from "~/lib/config"
 import {
   createFallbackModel,
@@ -98,6 +99,7 @@ async function countTokensViaAnthropic(
  */
 export async function handleCountTokens(c: Context) {
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
+  anthropicPayload.model = resolveModelAlias(anthropicPayload.model)
   const providerModelAlias = resolveExistingProviderModelAlias(
     anthropicPayload.model,
     getProviderConfigResolver(c),

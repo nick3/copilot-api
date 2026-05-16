@@ -19,6 +19,7 @@ import {
   getSmallModel,
   isMessageStartInputTokensFallbackEnabled,
   isMessagesApiEnabled,
+  resolveModelAlias,
   shouldCompactUseSmallModel,
 } from "~/lib/config"
 import {
@@ -132,6 +133,18 @@ const getProviderConfigResolver = (c: Context): typeof getProviderConfig => {
     | typeof getProviderConfig
     | undefined
   return resolver ?? getProviderConfig
+}
+
+const resolveProviderTargetModelAlias = (
+  model: string,
+  providerConfigResolver: typeof getProviderConfig,
+) => {
+  const targetModel = resolveModelAlias(model)
+  if (targetModel === model) {
+    return null
+  }
+
+  return resolveExistingProviderModelAlias(targetModel, providerConfigResolver)
 }
 
 type AccountSelection = Awaited<
@@ -318,15 +331,22 @@ async function handleProviderAliasCompletion(
 // eslint-disable-next-line max-lines-per-function, complexity
 export async function handleCompletion(c: Context) {
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
+  const providerConfigResolver = getProviderConfigResolver(c)
   const providerModelAlias = resolveExistingProviderModelAlias(
     anthropicPayload.model,
-    getProviderConfigResolver(c),
+    providerConfigResolver,
   )
-  if (providerModelAlias) {
+  const providerTargetModelAlias =
+    providerModelAlias
+    ?? resolveProviderTargetModelAlias(
+      anthropicPayload.model,
+      providerConfigResolver,
+    )
+  if (providerTargetModelAlias) {
     return await handleProviderAliasCompletion(c, {
       payload: anthropicPayload,
-      provider: providerModelAlias.provider,
-      providerModel: providerModelAlias.model,
+      provider: providerTargetModelAlias.provider,
+      providerModel: providerTargetModelAlias.model,
     })
   }
 
@@ -691,7 +711,10 @@ const handleWithResponsesApi = async (params: {
   } = params
   const responsesPayload = translateAnthropicMessagesToResponsesPayload(
     anthropicPayload,
-    selectedModel.id,
+    {
+      modelOverride: selectedModel.id,
+      subagentAgentId: subagentMarker?.agent_id,
+    },
   )
 
   applyResponsesApiContextManagement(

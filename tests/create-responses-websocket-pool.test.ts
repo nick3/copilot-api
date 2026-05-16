@@ -3,7 +3,13 @@ import { afterEach, beforeEach, expect, mock, test } from "bun:test"
 import type { AccountContext } from "../src/lib/types/account"
 import type { ResponsesResult } from "../src/services/copilot/create-responses"
 
-type Listener = (event: { data?: string }) => void
+type ListenerEvent = {
+  data?: string
+  error?: unknown
+  message?: string
+}
+
+type Listener = (event: ListenerEvent) => void
 
 const originalClearTimeout = globalThis.clearTimeout
 const originalSetTimeout = globalThis.setTimeout
@@ -15,6 +21,7 @@ class MockWebSocket {
   static readonly CLOSED = 3
   static autoComplete = true
   static failOpen = false
+  static failOpenEvent: ListenerEvent | null = null
   static instances: Array<MockWebSocket> = []
 
   readonly sent: Array<string> = []
@@ -34,7 +41,7 @@ class MockWebSocket {
     originalSetTimeout(() => {
       if (MockWebSocket.failOpen) {
         this.readyState = MockWebSocket.CLOSED
-        this.emit("error", {})
+        this.emit("error", MockWebSocket.failOpenEvent ?? {})
         return
       }
 
@@ -72,6 +79,10 @@ class MockWebSocket {
     this.emit("close", {})
   }
 
+  emitError(payload: ListenerEvent): void {
+    this.emit("error", payload)
+  }
+
   completeLatestResponse(): void {
     const latestSent = this.sent.at(-1)
     if (!latestSent) {
@@ -91,7 +102,7 @@ class MockWebSocket {
     })
   }
 
-  private emit(event: string, payload: { data?: string }): void {
+  private emit(event: string, payload: ListenerEvent): void {
     for (const listener of this.listeners.get(event) ?? []) {
       listener(payload)
     }
@@ -175,6 +186,7 @@ const createResponsesResult = (
 beforeEach(() => {
   MockWebSocket.autoComplete = true
   MockWebSocket.failOpen = false
+  MockWebSocket.failOpenEvent = null
   MockWebSocket.instances = []
   state.accountType = "individual"
   state.copilotApiUrl = "https://api.githubcopilot.com"
@@ -186,6 +198,7 @@ beforeEach(() => {
 afterEach(() => {
   MockWebSocket.autoComplete = true
   MockWebSocket.failOpen = false
+  MockWebSocket.failOpenEvent = null
   for (const websocket of MockWebSocket.instances) {
     websocket.close()
   }
@@ -208,6 +221,26 @@ test("Responses websocket pool reuses the same connection for matching pool keys
 
   expect(MockWebSocket.instances).toHaveLength(1)
   expect(MockWebSocket.instances[0]?.sent).toHaveLength(2)
+})
+
+test("Responses websocket open failure includes the underlying reason", async () => {
+  MockWebSocket.failOpen = true
+  MockWebSocket.failOpenEvent = {
+    error: new Error("tls handshake failed"),
+  }
+
+  let thrown: unknown = null
+
+  try {
+    await collectResponsesStream("request-1")
+  } catch (error) {
+    thrown = error
+  }
+
+  expect(thrown).toBeInstanceOf(Error)
+  expect((thrown as Error).message).toBe(
+    "Failed to create responses websocket: tls handshake failed",
+  )
 })
 
 test("Responses websocket pool separates different request IDs", async () => {
@@ -299,6 +332,30 @@ test("Responses websocket pool clears stale idle timer after a queued request st
 
   MockWebSocket.instances[0]?.completeLatestResponse()
   await secondPromise
+})
+
+test("Responses websocket stream failure includes the underlying reason", async () => {
+  MockWebSocket.autoComplete = false
+
+  const streamPromise = collectResponsesStream("request-1")
+  await waitFor(() => MockWebSocket.instances[0]?.sent.length === 1)
+
+  MockWebSocket.instances[0]?.emitError({
+    error: new Error("socket hang up"),
+  })
+
+  let thrown: unknown = null
+
+  try {
+    await streamPromise
+  } catch (error) {
+    thrown = error
+  }
+
+  expect(thrown).toBeInstanceOf(Error)
+  expect((thrown as Error).message).toBe(
+    "Responses websocket stream error: socket hang up",
+  )
 })
 
 test("Responses websocket uses the proxy-env dispatcher when initialized", async () => {
