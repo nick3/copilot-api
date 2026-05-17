@@ -569,7 +569,7 @@ export const getResponsesWebSocketInitiator = (
 const createPooledResponsesWebSocketStream = (
   request: ResponsesWebSocketRequest,
   baseUrl: string,
-): ResponsesStream => runResponsesWebSocketPoolRequest(request, baseUrl)
+): ResponsesStream => runResponsesWebSocketRequest(request, baseUrl)
 
 export const buildResponsesWebSocketPayload = (
   payload: ResponsesPayload,
@@ -600,27 +600,34 @@ export const buildResponsesWebSocketUrl = (baseUrl: string): string => {
   return url.toString()
 }
 
-const responsesWebSocketPool = new Map<string, ResponsesWebSocketPoolEntry>()
+const responsesWebSocketPool = new Map<string, ResponsesWebSocketEntry>()
+const responsesWebSocketActiveRequests = new Map<string, number>()
 
-interface ResponsesWebSocketPoolEntry {
+interface ResponsesWebSocketEntry {
   closed: boolean
   idleTimer: ReturnType<typeof setTimeout> | null
-  lock: Promise<void>
+  requestCount: number
   websocketPromise: Promise<InstanceType<typeof WebSocket>>
 }
 
-const runResponsesWebSocketPoolRequest = async function* (
+interface ResponsesWebSocketRequestTarget {
+  entry: ResponsesWebSocketEntry
+  pooled: boolean
+}
+
+const runResponsesWebSocketRequest = async function* (
   request: ResponsesWebSocketRequest,
   baseUrl: string,
 ): ResponsesStream {
-  const entry = getResponsesWebSocketPoolEntry(request, baseUrl)
-  const release = await acquireResponsesWebSocketPoolEntry(
-    request.poolKey,
-    entry,
-  )
+  const { entry, pooled } = getResponsesWebSocketRequestTarget(request, baseUrl)
+  const release = acquireResponsesWebSocketEntry(request.poolKey, entry, pooled)
 
   try {
-    const websocket = await entry.websocketPromise
+    const websocket = await getReadyResponsesWebSocket(
+      request.poolKey,
+      entry,
+      pooled,
+    )
     websocket.send(JSON.stringify(request.payload))
 
     for await (const data of createWebSocketMessageStream(websocket)) {
@@ -642,29 +649,42 @@ const runResponsesWebSocketPoolRequest = async function* (
   }
 }
 
-const getResponsesWebSocketPoolEntry = (
+const getResponsesWebSocketRequestTarget = (
   request: ResponsesWebSocketRequest,
   baseUrl: string,
-): ResponsesWebSocketPoolEntry => {
+): ResponsesWebSocketRequestTarget => {
+  if (getResponsesWebSocketActiveRequestCount(request.poolKey) > 0) {
+    return {
+      entry: createResponsesWebSocketEntry(request, baseUrl),
+      pooled: false,
+    }
+  }
+
   const existing = responsesWebSocketPool.get(request.poolKey)
   if (existing && !existing.closed) {
     clearResponsesWebSocketIdleTimer(existing)
-    return existing
+    return {
+      entry: existing,
+      pooled: true,
+    }
   }
 
-  const entry = createResponsesWebSocketPoolEntry(request, baseUrl)
+  const entry = createResponsesWebSocketEntry(request, baseUrl)
   responsesWebSocketPool.set(request.poolKey, entry)
-  return entry
+  return {
+    entry,
+    pooled: true,
+  }
 }
 
-const createResponsesWebSocketPoolEntry = (
+const createResponsesWebSocketEntry = (
   request: ResponsesWebSocketRequest,
   baseUrl: string,
-): ResponsesWebSocketPoolEntry => {
-  const entry: ResponsesWebSocketPoolEntry = {
+): ResponsesWebSocketEntry => {
+  const entry: ResponsesWebSocketEntry = {
     closed: false,
     idleTimer: null,
-    lock: Promise.resolve(),
+    requestCount: 0,
     websocketPromise: openResponsesWebSocket({
       headers: request.headers,
       url: buildResponsesWebSocketUrl(baseUrl),
@@ -687,20 +707,14 @@ const createResponsesWebSocketPoolEntry = (
   return entry
 }
 
-const acquireResponsesWebSocketPoolEntry = async (
+const acquireResponsesWebSocketEntry = (
   poolKey: string,
-  entry: ResponsesWebSocketPoolEntry,
-): Promise<() => void> => {
+  entry: ResponsesWebSocketEntry,
+  pooled: boolean,
+): (() => void) => {
   clearResponsesWebSocketIdleTimer(entry)
-
-  let releaseCurrent!: () => void
-  const previousLock = entry.lock
-  entry.lock = new Promise<void>((resolve) => {
-    releaseCurrent = resolve
-  })
-
-  await previousLock
-  clearResponsesWebSocketIdleTimer(entry)
+  incrementResponsesWebSocketActiveRequestCount(poolKey)
+  entry.requestCount += 1
 
   let released = false
   return () => {
@@ -709,16 +723,56 @@ const acquireResponsesWebSocketPoolEntry = async (
     }
 
     released = true
-    releaseCurrent()
-    if (!entry.closed) {
-      scheduleResponsesWebSocketIdleClose(poolKey, entry)
+    entry.requestCount -= 1
+
+    decrementResponsesWebSocketActiveRequestCount(poolKey)
+    if (entry.closed || entry.requestCount > 0) {
+      return
     }
+
+    if (pooled && responsesWebSocketPool.get(poolKey) === entry) {
+      scheduleResponsesWebSocketIdleClose(poolKey, entry)
+      return
+    }
+
+    removeResponsesWebSocketPoolEntry(poolKey, entry)
   }
+}
+
+const getReadyResponsesWebSocket = async (
+  poolKey: string,
+  entry: ResponsesWebSocketEntry,
+  pooled: boolean,
+): Promise<InstanceType<typeof WebSocket>> => {
+  if (entry.closed) {
+    throw new Error(
+      "Responses websocket became unavailable before the request started",
+    )
+  }
+
+  const websocket = await entry.websocketPromise
+  if (
+    entry.closed
+    || (pooled && responsesWebSocketPool.get(poolKey) !== entry)
+  ) {
+    throw new Error(
+      "Responses websocket became unavailable before the request started",
+    )
+  }
+
+  if (websocket.readyState !== WebSocket.OPEN) {
+    removeResponsesWebSocketPoolEntry(poolKey, entry)
+    throw new Error(
+      "Responses websocket became unavailable before the request started",
+    )
+  }
+
+  return websocket
 }
 
 const scheduleResponsesWebSocketIdleClose = (
   poolKey: string,
-  entry: ResponsesWebSocketPoolEntry,
+  entry: ResponsesWebSocketEntry,
 ): void => {
   clearResponsesWebSocketIdleTimer(entry)
   entry.idleTimer = setTimeout(() => {
@@ -728,7 +782,7 @@ const scheduleResponsesWebSocketIdleClose = (
 }
 
 const clearResponsesWebSocketIdleTimer = (
-  entry: ResponsesWebSocketPoolEntry,
+  entry: ResponsesWebSocketEntry,
 ): void => {
   if (entry.idleTimer) {
     clearTimeout(entry.idleTimer)
@@ -736,15 +790,42 @@ const clearResponsesWebSocketIdleTimer = (
   }
 }
 
-const removeResponsesWebSocketPoolEntry = (
+const getResponsesWebSocketActiveRequestCount = (poolKey: string): number =>
+  responsesWebSocketActiveRequests.get(poolKey) ?? 0
+
+const incrementResponsesWebSocketActiveRequestCount = (
   poolKey: string,
-  entry: ResponsesWebSocketPoolEntry,
 ): void => {
-  if (responsesWebSocketPool.get(poolKey) !== entry) {
+  responsesWebSocketActiveRequests.set(
+    poolKey,
+    getResponsesWebSocketActiveRequestCount(poolKey) + 1,
+  )
+}
+
+const decrementResponsesWebSocketActiveRequestCount = (
+  poolKey: string,
+): void => {
+  const nextCount = getResponsesWebSocketActiveRequestCount(poolKey) - 1
+  if (nextCount <= 0) {
+    responsesWebSocketActiveRequests.delete(poolKey)
     return
   }
 
-  responsesWebSocketPool.delete(poolKey)
+  responsesWebSocketActiveRequests.set(poolKey, nextCount)
+}
+
+const removeResponsesWebSocketPoolEntry = (
+  poolKey: string,
+  entry: ResponsesWebSocketEntry,
+): void => {
+  if (responsesWebSocketPool.get(poolKey) === entry) {
+    responsesWebSocketPool.delete(poolKey)
+  }
+
+  if (entry.closed) {
+    return
+  }
+
   entry.closed = true
   clearResponsesWebSocketIdleTimer(entry)
   entry.websocketPromise.then(closeResponsesWebSocket).catch(() => {})

@@ -20,6 +20,7 @@ class MockWebSocket {
   static readonly CLOSING = 2
   static readonly CLOSED = 3
   static autoComplete = true
+  static closeAfterComplete = false
   static failOpen = false
   static failOpenEvent: ListenerEvent | null = null
   static instances: Array<MockWebSocket> = []
@@ -100,6 +101,12 @@ class MockWebSocket {
         type: "response.completed",
       }),
     })
+
+    if (MockWebSocket.closeAfterComplete) {
+      originalSetTimeout(() => {
+        this.close()
+      }, 0)
+    }
   }
 
   private emit(event: string, payload: ListenerEvent): void {
@@ -185,6 +192,7 @@ const createResponsesResult = (
 
 beforeEach(() => {
   MockWebSocket.autoComplete = true
+  MockWebSocket.closeAfterComplete = false
   MockWebSocket.failOpen = false
   MockWebSocket.failOpenEvent = null
   MockWebSocket.instances = []
@@ -197,6 +205,7 @@ beforeEach(() => {
 
 afterEach(() => {
   MockWebSocket.autoComplete = true
+  MockWebSocket.closeAfterComplete = false
   MockWebSocket.failOpen = false
   MockWebSocket.failOpenEvent = null
   for (const websocket of MockWebSocket.instances) {
@@ -252,48 +261,105 @@ test("Responses websocket pool separates different request IDs", async () => {
   expect(MockWebSocket.instances[1]?.sent).toHaveLength(1)
 })
 
-test("Responses websocket pool clears stale idle timer after a queued request starts", async () => {
+test("Responses websocket does not open until the stream is consumed", async () => {
   MockWebSocket.autoComplete = false
 
-  type IdleTimer = ReturnType<typeof setTimeout> & {
-    cleared: boolean
-    fire: () => void
-    unref: () => void
-  }
-  const idleTimers: Array<IdleTimer> = []
+  const response = await createResponses(
+    {
+      input: "hello",
+      model: "gpt-test",
+      stream: true,
+    },
+    {
+      initiator: "user",
+      requestId: "request-1",
+      transport: "websocket",
+      vision: false,
+    },
+    account,
+  )
 
-  ;(globalThis as unknown as { setTimeout: typeof setTimeout }).setTimeout = ((
-    ...args: Parameters<typeof setTimeout>
-  ) => {
-    const [handler, timeout] = args
-    if (timeout === 60_000 && typeof handler === "function") {
-      const idleHandler = handler as () => void
-      const timer = {
-        cleared: false,
-        fire: () => {
-          if (!timer.cleared) {
-            idleHandler()
-          }
-        },
-        unref: () => {},
-      } as IdleTimer
-      idleTimers.push(timer)
-      return timer
-    }
+  expect(MockWebSocket.instances).toHaveLength(0)
 
-    return originalSetTimeout(...args)
-  }) as typeof setTimeout
-  ;(
-    globalThis as unknown as { clearTimeout: typeof clearTimeout }
-  ).clearTimeout = ((timer: ReturnType<typeof setTimeout>) => {
-    const idleTimer = idleTimers.find((entry) => entry === timer)
-    if (idleTimer) {
-      idleTimer.cleared = true
-      return
-    }
+  const iterator = (response as AsyncIterable<unknown>)[Symbol.asyncIterator]()
+  const firstChunk = iterator.next()
 
-    originalClearTimeout(timer)
-  }) as typeof clearTimeout
+  await waitFor(() => MockWebSocket.instances[0]?.sent.length === 1)
+
+  expect(MockWebSocket.instances).toHaveLength(1)
+  expect(MockWebSocket.instances[0]?.sent).toHaveLength(1)
+
+  MockWebSocket.instances[0]?.completeLatestResponse()
+  await firstChunk
+  await iterator.next()
+})
+
+test("Responses websocket delayed concurrent streams still use dedicated connections", async () => {
+  MockWebSocket.autoComplete = false
+
+  const firstResponse = await createResponses(
+    {
+      input: "hello",
+      model: "gpt-test",
+      stream: true,
+    },
+    {
+      initiator: "user",
+      requestId: "request-1",
+      transport: "websocket",
+      vision: false,
+    },
+    account,
+  )
+  const secondResponse = await createResponses(
+    {
+      input: "hello",
+      model: "gpt-test",
+      stream: true,
+    },
+    {
+      initiator: "user",
+      requestId: "request-1",
+      transport: "websocket",
+      vision: false,
+    },
+    account,
+  )
+
+  expect(MockWebSocket.instances).toHaveLength(0)
+
+  const firstIterator = (firstResponse as AsyncIterable<unknown>)[
+    Symbol.asyncIterator
+  ]()
+  const secondIterator = (secondResponse as AsyncIterable<unknown>)[
+    Symbol.asyncIterator
+  ]()
+  const firstChunk = firstIterator.next()
+
+  await waitFor(() => MockWebSocket.instances[0]?.sent.length === 1)
+
+  const secondChunk = secondIterator.next()
+
+  await waitFor(
+    () =>
+      MockWebSocket.instances.length === 2
+      && MockWebSocket.instances[1]?.sent.length === 1,
+  )
+
+  expect(MockWebSocket.instances[0]?.sent).toHaveLength(1)
+  expect(MockWebSocket.instances[1]?.sent).toHaveLength(1)
+
+  MockWebSocket.instances[1]?.completeLatestResponse()
+  await secondChunk
+  await secondIterator.next()
+
+  MockWebSocket.instances[0]?.completeLatestResponse()
+  await firstChunk
+  await firstIterator.next()
+})
+
+test("Responses websocket concurrent request bypasses the pool without closing the previous websocket", async () => {
+  MockWebSocket.autoComplete = false
 
   const firstResponse = await createResponses(
     {
@@ -317,21 +383,124 @@ test("Responses websocket pool clears stale idle timer after a queued request st
   await waitFor(() => MockWebSocket.instances[0]?.sent.length === 1)
 
   const secondPromise = collectResponsesStream("request-1")
-  await waitFor(() => idleTimers.length === 0)
+
+  await waitFor(
+    () =>
+      MockWebSocket.instances.length === 2
+      && MockWebSocket.instances[1]?.sent.length === 1,
+  )
+
+  expect(MockWebSocket.instances[0]?.readyState).toBe(MockWebSocket.OPEN)
+  expect(MockWebSocket.instances[0]?.sent).toHaveLength(1)
+  expect(MockWebSocket.instances[1]?.sent).toHaveLength(1)
+
+  MockWebSocket.instances[1]?.completeLatestResponse()
+  await secondPromise
+
+  expect(MockWebSocket.instances[0]?.readyState).toBe(MockWebSocket.OPEN)
+
+  MockWebSocket.instances[0]?.completeLatestResponse()
+  await firstChunk
+  await firstIterator.next()
+})
+
+test("Responses websocket multiple concurrent requests each use a dedicated connection", async () => {
+  MockWebSocket.autoComplete = false
+
+  const firstResponse = await createResponses(
+    {
+      input: "hello",
+      model: "gpt-test",
+      stream: true,
+    },
+    {
+      initiator: "user",
+      requestId: "request-1",
+      transport: "websocket",
+      vision: false,
+    },
+    account,
+  )
+  const firstIterator = (firstResponse as AsyncIterable<unknown>)[
+    Symbol.asyncIterator
+  ]()
+  const firstChunk = firstIterator.next()
+
+  await waitFor(() => MockWebSocket.instances[0]?.sent.length === 1)
+
+  const secondPromise = collectResponsesStream("request-1")
+  const thirdPromise = collectResponsesStream("request-1")
+
+  await waitFor(
+    () =>
+      MockWebSocket.instances.length === 3
+      && MockWebSocket.instances[1]?.sent.length === 1,
+  )
+
+  expect(MockWebSocket.instances[2]?.sent).toHaveLength(1)
+
+  MockWebSocket.instances[1]?.completeLatestResponse()
+  await secondPromise
+
+  expect(MockWebSocket.instances[0]?.sent).toHaveLength(1)
+  expect(MockWebSocket.instances[1]?.sent).toHaveLength(1)
+  expect(MockWebSocket.instances[2]?.sent).toHaveLength(1)
+
+  MockWebSocket.instances[2]?.completeLatestResponse()
+  await thirdPromise
+
+  MockWebSocket.instances[0]?.completeLatestResponse()
+  await firstChunk
+  await firstIterator.next()
+})
+
+test("Responses websocket sequential request reuses the pooled connection after concurrent work completes", async () => {
+  MockWebSocket.autoComplete = false
+
+  const firstResponse = await createResponses(
+    {
+      input: "hello",
+      model: "gpt-test",
+      stream: true,
+    },
+    {
+      initiator: "user",
+      requestId: "request-1",
+      transport: "websocket",
+      vision: false,
+    },
+    account,
+  )
+  const firstIterator = (firstResponse as AsyncIterable<unknown>)[
+    Symbol.asyncIterator
+  ]()
+  const firstChunk = firstIterator.next()
+
+  await waitFor(() => MockWebSocket.instances[0]?.sent.length === 1)
+
+  const secondPromise = collectResponsesStream("request-1")
+
+  await waitFor(
+    () =>
+      MockWebSocket.instances.length === 2
+      && MockWebSocket.instances[1]?.sent.length === 1,
+  )
+
+  MockWebSocket.instances[1]?.completeLatestResponse()
+  await secondPromise
 
   MockWebSocket.instances[0]?.completeLatestResponse()
   await firstChunk
   await firstIterator.next()
 
+  const thirdPromise = collectResponsesStream("request-1")
   await waitFor(() => MockWebSocket.instances[0]?.sent.length === 2)
-  expect(idleTimers).toHaveLength(1)
-  expect(idleTimers[0]?.cleared).toBe(true)
 
-  idleTimers[0]?.fire()
-  expect(MockWebSocket.instances[0]?.readyState).toBe(MockWebSocket.OPEN)
+  expect(MockWebSocket.instances).toHaveLength(2)
+  expect(MockWebSocket.instances[1]?.sent).toHaveLength(1)
 
   MockWebSocket.instances[0]?.completeLatestResponse()
-  await secondPromise
+  await thirdPromise
 })
 
 test("Responses websocket stream failure includes the underlying reason", async () => {
