@@ -1,7 +1,10 @@
 import { Database } from "bun:sqlite"
 import { expect, test } from "bun:test"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 
-import { initAdminDb } from "~/lib/admin-db"
+import { initAdminDb, openAdminDb } from "~/lib/admin-db"
 
 function countTable(db: Database, name: string): number {
   const row = db
@@ -11,6 +14,22 @@ function countTable(db: Database, name: string): number {
     .get(name) as { c: number }
   return row.c
 }
+
+test("openAdminDb creates missing parent directories for file databases", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "admin-db-open-"))
+  const dbPath = path.join(tempRoot, "nested", "admin.sqlite")
+
+  let db: Database | null = null
+  try {
+    db = openAdminDb(dbPath)
+    db.run("SELECT 1;")
+
+    expect(fs.existsSync(path.dirname(dbPath))).toBe(true)
+  } finally {
+    db?.close()
+    fs.rmSync(tempRoot, { force: true, recursive: true })
+  }
+})
 
 test("initAdminDb creates Responses item owner request_log columns", () => {
   const db = new Database(":memory:")

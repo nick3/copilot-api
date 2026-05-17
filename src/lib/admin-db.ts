@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite"
 import consola from "consola"
+import fs from "node:fs"
 import path from "node:path"
 
 import { PATHS } from "./paths"
@@ -40,6 +41,10 @@ export function getAdminDbPath(): string {
 }
 
 export function openAdminDb(filePath: string = DEFAULT_DB_PATH): Database {
+  if (filePath !== ":memory:") {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true })
+  }
+
   return new Database(filePath)
 }
 
