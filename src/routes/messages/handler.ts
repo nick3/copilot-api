@@ -107,7 +107,9 @@ import {
   translateToOpenAI,
 } from "./non-stream-translation"
 import {
+  applyLastMessageCacheControl,
   getCompactType,
+  getLastMessageContentCacheControl,
   mergeToolResultForClaude,
   prepareMessagesApiPayload,
   sanitizeIdeTools,
@@ -399,6 +401,10 @@ export async function handleCompletion(c: Context) {
     logger.debug("Compact request type:", compactType)
   }
 
+  const lastMessageCacheControl = getLastMessageContentCacheControl(
+    anthropicPayload.messages.at(-1),
+  )
+
   if (compactType === COMPACT_REQUEST && shouldCompactUseSmallModel()) {
     anthropicPayload.model = getSmallModel()
   }
@@ -412,6 +418,8 @@ export async function handleCompletion(c: Context) {
     // not only for claude, but also for opencode
     mergeToolResultForClaude(anthropicPayload)
   }
+
+  applyLastMessageCacheControl(anthropicPayload, lastMessageCacheControl)
 
   const upstreamRequestId = generateRequestIdFromPayload(
     anthropicPayload,

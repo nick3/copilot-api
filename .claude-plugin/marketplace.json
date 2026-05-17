@@ -5,9 +5,14 @@
   },
   "plugins": [
     {
-      "name": "claude-plugin",
-      "description": "Inject SubagentStart marker context for copilot-api initiator override",
-      "source": "./claude-plugin"
+      "name": "agent-inject",
+      "description": "Inject copilot-api rules and SubagentStart agent context",
+      "source": "./claude-plugin/agent-inject"
+    },
+    {
+      "name": "tool-search",
+      "description": "Register the tool_search MCP bridge for GPT Responses deferred tools",
+      "source": "./claude-plugin/tool-search"
     }
   ]
 }

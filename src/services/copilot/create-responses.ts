@@ -51,13 +51,18 @@ export interface ResponsesPayload {
 }
 
 export type ToolChoiceOptions = "none" | "auto" | "required"
+export type ToolSearchExecution = "client" | "server"
 
 export interface ToolChoiceFunction {
   name: string
   type: "function"
 }
 
-export type Tool = FunctionTool | Record<string, unknown>
+export type Tool =
+  | FunctionTool
+  | ToolSearchTool
+  | NamespaceTool
+  | Record<string, unknown>
 
 export interface FunctionTool {
   name: string
@@ -65,6 +70,21 @@ export interface FunctionTool {
   strict: boolean | null
   type: "function"
   description?: string | null
+  defer_loading?: boolean | null
+}
+
+export interface ToolSearchTool {
+  type: "tool_search"
+  execution?: ToolSearchExecution | null
+  description?: string | null
+  parameters?: { [key: string]: unknown } | null
+}
+
+export interface NamespaceTool {
+  type: "namespace"
+  name: string
+  description?: string | null
+  tools: Array<FunctionTool>
 }
 
 export type ResponseIncludable =
@@ -101,12 +121,29 @@ export interface ResponseFunctionToolCallItem {
   name: string
   arguments: string
   status?: "in_progress" | "completed" | "incomplete"
+  namespace?: string | null
 }
 
 export interface ResponseFunctionCallOutputItem {
   type: "function_call_output"
   call_id: string
   output: string | Array<ResponseInputContent>
+  status?: "in_progress" | "completed" | "incomplete"
+}
+
+export interface ResponseToolSearchCallItem {
+  type: "tool_search_call"
+  call_id: string
+  arguments: Record<string, unknown> | string
+  execution?: ToolSearchExecution | null
+  status?: "in_progress" | "completed" | "incomplete"
+}
+
+export interface ResponseToolSearchOutputItem {
+  type: "tool_search_output"
+  call_id: string
+  tools: Array<Tool>
+  execution?: ToolSearchExecution | null
   status?: "in_progress" | "completed" | "incomplete"
 }
 
@@ -130,6 +167,8 @@ export type ResponseInputItem =
   | ResponseInputMessage
   | ResponseFunctionToolCallItem
   | ResponseFunctionCallOutputItem
+  | ResponseToolSearchCallItem
+  | ResponseToolSearchOutputItem
   | ResponseInputReasoning
   | ResponseInputCompaction
   | Record<string, unknown>
@@ -193,6 +232,8 @@ export type ResponseOutputItem =
   | ResponseOutputMessage
   | ResponseOutputReasoning
   | ResponseOutputFunctionCall
+  | ResponseOutputToolSearchCall
+  | ResponseOutputToolSearchOutput
   | ResponseOutputCompaction
 
 export interface ResponseOutputMessage {
@@ -222,6 +263,25 @@ export interface ResponseOutputFunctionCall {
   call_id: string
   name: string
   arguments: string
+  status?: "in_progress" | "completed" | "incomplete"
+  namespace?: string | null
+}
+
+export interface ResponseOutputToolSearchCall {
+  id?: string
+  type: "tool_search_call"
+  call_id: string
+  arguments: Record<string, unknown> | string
+  execution?: ToolSearchExecution | null
+  status?: "in_progress" | "completed" | "incomplete"
+}
+
+export interface ResponseOutputToolSearchOutput {
+  id?: string
+  type: "tool_search_output"
+  call_id: string
+  tools: Array<Tool>
+  execution?: ToolSearchExecution | null
   status?: "in_progress" | "completed" | "incomplete"
 }
 

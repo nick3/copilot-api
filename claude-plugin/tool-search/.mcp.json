@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "tool_search": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@nick3/copilot-api@latest", "mcp"],
+      "alwaysLoad": true
+    }
+  }
+}

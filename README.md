@@ -730,6 +730,47 @@ You can find more options here: [Claude Code settings](https://docs.anthropic.co
 
 You can also read more about IDE integration here: [Add Claude Code to your IDE](https://docs.anthropic.com/en/docs/claude-code/ide-integrations)
 
+## GPT Tool Search
+
+For GPT Responses models such as `gpt-5.4+`, this proxy can expose Responses `tool_search` through a small MCP bridge. The same bridge can be used by Claude Code and opencode, as long as the client loads MCP servers and sends Anthropic Messages traffic through this proxy.
+
+Do not set Claude Code's native `ENABLE_TOOL_SEARCH` for GPT models. That flag enables Claude Code's own client-side tool search mode, and it may stop forwarding deferred tool definitions. This proxy needs the full tool definitions so it can keep the small always-loaded tool set eager and translate every other tool into Responses deferred namespaces.
+
+If you install `tool-search@copilot-api-marketplace`, Claude Code receives this MCP bridge automatically and you can skip the manual Claude Code MCP setup below.
+
+Add the tool search bridge to the MCP config used by Claude Code:
+
+```json
+{
+  "mcpServers": {
+    "tool_search": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@nick3/copilot-api@latest", "mcp"]
+    }
+  }
+}
+```
+
+Add the tool search bridge to the MCP config used by opencode:
+
+```json
+{
+  "mcp": {
+    "tool_search": {
+      "type": "local",
+      "command": ["npx", "-y", "@nick3/copilot-api@latest", "mcp"]
+    }
+  }
+}
+```
+
+For local development, use `bun` as the command and `["run", "./src/main.ts", "mcp"]` as the args.
+
+Internally, the proxy now configures OpenAI Responses `tool_search` in client-executed mode. Deferred tools are still exposed as searchable namespaces, but the model is explicitly asked to return the exact deferred tool names it wants to load next.
+
+The bridge uses direct tool selection, not query search. Its tool input is `names`, a comma-separated list of exact deferred tool names, for example `TaskList,TaskGet,mcp__fetch__fetch`.
+
 ## Using with OpenCode
 
 OpenCode already has a direct GitHub Copilot provider. Use this section when you want OpenCode to point at this proxy through `@ai-sdk/anthropic` and reuse the agent behaviors described earlier in this README.
@@ -891,10 +932,13 @@ Plugin integrations are available for Claude Code and opencode.
 
 #### Claude Code plugin integration (marketplace-based)
 
-The Claude Code integration is packaged as a plugin named `claude-plugin`.
+The Claude Code integration is packaged as two plugins:
+
+- `agent-inject` injects `__SUBAGENT_MARKER__...` on `SubagentStart`, so this proxy can infer `x-initiator: agent`.
+- `tool-search` registers the `tool_search` MCP bridge used for GPT Responses deferred tool loading.
 
 - Marketplace catalog in this repository: `.claude-plugin/marketplace.json`
-- Plugin source in this repository: `claude-plugin`
+- Plugin sources in this repository: `claude-plugin/agent-inject`, `claude-plugin/tool-search`
 
 Add the marketplace remotely:
 
@@ -902,18 +946,21 @@ Add the marketplace remotely:
 /plugin marketplace add https://github.com/nick3/copilot-api.git#all
 ```
 
-Install the plugin from the marketplace:
+Install the plugins from the marketplace:
 
 ```sh
-/plugin install claude-plugin@copilot-api-marketplace
+/plugin install agent-inject@copilot-api-marketplace
+/plugin install tool-search@copilot-api-marketplace
 ```
 
-After installation, the plugin injects `__SUBAGENT_MARKER__...` on `SubagentStart`, and this proxy uses it to infer `x-initiator: agent`.
+After installation, `agent-inject` injects `__SUBAGENT_MARKER__...` on `SubagentStart`, and this proxy uses it to infer `x-initiator: agent`.
 
-The plugin also registers a `UserPromptSubmit` hook that returns `{"continue": true}`, and it can inject `SessionStart` reminder rules through environment variables:
+The `agent-inject` plugin also registers a `UserPromptSubmit` hook that returns `{"continue": true}`, and it can inject `SessionStart` reminder rules through environment variables:
 
 - `CLAUDE_PLUGIN_ENABLE_QUESTION_RULES=1` enables the two reminders about using the `question` tool automatically for Claude Code. Alternatively, you can add the same reminders manually in `CLAUDE.md`; see [CLAUDE.md or AGENTS.md Recommended Content](#claudemd-or-agentsmd-recommended-content).
 - `CLAUDE_PLUGIN_ENABLE_NO_BACKGROUND_AGENTS_RULE=1` enables the `run_in_background: true` avoidance reminder for agent hooks.
+
+The `tool-search` plugin bundles the same MCP bridge described in [GPT Tool Search](#gpt-tool-search), so Claude Code users do not need to add the `tool_search` server manually when they install that plugin.
 
 #### Opencode plugin
 

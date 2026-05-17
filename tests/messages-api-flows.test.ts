@@ -16,6 +16,7 @@ import type {
 import { COMPACT_REQUEST } from "../src/lib/compact"
 
 let capturedPayload: ChatCompletionsPayload | null = null
+let capturedResponsesPayload: ResponsesPayload | null = null
 let capturedResponsesOptions: {
   transport?: ResponsesTransport
 } | null = null
@@ -51,6 +52,7 @@ const createResponses = mock(
       transport?: ResponsesTransport
     },
   ): Promise<CreateResponsesReturn> => {
+    capturedResponsesPayload = payload
     capturedResponsesOptions = options
     return Promise.resolve(createResponsesResult(payload.model))
   },
@@ -81,6 +83,7 @@ const createContext = () =>
 
 beforeEach(() => {
   capturedPayload = null
+  capturedResponsesPayload = null
   capturedResponsesOptions = null
   responsesApiWebSocketEnabled = true
   messagesApiFlowDependencies.createChatCompletions = createChatCompletions
@@ -304,6 +307,108 @@ test("messages Responses flow keeps HTTP transport for /responses-only models", 
   expect(response.status).toBe(200)
   expect(createResponses).toHaveBeenCalledTimes(1)
   expect(capturedResponsesOptions?.transport).toBe("http")
+})
+
+test("messages Responses flow keeps streaming transport for deferred tool search", async () => {
+  const payload: AnthropicMessagesPayload = {
+    max_tokens: 128,
+    stream: true,
+    messages: [{ role: "user", content: "fetch a page" }],
+    model: "gpt-5.4",
+    tools: [
+      {
+        name: "mcp__tool_search__search",
+        input_schema: { type: "object" },
+      },
+      {
+        name: "mcp__fetch__fetch",
+        description: "Fetch a URL",
+        input_schema: { type: "object" },
+      },
+    ],
+  }
+
+  const response = await handleWithResponsesApi(createContext(), payload, {
+    logger,
+    requestId: "request-1",
+    selectedModel: createModel(["/responses", "ws:/responses"]),
+  })
+
+  expect(response.status).toBe(200)
+  expect(createResponses).toHaveBeenCalledTimes(1)
+  expect(capturedResponsesPayload?.stream).toBe(true)
+  expect(capturedResponsesOptions?.transport).toBe("websocket")
+})
+
+test("messages Responses flow preserves the configured tool_search alias in non-streaming responses", async () => {
+  createResponses.mockImplementationOnce(
+    (
+      payload: ResponsesPayload,
+      options: { transport?: ResponsesTransport },
+    ) => {
+      capturedResponsesPayload = payload
+      capturedResponsesOptions = options
+      return Promise.resolve({
+        ...createResponsesResult(payload.model),
+        output: [
+          {
+            id: "search-1",
+            type: "tool_search_call",
+            call_id: "call_search",
+            arguments: { names: ["mcp__fetch__fetch"] },
+            status: "completed",
+          },
+        ],
+      })
+    },
+  )
+
+  const payload: AnthropicMessagesPayload = {
+    max_tokens: 128,
+    messages: [{ role: "user", content: "fetch a page" }],
+    model: "gpt-5.4",
+    tools: [
+      {
+        name: "tool_search_search",
+        input_schema: { type: "object" },
+      },
+      {
+        name: "mcp__fetch__fetch",
+        description: "Fetch a URL",
+        input_schema: { type: "object" },
+      },
+    ],
+  }
+
+  const response = await handleWithResponsesApi(createContext(), payload, {
+    logger,
+    requestId: "request-1",
+    selectedModel: createModel(["/responses"]),
+  })
+
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual({
+    id: "resp-test",
+    type: "message",
+    role: "assistant",
+    content: [
+      {
+        type: "tool_use",
+        id: "call_search",
+        name: "tool_search_search",
+        input: {
+          names: "mcp__fetch__fetch",
+        },
+      },
+    ],
+    model: "gpt-5.4",
+    stop_reason: "tool_use",
+    stop_sequence: null,
+    usage: {
+      input_tokens: 0,
+      output_tokens: 0,
+    },
+  })
 })
 
 const createModel = (supportedEndpoints: Array<string>): Model => ({

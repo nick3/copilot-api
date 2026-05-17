@@ -272,6 +272,159 @@ describe("messages handler sanitization", () => {
   })
 })
 
+describe("messages handler cache_control merge", () => {
+  test("adds cache_control to the last content block after merging tool_result content", async () => {
+    let upstreamBody: Record<string, unknown> | undefined
+
+    const selection = buildSelection("/v1/messages", "messages-model")
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    const fetchMock = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = parseFetchBody(opts?.body)
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildAnthropicResponse("messages-model", "messages")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          createPayload({
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "tool_result",
+                    tool_use_id: "tool-1",
+                    content: "Launching skill: foo",
+                  },
+                  {
+                    type: "text",
+                    text: "[Pasted ~4 lines]",
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(upstreamBody?.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-1",
+            content: "Launching skill: foo\n\n[Pasted ~4 lines]",
+            cache_control: {
+              type: "ephemeral",
+            },
+          },
+        ],
+      },
+    ])
+  })
+
+  test("preserves cache_control captured before Tool loaded is stripped", async () => {
+    let upstreamBody: Record<string, unknown> | undefined
+
+    const selection = buildSelection("/v1/messages", "messages-model")
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    const fetchMock = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = parseFetchBody(opts?.body)
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildAnthropicResponse("messages-model", "messages")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          createPayload({
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "tool_result",
+                    tool_use_id: "tool-1",
+                    content: [
+                      {
+                        type: "tool_reference",
+                        tool_name: "AskUserQuestion",
+                      },
+                    ],
+                  },
+                  {
+                    type: "text",
+                    text: "Tool loaded.",
+                    cache_control: {
+                      type: "ephemeral",
+                      scope: "user",
+                    },
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(upstreamBody?.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-1",
+            content: [
+              {
+                type: "tool_reference",
+                tool_name: "AskUserQuestion",
+              },
+            ],
+            cache_control: {
+              type: "ephemeral",
+              scope: "user",
+            },
+          },
+        ],
+      },
+    ])
+  })
+})
+
 describe("messages handler routing", () => {
   test("routes to the Messages API when selection chooses /v1/messages", async () => {
     let requestedUrl = ""

@@ -742,6 +742,47 @@ npx @nick3/copilot-api@latest start --claude-code
 
 也可以参考 IDE 集成说明：[Add Claude Code to your IDE](https://docs.anthropic.com/en/docs/claude-code/ide-integrations)
 
+## GPT Tool Search
+
+对于 `gpt-5.4+` 这类 GPT Responses 模型，本代理可以通过一个很小的 MCP bridge 暴露 Responses `tool_search`。Claude Code 和 opencode 都可以使用同一个 bridge，前提是客户端会加载 MCP server，并且 Anthropic Messages 流量会经过本代理。
+
+GPT 模型不要设置 Claude Code 原生的 `ENABLE_TOOL_SEARCH`。这个开关启用的是 Claude Code 自己的客户端 tool search 模式，可能导致 deferred 工具定义不再转发给代理。本代理需要完整的工具定义，这样才能只保留那一小组常驻加载工具，其余工具统一转换为 Responses deferred namespace。
+
+如果你安装了 `tool-search@copilot-api-marketplace`，Claude Code 会自动带上这个 MCP bridge，可以跳过下面这段 Claude Code MCP 手动配置。
+
+请把 tool search bridge 加到 Claude Code 使用的 MCP 配置中：
+
+```json
+{
+  "mcpServers": {
+    "tool_search": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@nick3/copilot-api@latest", "mcp"]
+    }
+  }
+}
+```
+
+请把 tool search bridge 加到 opencode 使用的 MCP 配置中：
+
+```json
+{
+  "mcp": {
+    "tool_search": {
+      "type": "local",
+      "command": ["npx", "-y", "@nick3/copilot-api@latest", "mcp"]
+    }
+  }
+}
+```
+
+本地开发时可以将命令换成 `bun`，参数换成 `["run", "./src/main.ts", "mcp"]`。
+
+代理内部现在会把 OpenAI Responses `tool_search` 配置成 client-executed 模式。deferred tools 仍然会作为可搜索 namespace 暴露给模型，但会明确要求模型直接返回下一步要加载的精确工具名列表。
+
+该 bridge 使用直接工具选择，不做 query 搜索。工具入参是 `names`，值为逗号分隔的精确 deferred 工具名，例如 `TaskList,TaskGet,mcp__fetch__fetch`。
+
 ## 与 OpenCode 一起使用
 
 OpenCode 已经内置了 GitHub Copilot provider。本节适用于你希望让 OpenCode 通过 `@ai-sdk/anthropic` 指向这个代理，并复用本 README 前面提到的 agent 行为时。
@@ -905,10 +946,13 @@ UI 会把 token 保存在 `sessionStorage` 中，并通过 `x-admin-token` 请�
 
 #### Claude Code 插件集成（基于 marketplace）
 
-Claude Code 集成被打包为名为 `claude-plugin` 的插件。
+Claude Code 集成现在拆分为两个插件：
+
+- `agent-inject` 会在 `SubagentStart` 时注入 `__SUBAGENT_MARKER__...`，以便本代理推导 `x-initiator: agent`。
+- `tool-search` 会注册用于 GPT Responses deferred tool loading 的 `tool_search` MCP bridge。
 
 - 本仓库中的 marketplace catalog：`.claude-plugin/marketplace.json`
-- 本仓库中的插件源码：`claude-plugin`
+- 本仓库中的插件源码：`claude-plugin/agent-inject`、`claude-plugin/tool-search`
 
 远程添加 marketplace：
 
@@ -919,15 +963,18 @@ Claude Code 集成被打包为名为 `claude-plugin` 的插件。
 从 marketplace 安装插件：
 
 ```sh
-/plugin install claude-plugin@copilot-api-marketplace
+/plugin install agent-inject@copilot-api-marketplace
+/plugin install tool-search@copilot-api-marketplace
 ```
 
-安装后，插件会在 `SubagentStart` 时注入 `__SUBAGENT_MARKER__...`，该代理会利用它推导 `x-initiator: agent`。
+安装后，`agent-inject` 会在 `SubagentStart` 时注入 `__SUBAGENT_MARKER__...`，该代理会利用它推导 `x-initiator: agent`。
 
-插件还会注册一个 `UserPromptSubmit` hook，并返回 `{"continue": true}`；同时它也可以通过环境变量注入 `SessionStart` reminder 规则：
+`agent-inject` 还会注册一个 `UserPromptSubmit` hook，并返回 `{"continue": true}`；同时它也可以通过环境变量注入 `SessionStart` reminder 规则：
 
 - `CLAUDE_PLUGIN_ENABLE_QUESTION_RULES=1` 会自动为 Claude Code 启用两条关于使用 `question` 工具的提醒。你也可以把同样的提醒手动写进 `CLAUDE.md`；见 [CLAUDE.md 或 AGENTS.md 推荐内容](#claudemd-or-agentsmd-recommended-content)。
 - `CLAUDE_PLUGIN_ENABLE_NO_BACKGROUND_AGENTS_RULE=1` 会启用关于避免在 agent hooks 中使用 `run_in_background: true` 的提醒。
+
+`tool-search` 插件内置了 [GPT Tool Search](#gpt-tool-search) 一节描述的同一个 MCP bridge，因此安装该插件后，Claude Code 用户无需再手动配置 `tool_search` server。
 
 #### Opencode 插件
 

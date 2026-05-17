@@ -1,8 +1,0 @@
-{
-  "name": "claude-plugin",
-  "description": "Inject copilot-api rules and SubagentStart marker",
-  "version": "1.2.0",
-  "author": {
-    "name": "copilot-api maintainers"
-  }
-}

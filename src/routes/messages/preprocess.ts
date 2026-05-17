@@ -13,6 +13,8 @@ import {
 import { getReasoningEffortForModel } from "~/lib/config"
 
 import type {
+  AnthropicAssistantContentBlock,
+  AnthropicCacheControl,
   AnthropicDocumentBlock,
   AnthropicImageBlock,
   AnthropicMessage,
@@ -31,9 +33,61 @@ const IDE_GET_DIAGNOSTICS_DESCRIPTION =
 const PDF_FILE_READ_PREFIX = "PDF file read:"
 
 type AnthropicAttachmentBlock = AnthropicImageBlock | AnthropicDocumentBlock
+type AnthropicMessageContentBlock =
+  | AnthropicUserContentBlock
+  | AnthropicAssistantContentBlock
 type IndexedAttachment = {
   attachment: AnthropicAttachmentBlock
   order: number
+}
+
+const getBlockCacheControl = (
+  block: AnthropicMessageContentBlock | undefined,
+): AnthropicCacheControl | undefined => {
+  if (!block || block.type === "thinking") {
+    return undefined
+  }
+
+  const cacheControl = block.cache_control
+  if (!cacheControl || typeof cacheControl !== "object") {
+    return
+  }
+
+  return cacheControl
+}
+
+export const getLastMessageContentCacheControl = (
+  lastMessage: AnthropicMessage | undefined,
+): AnthropicCacheControl | undefined => {
+  if (!lastMessage || !Array.isArray(lastMessage.content)) {
+    return undefined
+  }
+
+  const cacheControl = getBlockCacheControl(lastMessage.content.at(-1))
+  return cacheControl ? { ...cacheControl } : undefined
+}
+
+// Apply the original last message tail's cache_control to the rewritten tail. If
+// the original tail was not marked, fall back to a default ephemeral marker.
+export const applyLastMessageCacheControl = (
+  anthropicPayload: AnthropicMessagesPayload,
+  lastMessageCacheControl: AnthropicCacheControl | undefined,
+): void => {
+  const cacheControl = lastMessageCacheControl ?? {
+    type: "ephemeral",
+  }
+
+  const lastMessage = anthropicPayload.messages.at(-1)
+  if (!lastMessage || !Array.isArray(lastMessage.content)) {
+    return
+  }
+
+  const lastBlock = lastMessage.content.at(-1)
+  if (!lastBlock || lastBlock.type === "thinking" || lastBlock.cache_control) {
+    return
+  }
+
+  lastBlock.cache_control = { ...cacheControl }
 }
 
 const getCompactCandidateText = (message: AnthropicMessage): string => {

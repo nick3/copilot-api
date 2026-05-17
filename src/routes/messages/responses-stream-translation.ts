@@ -1,4 +1,8 @@
 import {
+  BRIDGE_TOOL_SEARCH_NAME,
+  formatToolSearchBridgeArguments,
+} from "~/lib/tool-search"
+import {
   type ResponseCompletedEvent,
   type ResponseCreatedEvent,
   type ResponseErrorEvent,
@@ -20,6 +24,7 @@ import { type AnthropicStreamEventData } from "./anthropic-types"
 import {
   THINKING_TEXT,
   encodeCompactionCarrierSignature,
+  resolveToolUseName,
   translateResponsesResultToAnthropic,
 } from "./responses-translation"
 
@@ -71,6 +76,7 @@ export interface ResponsesStreamState {
   historicalInputTokens?: number
   historicalOutputTokens?: number
   historicalCachedInputTokens?: number
+  toolSearchName: string
 }
 
 type FunctionCallStreamState = {
@@ -80,7 +86,9 @@ type FunctionCallStreamState = {
   consecutiveWhitespaceCount: number
 }
 
-export const createResponsesStreamState = (): ResponsesStreamState => ({
+export const createResponsesStreamState = (options?: {
+  toolSearchName?: string
+}): ResponsesStreamState => ({
   messageStartSent: false,
   messageCompleted: false,
   nextContentBlockIndex: 0,
@@ -88,6 +96,7 @@ export const createResponsesStreamState = (): ResponsesStreamState => ({
   openBlocks: new Set(),
   blockHasDelta: new Set(),
   functionCallStateByOutputIndex: new Map(),
+  toolSearchName: options?.toolSearchName ?? BRIDGE_TOOL_SEARCH_NAME,
 })
 
 export const translateResponsesStreamEvent = (
@@ -163,7 +172,7 @@ const handleOutputItemAdded = (
   state: ResponsesStreamState,
 ): Array<AnthropicStreamEventData> => {
   const events = new Array<AnthropicStreamEventData>()
-  const functionCallDetails = extractFunctionCallDetails(rawEvent)
+  const functionCallDetails = extractFunctionCallDetails(rawEvent, state)
   if (!functionCallDetails) {
     return events
   }
@@ -200,6 +209,31 @@ const handleOutputItemDone = (
   const item = rawEvent.item
   const itemType = item.type
   const outputIndex = rawEvent.output_index
+
+  if (itemType === "tool_search_call") {
+    const blockIndex = openFunctionCallBlock(state, {
+      outputIndex,
+      toolCallId: item.call_id,
+      name: state.toolSearchName,
+      events,
+    })
+    const finalArguments = stringifyToolSearchArguments(item.arguments)
+
+    if (!state.blockHasDelta.has(blockIndex) && finalArguments) {
+      events.push({
+        type: "content_block_delta",
+        index: blockIndex,
+        delta: {
+          type: "input_json_delta",
+          partial_json: finalArguments,
+        },
+      })
+      state.blockHasDelta.add(blockIndex)
+    }
+
+    state.functionCallStateByOutputIndex.delete(outputIndex)
+    return events
+  }
 
   if (itemType === "compaction") {
     if (!item.id || !item.encrypted_content) {
@@ -743,21 +777,44 @@ type FunctionCallDetails = {
 
 const extractFunctionCallDetails = (
   rawEvent: ResponseOutputItemAddedEvent,
+  state: ResponsesStreamState,
 ): FunctionCallDetails | undefined => {
   const item = rawEvent.item
   const itemType = item.type
+  if (itemType === "tool_search_call") {
+    const outputIndex = rawEvent.output_index
+    const toolCallId = item.call_id
+    const name = state.toolSearchName
+    return {
+      outputIndex,
+      toolCallId,
+      name,
+      initialArguments: "",
+    }
+  }
+
   if (itemType !== "function_call") {
     return undefined
   }
 
   const outputIndex = rawEvent.output_index
   const toolCallId = item.call_id
-  const name = item.name
+  const name = resolveToolUseName(item)
   const initialArguments = item.arguments
   return {
     outputIndex,
     toolCallId,
     name,
     initialArguments,
+  }
+}
+
+const stringifyToolSearchArguments = (
+  argumentsValue: Record<string, unknown> | string,
+): string | undefined => {
+  try {
+    return JSON.stringify(formatToolSearchBridgeArguments(argumentsValue))
+  } catch {
+    return undefined
   }
 }

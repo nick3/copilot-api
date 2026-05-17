@@ -1,15 +1,11 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@nick3/copilot-api",
-  "version": "1.10.4",
+  "version": "1.10.7",
   "description": "OpenAI and Anthropic-compatible gateway for GitHub Copilot or third-party providers.",
   "keywords": [
-    "dashboard",
-    "multi-provider",
-    "github-copilot",
     "ai-gateway",
-    "openai-compatible",
-    "anthropic-compatible"
+    "github-copilot"
   ],
   "homepage": "https://github.com/nick3/copilot-api",
   "bugs": "https://github.com/nick3/copilot-api/issues",
@@ -52,6 +48,7 @@
     "rolldown": "1.0.0-rc.18"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "citty": "^0.1.6",
     "clipboardy": "^5.0.0",
     "consola": "^3.4.2",

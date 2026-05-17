@@ -1,10 +1,13 @@
 import { describe, expect, it } from "bun:test"
 
 import { requestContext } from "~/lib/request-context"
+import { createMcpToolSearchSentinel } from "~/lib/tool-search"
 import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
 import type {
   ResponseFunctionCallOutputItem,
   ResponseInputMessage,
+  ResponseToolSearchCallItem,
+  ResponseToolSearchOutputItem,
   ResponsesResult,
 } from "~/services/copilot/create-responses"
 
@@ -425,6 +428,461 @@ describe("translateAnthropicMessagesToResponsesPayload", () => {
       },
     ])
   })
+
+  it("converts bridge and deferred tools into Responses tool_search and namespaces", () => {
+    const result = translateAnthropicMessagesToResponsesPayload({
+      model: "gpt-5.4",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: "fetch a page" }],
+      tools: [
+        {
+          name: "mcp__tool_search__search",
+          description: "Search deferred tools",
+          input_schema: {
+            type: "object",
+            properties: {
+              names: { type: "string" },
+            },
+            required: ["names"],
+          },
+        },
+        {
+          name: "mcp__fetch__fetch",
+          description: "Fetch a URL",
+          input_schema: {
+            type: "object",
+            properties: {
+              url: { type: "string" },
+            },
+            required: ["url"],
+          },
+        },
+        {
+          name: "chrome-devtools_click",
+          description: "Click an element",
+          input_schema: {
+            type: "object",
+            properties: {
+              uid: { type: "string" },
+            },
+            required: ["uid"],
+          },
+        },
+        {
+          name: "Read",
+          description: "Read a file",
+          input_schema: {
+            type: "object",
+            properties: {
+              file_path: { type: "string" },
+            },
+            required: ["file_path"],
+          },
+        },
+      ],
+    })
+
+    expect(result.parallel_tool_calls).toBe(true)
+    expect(result.tools).toEqual([
+      {
+        type: "tool_search",
+        execution: "client",
+        description:
+          "Load deferred tools by exact name before using them. Return only the searchable tool names you need for the next step.",
+        parameters: {
+          type: "object",
+          properties: {
+            names: {
+              type: "array",
+              description: "Exact deferred tool names to load.",
+              items: {
+                type: "string",
+                enum: ["mcp__fetch__fetch", "chrome-devtools_click"],
+              },
+              minItems: 1,
+            },
+          },
+          required: ["names"],
+          additionalProperties: false,
+        },
+      },
+      {
+        type: "namespace",
+        name: "mcp__fetch__fetch",
+        description: "Fetch a URL",
+        tools: [
+          {
+            type: "function",
+            name: "mcp__fetch__fetch",
+            description: "Fetch a URL",
+            parameters: {
+              type: "object",
+              properties: {
+                url: { type: "string" },
+              },
+              required: ["url"],
+            },
+            strict: false,
+            defer_loading: true,
+          },
+        ],
+      },
+      {
+        type: "namespace",
+        name: "chrome-devtools_click",
+        description: "Click an element",
+        tools: [
+          {
+            type: "function",
+            name: "chrome-devtools_click",
+            description: "Click an element",
+            parameters: {
+              type: "object",
+              properties: {
+                uid: { type: "string" },
+              },
+              required: ["uid"],
+            },
+            strict: false,
+            defer_loading: true,
+          },
+        ],
+      },
+      {
+        type: "function",
+        name: "Read",
+        description: "Read a file",
+        parameters: {
+          type: "object",
+          properties: {
+            file_path: { type: "string" },
+          },
+          required: ["file_path"],
+        },
+        strict: false,
+      },
+    ])
+  })
+
+  it("keeps deferred candidates as normal functions when the bridge tool is absent", () => {
+    const result = translateAnthropicMessagesToResponsesPayload({
+      model: "gpt-5.4",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: "fetch a page" }],
+      tools: [
+        {
+          name: "mcp__fetch__fetch",
+          description: "Fetch a URL",
+          input_schema: {
+            type: "object",
+            properties: {
+              url: { type: "string" },
+            },
+          },
+        },
+        {
+          name: "chrome-devtools_click",
+          description: "Click an element",
+          input_schema: {
+            type: "object",
+            properties: {
+              uid: { type: "string" },
+            },
+          },
+        },
+      ],
+    })
+
+    expect(result.parallel_tool_calls).toBe(true)
+    expect(result.tools).toEqual([
+      {
+        type: "function",
+        name: "mcp__fetch__fetch",
+        description: "Fetch a URL",
+        parameters: {
+          type: "object",
+          properties: {
+            url: { type: "string" },
+          },
+        },
+        strict: false,
+      },
+      {
+        type: "function",
+        name: "chrome-devtools_click",
+        description: "Click an element",
+        parameters: {
+          type: "object",
+          properties: {
+            uid: { type: "string" },
+          },
+        },
+        strict: false,
+      },
+    ])
+  })
+
+  it("maps bridge tool_use history into tool_search_call input items", () => {
+    const result = translateAnthropicMessagesToResponsesPayload({
+      model: "gpt-5.4",
+      max_tokens: 1024,
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "call_search",
+              name: "mcp__tool_search__search",
+              input: { names: "mcp__fetch__fetch" },
+            },
+          ],
+        },
+      ],
+      tools: [
+        {
+          name: "mcp__tool_search__search",
+          input_schema: { type: "object" },
+        },
+        {
+          name: "mcp__fetch__fetch",
+          input_schema: { type: "object" },
+        },
+      ],
+    })
+
+    const input = result.input as Array<ResponseToolSearchCallItem>
+    expect(input).toEqual([
+      {
+        type: "tool_search_call",
+        call_id: "call_search",
+        arguments: { names: ["mcp__fetch__fetch"] },
+        execution: "client",
+        status: "completed",
+      },
+    ])
+  })
+
+  it("preserves namespace on deferred tool_use history", () => {
+    const result = translateAnthropicMessagesToResponsesPayload({
+      model: "gpt-5.4",
+      max_tokens: 1024,
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "call_shipping_eta",
+              name: "get_shipping_eta",
+              input: { order_id: "order_42" },
+            },
+          ],
+        },
+      ],
+      tools: [
+        {
+          name: "mcp__tool_search__search",
+          input_schema: { type: "object" },
+        },
+        {
+          name: "get_shipping_eta",
+          input_schema: { type: "object" },
+        },
+      ],
+    })
+
+    expect(result.input).toEqual([
+      {
+        type: "function_call",
+        call_id: "call_shipping_eta",
+        name: "get_shipping_eta",
+        namespace: "get_shipping_eta",
+        arguments: '{"order_id":"order_42"}',
+        status: "completed",
+      },
+    ])
+  })
+
+  it("accepts tool_search bridge aliases in tool_use history", () => {
+    const result = translateAnthropicMessagesToResponsesPayload({
+      model: "gpt-5.4",
+      max_tokens: 1024,
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "call_search",
+              name: "tool_search_search",
+              input: { names: "mcp__fetch__fetch" },
+            },
+          ],
+        },
+      ],
+      tools: [
+        {
+          name: "tool_search_search",
+          input_schema: { type: "object" },
+        },
+        {
+          name: "mcp__fetch__fetch",
+          input_schema: { type: "object" },
+        },
+      ],
+    })
+
+    const input = result.input as Array<ResponseToolSearchCallItem>
+    expect(input).toEqual([
+      {
+        type: "tool_search_call",
+        call_id: "call_search",
+        arguments: { names: ["mcp__fetch__fetch"] },
+        execution: "client",
+        status: "completed",
+      },
+    ])
+  })
+
+  it("rebuilds tool_search_output from tool_reference history", () => {
+    const result = translateAnthropicMessagesToResponsesPayload({
+      model: "gpt-5.4",
+      max_tokens: 1024,
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "call_search",
+              name: "mcp__tool_search__search",
+              input: { names: "mcp__fetch__fetch" },
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "call_search",
+              content: [
+                {
+                  type: "tool_reference",
+                  tool_name: "mcp__fetch__fetch",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      tools: [
+        {
+          name: "mcp__tool_search__search",
+          input_schema: { type: "object" },
+        },
+        {
+          name: "mcp__fetch__fetch",
+          description: "Fetch a URL",
+          input_schema: {
+            type: "object",
+            properties: {
+              url: { type: "string" },
+            },
+          },
+        },
+      ],
+    })
+
+    const input = result.input as Array<
+      ResponseToolSearchCallItem | ResponseToolSearchOutputItem
+    >
+    expect(input[1]).toEqual({
+      type: "tool_search_output",
+      call_id: "call_search",
+      execution: "client",
+      tools: [
+        {
+          type: "namespace",
+          name: "mcp__fetch__fetch",
+          description: "Fetch a URL",
+          tools: [
+            {
+              type: "function",
+              name: "mcp__fetch__fetch",
+              description: "Fetch a URL",
+              parameters: {
+                type: "object",
+                properties: {
+                  url: { type: "string" },
+                },
+              },
+              strict: false,
+              defer_loading: true,
+            },
+          ],
+        },
+      ],
+      status: "completed",
+    })
+  })
+
+  it("rebuilds tool_search_output from bridge sentinel results", () => {
+    const result = translateAnthropicMessagesToResponsesPayload({
+      model: "gpt-5.4",
+      max_tokens: 1024,
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "call_search",
+              name: "mcp__tool_search__search",
+              input: { names: "TaskList" },
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "call_search",
+              content: createMcpToolSearchSentinel("TaskList"),
+            },
+          ],
+        },
+      ],
+      tools: [
+        {
+          name: "mcp__tool_search__search",
+          input_schema: { type: "object" },
+        },
+        {
+          name: "mcp__fetch__fetch",
+          description: "Fetch a URL",
+          input_schema: { type: "object" },
+        },
+        {
+          name: "TaskList",
+          description: "List tasks",
+          input_schema: { type: "object" },
+        },
+      ],
+    })
+
+    const input = result.input as Array<
+      ResponseToolSearchCallItem | ResponseToolSearchOutputItem
+    >
+    const output = input[1] as ResponseToolSearchOutputItem
+    expect(output.type).toBe("tool_search_output")
+    expect(output.execution).toBe("client")
+    expect(
+      (output.tools as Array<{ name: string }>).map((tool) => tool.name),
+    ).toEqual(["TaskList"])
+  })
 })
 
 describe("translateResponsesResultToAnthropic", () => {
@@ -514,5 +972,97 @@ describe("translateResponsesResultToAnthropic", () => {
     if (textBlock.type === "text") {
       expect(textBlock.text).toBe("Added the task to your todo list.")
     }
+  })
+
+  it("uses function_call namespace as the Anthropic tool_use name", () => {
+    const responsesResult: ResponsesResult = {
+      id: "resp_namespace",
+      object: "response",
+      created_at: 0,
+      model: "gpt-5.4",
+      output: [
+        {
+          id: "call_1",
+          type: "function_call",
+          call_id: "call_1",
+          name: "invoke",
+          namespace: "mcp__fetch__fetch",
+          arguments: '{"url":"https://example.com"}',
+          status: "completed",
+        },
+      ],
+      output_text: "",
+      status: "completed",
+      usage: null,
+      error: null,
+      incomplete_details: null,
+      instructions: null,
+      metadata: null,
+      parallel_tool_calls: false,
+      temperature: null,
+      tool_choice: null,
+      tools: [],
+      top_p: null,
+    }
+
+    const anthropicResponse =
+      translateResponsesResultToAnthropic(responsesResult)
+
+    expect(anthropicResponse.stop_reason).toBe("tool_use")
+    expect(anthropicResponse.content).toEqual([
+      {
+        type: "tool_use",
+        id: "call_1",
+        name: "mcp__fetch__fetch",
+        input: {
+          url: "https://example.com",
+        },
+      },
+    ])
+  })
+
+  it("maps tool_search_call output into the bridge Anthropic tool_use", () => {
+    const responsesResult: ResponsesResult = {
+      id: "resp_search",
+      object: "response",
+      created_at: 0,
+      model: "gpt-5.4",
+      output: [
+        {
+          id: "search_1",
+          type: "tool_search_call",
+          call_id: "call_search",
+          arguments: { names: ["mcp__fetch__fetch", "TaskList"] },
+          status: "completed",
+        },
+      ],
+      output_text: "",
+      status: "completed",
+      usage: null,
+      error: null,
+      incomplete_details: null,
+      instructions: null,
+      metadata: null,
+      parallel_tool_calls: false,
+      temperature: null,
+      tool_choice: null,
+      tools: [],
+      top_p: null,
+    }
+
+    const anthropicResponse =
+      translateResponsesResultToAnthropic(responsesResult)
+
+    expect(anthropicResponse.stop_reason).toBe("tool_use")
+    expect(anthropicResponse.content).toEqual([
+      {
+        type: "tool_use",
+        id: "call_search",
+        name: "mcp__tool_search__search",
+        input: {
+          names: "mcp__fetch__fetch,TaskList",
+        },
+      },
+    ])
   })
 })
