@@ -586,8 +586,6 @@
       "sessionAffinityRetentionError": "Must be a non-negative number.",
       "allowOriginalModelNamesLabel": "Allow original model names",
       "allowOriginalModelNamesHint": "Default behavior when aliases do not override original model IDs.",
-      "useFunctionApplyPatchLabel": "Responses API apply_patch",
-      "useFunctionApplyPatchHint": "Include the apply_patch function tool when forwarding requests through the Responses API.",
       "forceAgentLabel": "Batch agent requests per session",
       "forceAgentHint": "Affects Copilot Premium request consumption counting: when off, every agent conversation request counts as 1 (same as the VS Code extension); when on, multiple requests in the same session count only once per model.",
       "compactUseSmallModelLabel": "Route compact requests to small model",

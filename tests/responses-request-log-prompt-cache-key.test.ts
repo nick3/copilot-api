@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import "./shared-admin-db-test-home"
 
 import type { AccountRuntime } from "~/lib/types/account"
+import type { ResponsesPayload } from "~/services/copilot/create-responses"
 import type { Model } from "~/services/copilot/get-models"
 
 import { HTTPError } from "~/lib/error"
@@ -326,6 +327,56 @@ describe("responses request log prompt_cache_key persistence", () => {
     expect(log?.affinity_key_used).toBe(metadataSessionId)
     expect(log?.affinity_key_source).toBe("metadata_session_id")
     expect(log?.selection_reason).toBe("affinity_miss")
+  })
+
+  test("preserves custom apply_patch tools for Copilot Responses", async () => {
+    let forwardedTools: ResponsesPayload["tools"]
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("/responses", "responses-model"))
+
+    const fetchMock = mock((_url: string, options?: FetchOptions) => {
+      const body = JSON.parse(options?.body as string) as ResponsesPayload
+      forwardedTools = body.tools
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildResponsesResult("responses-model", "ok")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const applyPatchTool = {
+      type: "custom",
+      name: "apply_patch",
+      description: "Edit files with a patch",
+      format: {
+        type: "grammar",
+        syntax: "lark",
+        definition: "start: /.+/",
+      },
+    }
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "original-model",
+          input: "hello",
+          tools: [applyPatchTool],
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(forwardedTools?.[0]).toEqual(applyPatchTool)
   })
 
   test("uses x-session-id for upstream interaction id when no other session key exists", async () => {

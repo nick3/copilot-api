@@ -1933,7 +1933,6 @@ type AdvancedSettingsCardProps = {
   sessionAffinityRetentionInput: string
   sessionAffinityRetentionIssue: string | null
   allowOriginalModelNamesForAliases: boolean
-  useFunctionApplyPatch: boolean
   forceAgent: boolean
   compactUseSmallModel: boolean
   messageStartInputTokensFallback: boolean
@@ -1945,7 +1944,6 @@ type AdvancedSettingsCardProps = {
   onModelRefreshIntervalChange: (value: string) => void
   onSessionAffinityRetentionChange: (value: string) => void
   onToggleAllowOriginalModelNamesForAliases: (value: boolean) => void
-  onToggleUseFunctionApplyPatch: (value: boolean) => void
   onToggleForceAgent: (value: boolean) => void
   onToggleCompactUseSmallModel: (value: boolean) => void
   onToggleMessageStartInputTokensFallback: (value: boolean) => void
@@ -1962,7 +1960,6 @@ export function AdvancedSettingsCard({
   sessionAffinityRetentionInput,
   sessionAffinityRetentionIssue,
   allowOriginalModelNamesForAliases,
-  useFunctionApplyPatch,
   forceAgent,
   compactUseSmallModel,
   messageStartInputTokensFallback,
@@ -1974,7 +1971,6 @@ export function AdvancedSettingsCard({
   onModelRefreshIntervalChange,
   onSessionAffinityRetentionChange,
   onToggleAllowOriginalModelNamesForAliases,
-  onToggleUseFunctionApplyPatch,
   onToggleForceAgent,
   onToggleCompactUseSmallModel,
   onToggleMessageStartInputTokensFallback,
@@ -2057,21 +2053,6 @@ export function AdvancedSettingsCard({
             </div>
           </div>
           <Switch checked={useMessagesApi} onCheckedChange={onToggleUseMessagesApi} />
-        </div>
-
-        <div className="flex items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="text-sm font-medium">
-              {t("settingsPage.advanced.useFunctionApplyPatchLabel")}
-            </div>
-            <div className="text-muted-foreground text-xs">
-              {t("settingsPage.advanced.useFunctionApplyPatchHint")}
-            </div>
-          </div>
-          <Switch
-            checked={useFunctionApplyPatch}
-            onCheckedChange={onToggleUseFunctionApplyPatch}
-          />
         </div>
 
         <div className="flex items-center justify-between gap-4">
@@ -2616,7 +2597,6 @@ type SettingsPageViewProps = {
   onAliasRemoveItem: (id: string) => void
   onAliasUpdateItem: (id: string, value: Partial<ModelAliasItem>) => void
   allowOriginalModelNamesForAliases: boolean
-  useFunctionApplyPatch: boolean
   forceAgent: boolean
   compactUseSmallModel: boolean
   messageStartInputTokensFallback: boolean
@@ -2641,7 +2621,6 @@ type SettingsPageViewProps = {
     patch: Partial<ProviderModelItem>,
   ) => void
   onAllowOriginalModelNamesForAliasesToggle: (value: boolean) => void
-  onUseFunctionApplyPatchToggle: (value: boolean) => void
   onForceAgentToggle: (value: boolean) => void
   onCompactUseSmallModelToggle: (value: boolean) => void
   onMessageStartInputTokensFallbackToggle: (value: boolean) => void
@@ -2949,13 +2928,6 @@ function useSettingsPageState(): SettingsPageViewProps {
     [setDraft],
   )
 
-  const handleUseFunctionApplyPatchToggle = useCallback(
-    (value: boolean) => {
-      setDraft((prev) => ({ ...prev, useFunctionApplyPatch: value }))
-    },
-    [setDraft],
-  )
-
   const handleForceAgentToggle = useCallback(
     (value: boolean) => {
       setDraft((prev) => ({ ...prev, forceAgent: value }))
@@ -3094,7 +3066,6 @@ function useSettingsPageState(): SettingsPageViewProps {
     },
     [devMode.enabled, devMode.capture4xx, devMode.capture5xx, devMode.captureOther, persistDevMode],
   )
-  const useFunctionApplyPatch = draft.useFunctionApplyPatch ?? true
   const forceAgent = draft.forceAgent ?? false
   const compactUseSmallModel = draft.compactUseSmallModel ?? true
   const messageStartInputTokensFallback =
@@ -3164,7 +3135,6 @@ function useSettingsPageState(): SettingsPageViewProps {
     onAliasAddItem,
     onAliasRemoveItem,
     onAliasUpdateItem,
-    useFunctionApplyPatch,
     forceAgent,
     compactUseSmallModel,
     messageStartInputTokensFallback,
@@ -3187,7 +3157,6 @@ function useSettingsPageState(): SettingsPageViewProps {
     onProvidersUpdateModel,
     onAllowOriginalModelNamesForAliasesToggle:
       handleAllowOriginalModelNamesForAliasesToggle,
-    onUseFunctionApplyPatchToggle: handleUseFunctionApplyPatchToggle,
     onForceAgentToggle: handleForceAgentToggle,
     onCompactUseSmallModelToggle: handleCompactUseSmallModelToggle,
     onMessageStartInputTokensFallbackToggle:
@@ -3256,7 +3225,6 @@ function SettingsPageView({
   onAliasRemoveItem,
   onAliasUpdateItem,
   allowOriginalModelNamesForAliases,
-  useFunctionApplyPatch,
   forceAgent,
   compactUseSmallModel,
   messageStartInputTokensFallback,
@@ -3277,7 +3245,6 @@ function SettingsPageView({
   onProvidersRemoveModel,
   onProvidersUpdateModel,
   onAllowOriginalModelNamesForAliasesToggle,
-  onUseFunctionApplyPatchToggle,
   onForceAgentToggle,
   onCompactUseSmallModelToggle,
   onMessageStartInputTokensFallbackToggle,
@@ -3500,7 +3467,6 @@ function SettingsPageView({
               allowOriginalModelNamesForAliases={
                 allowOriginalModelNamesForAliases
               }
-              useFunctionApplyPatch={useFunctionApplyPatch}
               forceAgent={forceAgent}
               compactUseSmallModel={compactUseSmallModel}
               messageStartInputTokensFallback={messageStartInputTokensFallback}
@@ -3518,7 +3484,6 @@ function SettingsPageView({
               onToggleAllowOriginalModelNamesForAliases={
                 onAllowOriginalModelNamesForAliasesToggle
               }
-              onToggleUseFunctionApplyPatch={onUseFunctionApplyPatchToggle}
               onToggleForceAgent={onForceAgentToggle}
               onToggleCompactUseSmallModel={onCompactUseSmallModelToggle}
               onToggleMessageStartInputTokensFallback={

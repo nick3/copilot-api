@@ -45,7 +45,6 @@ export interface AppConfig {
   >
   modelAliases?: Record<string, { target: string; allowOriginal?: boolean }>
   allowOriginalModelNamesForAliases?: boolean
-  useFunctionApplyPatch?: boolean
   forceAgent?: boolean
   compactUseSmallModel?: boolean
   messageStartInputTokensFallback?: boolean
@@ -157,7 +156,6 @@ const defaultConfig: AppConfig = {
     "gpt-5.5": "xhigh",
   },
   allowOriginalModelNamesForAliases: false,
-  useFunctionApplyPatch: true,
   forceAgent: false,
   compactUseSmallModel: true,
   messageStartInputTokensFallback: false,

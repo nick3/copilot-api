@@ -161,7 +161,6 @@ export type AdminConfig = {
   modelReasoningEfforts?: Record<string, ReasoningEffort>
   modelAliases?: Record<string, ModelAliasSpec | string>
   allowOriginalModelNamesForAliases?: boolean
-  useFunctionApplyPatch?: boolean
   forceAgent?: boolean
   compactUseSmallModel?: boolean
   messageStartInputTokensFallback?: boolean

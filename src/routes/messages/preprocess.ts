@@ -21,6 +21,7 @@ import type {
   AnthropicMessagesPayload,
   AnthropicTextBlock,
   AnthropicToolResultBlock,
+  AnthropicToolResultContentBlock,
   AnthropicUserContentBlock,
 } from "./anthropic-types"
 
@@ -185,7 +186,7 @@ const mergeContentWithText = (
   }
   return {
     ...tr,
-    content: [...tr.content, textBlock],
+    content: [...tr.content, stripContentBlockCacheControl(textBlock)],
   }
 }
 
@@ -201,24 +202,43 @@ const mergeContentWithTexts = (
   if (hasToolRef(tr)) {
     return tr
   }
-  return { ...tr, content: [...tr.content, ...textBlocks] }
+  return {
+    ...tr,
+    content: [...tr.content, ...textBlocks.map(stripContentBlockCacheControl)],
+  }
 }
 
 const mergeContentWithAttachments = (
   tr: AnthropicToolResultBlock,
   attachments: Array<AnthropicAttachmentBlock>,
 ): AnthropicToolResultBlock => {
+  const cleanAttachments = attachments.map(stripContentBlockCacheControl)
+
   if (typeof tr.content === "string") {
     return {
       ...tr,
-      content: [{ type: "text", text: tr.content }, ...attachments],
+      content: [{ type: "text", text: tr.content }, ...cleanAttachments],
     }
   }
 
   return {
     ...tr,
-    content: [...tr.content, ...attachments],
+    content: [...tr.content, ...cleanAttachments],
   }
+}
+
+const stripContentBlockCacheControl = <
+  T extends AnthropicToolResultContentBlock,
+>(
+  block: T,
+): T => {
+  if (!Object.hasOwn(block, "cache_control")) {
+    return block
+  }
+
+  const copy = { ...block }
+  delete copy.cache_control
+  return copy
 }
 
 const isAttachmentBlock = (

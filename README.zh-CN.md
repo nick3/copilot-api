@@ -363,7 +363,6 @@ Copilot API 现在使用子命令结构，主要命令包括：
       "gpt-5.4": "xhigh"
     },
     "allowOriginalModelNamesForAliases": false,
-    "useFunctionApplyPatch": true,
     "forceAgent": false,
     "compactUseSmallModel": true,
     "messageStartInputTokensFallback": false,
@@ -455,7 +454,6 @@ Copilot API 现在使用子命令结构，主要命令包括：
 - **apiKey（已弃用）：** 兼容迁移的旧单 key 字段。优先使用 `auth.apiKeys`。当 `auth.apiKeys` 为空时，服务端会回退到 `COPILOT_API_KEY`，再回退到 `apiKey`。- **modelReasoningEfforts：** 按模型配置发送到 Copilot Responses API 的 `reasoning.effort`。可选值包括 `none`、`minimal`、`low`、`medium`、`high` 和 `xhigh`。若某模型未配置，则默认使用 `high`。
 - **modelAliases：** `alias -> { target, allowOriginal? }` 的映射（也仍然接受旧的字符串写法）。别名 key 会先做标准化（trim + lowercase），且不能为空；别名不能映射回自己（大小写不敏感），冲突的标准化别名会被拒绝。`allowOriginal` 可为单个别名覆盖全局默认值。如果多个别名映射到同一个 target，只要其中任意一个设置了 `allowOriginal: true`，原始模型名就会被允许（allow-wins）。Admin UI/API 会拒绝被屏蔽的键（`__proto__`、`constructor`、`prototype`）。下游请求可以直接使用这些别名，target 也可以是 `provider/model` 形式，用于顶层 `/v1/messages` 与 `/v1/messages/count_tokens` 路由。
 - **allowOriginalModelNamesForAliases：** 对未显式设置 `allowOriginal` 的别名所采用的全局默认值。当其为 `false`（默认）时，target 原名默认被屏蔽，除非某个别名显式允许；当其为 `true` 时，target 原名默认可用，除非所有别名都显式阻止。
-- **useFunctionApplyPatch：** 当为 `true`（默认）时，`POST /v1/responses` 会把 `tools` 中形如 `{ "type": "custom", "name": "apply_patch" }` 的条目转换为 OpenAI 风格的 `function` 工具（带参数 schema），以便与上游更好兼容。设为 `false` 则保留自定义工具原样。
 - **forceAgent：** 当为 `true` 时，只要 `POST /v1/responses` 的任一 input item 带有 `role: "assistant"`，就会把请求视为由 agent 发起；当为 `false`（默认）时，只检查最后一个 input item。
 - **compactUseSmallModel：** 当为 `true` 时，检测到的“compact”请求（例如 Claude Code 或 opencode 的 compact 模式）会自动改用配置中的 `smallModel`，以避免短后台任务消耗 premium 使用量。默认值为 `true`。
 - **messageStartInputTokensFallback：** 当为 `true` 时，如果上游流式事件没有提供 `message_start.input_tokens`，Anthropic 流式翻译层会自行估算该值。默认值为 `false`。

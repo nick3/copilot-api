@@ -188,7 +188,6 @@ const CONFIG_KEYS = new Set<keyof AppConfig>([
   "modelReasoningEfforts",
   "modelAliases",
   "allowOriginalModelNamesForAliases",
-  "useFunctionApplyPatch",
   "forceAgent",
   "compactUseSmallModel",
   "messageStartInputTokensFallback",
@@ -891,7 +890,6 @@ function applyOptionalBoolean(
   next: AppConfig,
   key:
     | "accountAffinity"
-    | "useFunctionApplyPatch"
     | "forceAgent"
     | "useMessagesApi"
     | "useResponsesApiWebSocket"
@@ -1142,8 +1140,6 @@ const CONFIG_PATCH_HANDLERS: Partial<Record<string, ConfigPatchHandler>> = {
   modelAliases: applyModelAliases,
   allowOriginalModelNamesForAliases: (next, value) =>
     applyOptionalBoolean(next, "allowOriginalModelNamesForAliases", value),
-  useFunctionApplyPatch: (next, value) =>
-    applyOptionalBoolean(next, "useFunctionApplyPatch", value),
   forceAgent: (next, value) => applyOptionalBoolean(next, "forceAgent", value),
   compactUseSmallModel: (next, value) =>
     applyOptionalBoolean(next, "compactUseSmallModel", value),

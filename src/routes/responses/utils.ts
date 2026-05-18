@@ -7,7 +7,6 @@ import type {
 
 import { COMPACT_REQUEST, type CompactType } from "~/lib/compact"
 import {
-  getConfig,
   isForceAgentEnabled,
   isResponsesApiContextManagementModel as isConfiguredResponsesApiContextManagementModel,
   isResponsesApiWebSocketEnabled as isConfiguredResponsesApiWebSocketEnabled,
@@ -180,37 +179,6 @@ const getPayloadItems = (
   }
 
   return result
-}
-
-export const useFunctionApplyPatch = (payload: ResponsesPayload): void => {
-  const config = getConfig()
-  const enabled = config.useFunctionApplyPatch ?? true
-  if (!enabled) return
-
-  if (Array.isArray(payload.tools)) {
-    const toolsArr = payload.tools
-    for (let i = 0; i < toolsArr.length; i++) {
-      const t = toolsArr[i]
-      if (t.type === "custom" && t.name === "apply_patch") {
-        toolsArr[i] = {
-          type: "function",
-          name: t.name,
-          description: "Use the `apply_patch` tool to edit files",
-          parameters: {
-            type: "object",
-            properties: {
-              input: {
-                type: "string",
-                description: "The entire contents of the apply_patch command",
-              },
-            },
-            required: ["input"],
-          },
-          strict: false,
-        }
-      }
-    }
-  }
 }
 
 export const removeWebSearchTool = (payload: ResponsesPayload): void => {

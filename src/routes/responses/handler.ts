@@ -52,7 +52,6 @@ import {
   getStreamChunkFields,
   isAsyncIterable,
   removeWebSearchTool,
-  useFunctionApplyPatch,
 } from "./utils"
 
 const logger = createHandlerLogger("responses-handler")
@@ -157,7 +156,6 @@ export const handleResponses = async (c: Context) => {
   request.selectionReason = selection.selectionReason
 
   const upstreamPayload = { ...payload, model: selectedModel.id }
-  useFunctionApplyPatch(upstreamPayload)
   removeUnsupportedTools(upstreamPayload)
   applyResponsesApiContextManagement(
     upstreamPayload,

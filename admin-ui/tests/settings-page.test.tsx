@@ -16,7 +16,6 @@ test("Advanced settings exposes Responses API WebSocket toggle", () => {
       responsesApiContextManagementModelsValue=""
       sessionAffinityRetentionInput=""
       sessionAffinityRetentionIssue={null}
-      useFunctionApplyPatch
       useMessagesApi
       useResponsesApiWebSearch
       useResponsesApiWebSocket={false}
@@ -28,7 +27,6 @@ test("Advanced settings exposes Responses API WebSocket toggle", () => {
       onToggleCompactUseSmallModel={() => {}}
       onToggleForceAgent={() => {}}
       onToggleMessageStartInputTokensFallback={() => {}}
-      onToggleUseFunctionApplyPatch={() => {}}
       onToggleUseMessagesApi={() => {}}
       onToggleUseResponsesApiWebSearch={() => {}}
       onToggleUseResponsesApiWebSocket={() => {}}

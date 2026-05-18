@@ -586,8 +586,6 @@
       "sessionAffinityRetentionError": "必须是非负数字。",
       "allowOriginalModelNamesLabel": "允许原始模型名",
       "allowOriginalModelNamesHint": "当别名未覆盖时的默认行为。",
-      "useFunctionApplyPatchLabel": "Responses API apply_patch",
-      "useFunctionApplyPatchHint": "在 Responses API 转发请求时包含 apply_patch 函数工具。",
       "forceAgentLabel": "按会话合并 Agent 请求计费",
       "forceAgentHint": "影响 Copilot高级请求消耗的计次：关闭时，每次与 Agent 的对话请求都会计 1 次（与 VS Code 插件一致）；开启时，同一会话内对同一模型的多次请求只计 1 次。",
       "compactUseSmallModelLabel": "compact 请求路由到小模型",

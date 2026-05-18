@@ -354,7 +354,6 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
       "gpt-5.4": "xhigh"
     },
     "allowOriginalModelNamesForAliases": false,
-    "useFunctionApplyPatch": true,
     "forceAgent": false,
     "compactUseSmallModel": true,
     "messageStartInputTokensFallback": false,
@@ -446,7 +445,6 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
 - **apiKey (deprecated):** Legacy single-key field kept for migration compatibility. Prefer `auth.apiKeys`. When `auth.apiKeys` is empty, the server falls back to `COPILOT_API_KEY` and then `apiKey`.- **modelReasoningEfforts:** Per-model `reasoning.effort` sent to the Copilot Responses API. Allowed values are `none`, `minimal`, `low`, `medium`, `high`, and `xhigh`. If a model isn’t listed, `high` is used by default.
 - **modelAliases:** Map of `alias -> { target, allowOriginal? }` (legacy string values are still accepted). Alias keys are normalized (trim + lowercase) and must be non-empty; aliases cannot map to themselves (case-insensitive), and conflicting normalized aliases are rejected. `allowOriginal` overrides the global default per alias. If multiple aliases map to the same target, original names are allowed when any alias sets `allowOriginal: true` (allow-wins). Admin UI/API rejects blocked keys (`__proto__`, `constructor`, `prototype`). Aliases can be used in downstream requests, and targets may be configured `provider/model` aliases for top-level `/v1/messages` and `/v1/messages/count_tokens` routing.
 - **allowOriginalModelNamesForAliases:** Global default for aliases that omit `allowOriginal`. When `false` (default), targets are blocked unless an alias explicitly allows them; when `true`, targets are allowed unless all aliases explicitly block them.
-- **useFunctionApplyPatch:** When `true` (default), `POST /v1/responses` converts a `tools` entry with `{ "type": "custom", "name": "apply_patch" }` into an OpenAI-style `function` tool (with a parameter schema) for upstream compatibility. Set to `false` to leave custom tools untouched.
 - **forceAgent:** When `true`, `POST /v1/responses` treats a request as agent-initiated if **any** input item has `role: "assistant"`. When `false` (default), only the **last** input item is checked.
 - **compactUseSmallModel:** When `true`, detected "compact" requests (e.g., from Claude Code or opencode compact mode) will automatically use the configured `smallModel` to avoid consuming premium usage for short/background tasks. Defaults to `true`.
 - **messageStartInputTokensFallback:** When `true`, the Anthropic streaming translation layer estimates `message_start.input_tokens` when upstream stream events do not provide it. Defaults to `false`.

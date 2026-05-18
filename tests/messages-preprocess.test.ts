@@ -240,6 +240,79 @@ describe("mergeToolResultForClaude content merging", () => {
     })
   })
 
+  test("strips cache_control from blocks absorbed into tool_result content", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-opus-4.6",
+      max_tokens: 128,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool-1",
+              content: [
+                {
+                  type: "text",
+                  text: "existing output",
+                },
+              ],
+            },
+            {
+              type: "text",
+              text: "follow-up details",
+              cache_control: {
+                type: "ephemeral",
+                scope: "user",
+              },
+            },
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: "image/png",
+                data: "image-data",
+              },
+              cache_control: {
+                type: "ephemeral",
+              },
+            },
+          ],
+        },
+      ],
+    }
+
+    mergeToolResultForClaude(payload)
+
+    expect(payload.messages[0]).toEqual({
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: "tool-1",
+          content: [
+            {
+              type: "text",
+              text: "existing output",
+            },
+            {
+              type: "text",
+              text: "follow-up details",
+            },
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: "image/png",
+                data: "image-data",
+              },
+            },
+          ],
+        },
+      ],
+    })
+  })
+
   test("appends all text blocks to the last tool_result when counts differ", () => {
     const payload: AnthropicMessagesPayload = {
       model: "claude-opus-4.6",
