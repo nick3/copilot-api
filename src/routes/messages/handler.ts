@@ -428,6 +428,8 @@ export async function handleCompletion(c: Context) {
   logger.debug("Generated request ID:", upstreamRequestId)
 
   const clientModel = anthropicPayload.model
+  anthropicPayload.model = resolveModelAlias(anthropicPayload.model)
+  const routingModel = anthropicPayload.model
   const streamRequested = Boolean(anthropicPayload.stream)
   const rawUserId = anthropicPayload.metadata?.user_id
   const userId = typeof rawUserId === "string" ? rawUserId : undefined
@@ -465,10 +467,10 @@ export async function handleCompletion(c: Context) {
   })
   if (blockedResponse) return blockedResponse
 
-  const endpointModel = findEndpointModel(clientModel)
-  const resolvedClientModel = endpointModel?.id ?? clientModel
+  const endpointModel = findEndpointModel(routingModel)
+  const resolvedClientModel = endpointModel?.id ?? routingModel
   const affinityModelId =
-    clientModel !== originalRequestModel ?
+    routingModel !== originalRequestModel ?
       (findEndpointModel(originalRequestModel)?.id ?? originalRequestModel)
     : undefined
   const useMessagesApi = isMessagesApiEnabled()

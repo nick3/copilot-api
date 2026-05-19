@@ -308,8 +308,26 @@ describe("provider/model aliases on top-level messages routes", () => {
   })
 
   test("falls back to Copilot model aliases when slash prefix is not a provider", async () => {
-    accountsManager.selectAccountForRequest = () =>
-      Promise.resolve(buildSelection("/chat/completions", "gpt-5.4"))
+    writeTestConfig({
+      auth: { apiKeys: [] },
+      modelAliases: {
+        "copilot/gpt-5.4": {
+          allowOriginal: true,
+          target: "gpt-5.4",
+        },
+      },
+      providers: {},
+    })
+
+    let selectionCandidates: Array<{ modelId: string; endpoint: string }> = []
+    accountsManager.selectAccountForRequest = (candidates) => {
+      selectionCandidates = candidates
+      if (!candidates.some((candidate) => candidate.modelId === "gpt-5.4")) {
+        return Promise.resolve({ ok: false, reason: "MODEL_NOT_SUPPORTED" })
+      }
+
+      return Promise.resolve(buildSelection("/chat/completions", "gpt-5.4"))
+    }
     accountsManager.finalizeQuota = () => Promise.resolve()
     createUpstreamResponse = () =>
       new Response(
@@ -359,6 +377,9 @@ describe("provider/model aliases on top-level messages routes", () => {
     })
 
     expect(response.status).toBe(200)
+    expect(selectionCandidates.map((candidate) => candidate.modelId)).toContain(
+      "gpt-5.4",
+    )
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const upstreamBody = JSON.parse(
       (fetchMock.mock.calls[0][1] as RequestInit).body as string,
