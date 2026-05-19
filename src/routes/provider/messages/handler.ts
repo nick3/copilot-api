@@ -232,6 +232,44 @@ const applyMissingExtraBody = (
   }
 }
 
+const getRequestThinkingBudget = (
+  payload: AnthropicMessagesPayload,
+): number | undefined => {
+  const budget = payload.thinking?.budget_tokens
+  if (typeof budget !== "number" || !Number.isFinite(budget)) {
+    return undefined
+  }
+  return budget
+}
+
+const applyOpenAICompatibleThinkingBudget = (
+  payload: ChatCompletionsPayload,
+  source: AnthropicMessagesPayload,
+): void => {
+  const thinkingBudget = getRequestThinkingBudget(source)
+  if (thinkingBudget !== undefined) {
+    payload.thinking_budget = thinkingBudget
+    return
+  }
+
+  if (payload.thinking_budget === undefined) {
+    delete payload.thinking_budget
+  }
+}
+
+const applyOpenAICompatibleExtraBodyThinkingBudget = (
+  payload: ChatCompletionsPayload,
+  options: { extraBody: Record<string, unknown> | undefined },
+): void => {
+  const { extraBody } = options
+  if (!extraBody || !Object.hasOwn(extraBody, "thinking_budget")) {
+    return
+  }
+
+  const rawPayload = payload as Record<string, unknown>
+  rawPayload.thinking_budget = extraBody.thinking_budget
+}
+
 const handleOpenAICompatibleProviderMessages = async (
   c: Context,
   options: {
@@ -299,6 +337,7 @@ const createOpenAICompatiblePayload = (
     supportPdf: modelConfig?.supportPdf,
     toolContentSupportType: modelConfig?.toolContentSupportType ?? [],
   })
+  applyOpenAICompatibleThinkingBudget(openAIPayload, payload)
 
   if (payload.top_k !== undefined) {
     openAIPayload.top_k = payload.top_k
@@ -318,6 +357,10 @@ const createOpenAICompatiblePayload = (
   })
 
   applyMissingExtraBody(openAIPayload, {
+    extraBody: modelConfig?.extraBody,
+  })
+
+  applyOpenAICompatibleExtraBodyThinkingBudget(openAIPayload, {
     extraBody: modelConfig?.extraBody,
   })
 

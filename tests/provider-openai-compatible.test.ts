@@ -242,6 +242,64 @@ describe("openai-compatible provider messages", () => {
     const body = JSON.parse(init.body as string) as Record<string, unknown>
     expect(body.parallel_tool_calls).toBe(false)
   })
+
+  test("maps Anthropic thinking budget to OpenAI-compatible thinking_budget", async () => {
+    const app = createApp()
+    const response = await app.request("/dash/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        max_tokens: 128,
+        messages: [{ role: "user", content: "hello" }],
+        model: "qwen-plus",
+        thinking: {
+          type: "enabled",
+          budget_tokens: 4096,
+        },
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    const body = JSON.parse(init.body as string) as Record<string, unknown>
+    expect(body.thinking_budget).toBe(4096)
+    expect(body).not.toHaveProperty("thinking")
+  })
+
+  test("forces thinking_budget from extraBody over request thinking budget", async () => {
+    setProviderModels({
+      "qwen-plus": {
+        extraBody: {
+          thinking_budget: 8192,
+        },
+        toolContentSupportType: [],
+      },
+    })
+
+    const app = createApp()
+    const response = await app.request("/dash/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        max_tokens: 128,
+        messages: [{ role: "user", content: "hello" }],
+        model: "qwen-plus",
+        thinking: {
+          type: "enabled",
+          budget_tokens: 4096,
+        },
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    const body = JSON.parse(init.body as string) as Record<string, unknown>
+    expect(body.thinking_budget).toBe(8192)
+  })
 })
 
 describe("openai-compatible provider context cache", () => {
