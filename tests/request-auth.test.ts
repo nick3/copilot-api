@@ -1,7 +1,11 @@
 import { expect, test } from "bun:test"
 import { Hono } from "hono"
 
-import { createAuthMiddleware } from "../src/lib/request-auth"
+import {
+  createAuthMiddleware,
+  extractHeadersApiKey,
+  isAuthorizedHeaders,
+} from "~/lib/request-auth"
 
 function createTestApp() {
   const app = new Hono()
@@ -56,6 +60,49 @@ test("authenticated route requires valid key", async () => {
     }),
   )
   expect(authorized.status).toBe(200)
+})
+
+test("raw headers auth supports x-api-key and bearer tokens", () => {
+  expect(
+    isAuthorizedHeaders(
+      new Headers({
+        "x-api-key": "k",
+      }),
+      () => ["k"],
+    ),
+  ).toBe(true)
+
+  expect(
+    isAuthorizedHeaders(
+      new Headers({
+        authorization: "Bearer k",
+      }),
+      () => ["k"],
+    ),
+  ).toBe(true)
+
+  expect(
+    isAuthorizedHeaders(
+      new Headers({
+        authorization: "Bearer wrong",
+      }),
+      () => ["k"],
+    ),
+  ).toBe(false)
+})
+
+test("raw headers auth allows requests when no keys are configured", () => {
+  expect(isAuthorizedHeaders(new Headers(), () => [])).toBe(true)
+})
+
+test("extractHeadersApiKey ignores unsupported authorization schemes", () => {
+  expect(
+    extractHeadersApiKey(
+      new Headers({
+        authorization: "Basic k",
+      }),
+    ),
+  ).toBe(null)
 })
 
 test("server keeps admin routes outside request auth middleware", async () => {

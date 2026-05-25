@@ -73,12 +73,16 @@ export function getConfiguredApiKeys(): Array<string> {
 }
 
 export function extractRequestApiKey(c: Context): string | null {
-  const xApiKey = c.req.header("x-api-key")?.trim()
+  return extractHeadersApiKey(c.req.raw.headers)
+}
+
+export function extractHeadersApiKey(headers: Headers): string | null {
+  const xApiKey = headers.get("x-api-key")?.trim()
   if (xApiKey) {
     return xApiKey
   }
 
-  const authorization = c.req.header("authorization")
+  const authorization = headers.get("authorization")
   if (!authorization) {
     return null
   }
@@ -90,6 +94,40 @@ export function extractRequestApiKey(c: Context): string | null {
 
   const bearerToken = rest.join(" ").trim()
   return bearerToken || null
+}
+
+export function isAuthorizedHeaders(
+  headers: Headers,
+  getApiKeys: () => Array<string> = getConfiguredApiKeys,
+): boolean {
+  const apiKeys = getApiKeys()
+  if (apiKeys.length === 0) {
+    return true
+  }
+
+  const requestApiKey = extractHeadersApiKey(headers)
+  return requestApiKey ?
+      apiKeys.some((apiKey) => timingSafeKeyCompare(requestApiKey, apiKey))
+    : false
+}
+
+export function createUnauthorizedRawResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      error: {
+        message:
+          "Unauthorized. Provide Authorization: Bearer <key> or x-api-key.",
+        type: "unauthorized",
+      },
+    }),
+    {
+      status: 401,
+      headers: {
+        "content-type": "application/json",
+        "WWW-Authenticate": 'Bearer realm="copilot-api"',
+      },
+    },
+  )
 }
 
 function createUnauthorizedResponse(c: Context): Response {
@@ -163,17 +201,7 @@ export function createAuthMiddleware(
       return next()
     }
 
-    const apiKeys = getApiKeys()
-    if (apiKeys.length === 0) {
-      return next()
-    }
-
-    const requestApiKey = extractRequestApiKey(c)
-    const hasValidApiKey =
-      requestApiKey ?
-        apiKeys.some((apiKey) => timingSafeKeyCompare(requestApiKey, apiKey))
-      : false
-    if (!hasValidApiKey) {
+    if (!isAuthorizedHeaders(c.req.raw.headers, getApiKeys)) {
       return createUnauthorizedResponse(c)
     }
 

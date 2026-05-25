@@ -3,7 +3,6 @@
 import { defineCommand } from "citty"
 import clipboard from "clipboardy"
 import consola from "consola"
-import { serve } from "srvx"
 
 import {
   registerQuotaRefreshSchedulerShutdownCleanup,
@@ -11,6 +10,10 @@ import {
   stopQuotaRefreshScheduler,
 } from "~/lib/quota-refresh-scheduler-runtime"
 import { isMcpHttpEnabledFromEnv } from "~/mcp-http-config"
+import {
+  createResponsesWebSocketHandler,
+  handleResponsesWebSocketUpgrade,
+} from "~/routes/responses/websocket"
 
 import { accountsManager } from "./lib/accounts-manager"
 import { addAccountToRegistry, saveAccountToken } from "./lib/accounts-registry"
@@ -255,13 +258,25 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   const { createServer } = await import("./server")
   const server = createServer({ enableMcpHttp })
+  const responsesWebSocketHandler = createResponsesWebSocketHandler(
+    server.fetch,
+  )
 
-  serve({
-    fetch: server.fetch,
+  Bun.serve({
     port: options.port,
-    bun: {
-      idleTimeout: 0,
+    idleTimeout: 0,
+    fetch: (request, bunServer) => {
+      const websocketResponse = handleResponsesWebSocketUpgrade(
+        request,
+        bunServer,
+      )
+      if (websocketResponse !== null) {
+        return websocketResponse
+      }
+
+      return server.fetch(request)
     },
+    websocket: responsesWebSocketHandler,
   })
 }
 
