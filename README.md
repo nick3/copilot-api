@@ -46,6 +46,7 @@ Compared with routing everything through plain Chat Completions compatibility, t
 ## Features
 
 - **OpenAI & Anthropic Compatibility**: Exposes GitHub Copilot as an OpenAI-compatible (`/v1/responses`, `/v1/chat/completions`, `/v1/models`, `/v1/embeddings`) and Anthropic-compatible (`/v1/messages`) API.
+- **Codex Responses WebSocket Compatibility**: Accepts Codex's preferred Responses WebSocket transport on `/v1/responses` and bridges it through the existing Responses handler.
 - **Anthropic-First Routing for Claude Models**: When a model supports Copilot's native `/v1/messages` endpoint, the proxy prefers it over `/responses` or `/chat/completions`, preserving Anthropic-style `tool_use` / `tool_result` flows and more Claude-native behavior.
 - **Fewer Unnecessary Premium Requests**: Reduces wasted premium usage by routing warmup requests to `smallModel`, merging `tool_result` follow-ups back into the tool flow, and treating resumed tool turns as continuation traffic instead of fresh premium interactions.
 - **Phase-Aware `gpt-5.4` and `gpt-5.3-codex`**: These models can emit user-friendly commentary before deeper reasoning or tool use, so long-running coding actions are easier to understand instead of appearing as a sudden tool burst.
@@ -467,7 +468,7 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
 - **modelRefreshIntervalHours:** Interval for refreshing account model lists in the background. Set to `0` to disable refresh. Defaults to `24`.
 - **sessionAffinityRetentionDays:** Number of days to retain session affinity bindings. Defaults to `7`.
 - **useMessagesApi:** When `true` (default), Claude-family models that support Copilot's native `/v1/messages` endpoint may use the Messages API path. Set to `false` to skip the Messages API candidate and fall back to `/responses` (if supported) or `/chat/completions`.
-- **useResponsesApiWebSocket:** When `true` (default), Responses API requests use Copilot's WebSocket transport for models that advertise `ws:/responses`; models that only advertise `/responses` continue to use HTTP. Set to `false` to disable WebSocket routing.
+- **useResponsesApiWebSocket:** When `true` (default), outbound Copilot Responses API requests use Copilot's WebSocket transport for models that advertise `ws:/responses`; models that only advertise `/responses` continue to use HTTP. Set to `false` to disable upstream WebSocket routing. This does not disable the inbound Codex-compatible WebSocket listener on `/v1/responses`.
 - **useResponsesApiWebSearch:** When `true` (default), `/v1/responses` keeps tools with `type: "web_search"` and forwards them upstream. Set to `false` to strip them before the Copilot request is sent.
 - **logLevel:** Controls handler file-log verbosity under `logs/*.log`. Allowed values: `error`, `warn`, `info`, `debug`. Defaults to `info`. Set it to `debug` when you need payload- or stream-level diagnostics written into file logs.
 - **anthropicApiKey:** Optional Anthropic API key used for accurate Claude token counting (see [Accurate Claude Token Counting](#accurate-claude-token-counting) below). Can also be set via the `ANTHROPIC_API_KEY` environment variable. If not set, token counting falls back to GPT tokenizer estimation.
@@ -505,6 +506,7 @@ These endpoints mimic the OpenAI API structure.
 | Endpoint                    | Method | Description                                                      |
 | --------------------------- | ------ | ---------------------------------------------------------------- |
 | `POST /v1/responses`        | `POST` | OpenAI Most advanced interface for generating model responses.          |
+| `GET /v1/responses`         | `WS`   | Codex-compatible Responses WebSocket transport.                  |
 | `POST /v1/chat/completions` | `POST` | Creates a model response for the given chat conversation.        |
 | `GET /v1/models`            | `GET`  | Lists the currently available models.                            |
 | `POST /v1/embeddings`       | `POST` | Creates an embedding vector representing the input text.         |
@@ -696,6 +698,42 @@ Or use inline environment variable:
 ```sh
 COPILOT_API_OAUTH_APP=opencode bunx --bun @nick3/copilot-api@latest start
 ```
+
+## Using with Codex CLI
+
+Codex can use this proxy as an OpenAI-compatible Responses API provider. The proxy supports both Codex's HTTP `POST /v1/responses` path and its preferred WebSocket upgrade on `GET /v1/responses`.
+
+Start the proxy:
+
+```sh
+bunx --bun @nick3/copilot-api@latest start
+```
+
+> **Note:** The inbound Codex WebSocket listener on `GET /v1/responses` requires the Bun server runtime, so start the proxy with `bunx --bun` (or a local Bun install). The `npx` path is only supported for the lightweight MCP bridge and does not run the WebSocket listener.
+
+Add a provider to `~/.codex/config.toml`:
+
+```toml
+[model_providers.copilot-api]
+name = "copilot-api"
+base_url = "http://localhost:4141/v1"
+wire_api = "responses"
+supports_websockets = true
+
+[profiles.copilot-api]
+model_provider = "copilot-api"
+model = "gpt-5.4"
+```
+
+Then run Codex with that profile:
+
+```sh
+codex -p copilot-api
+```
+
+If you configured `auth.apiKeys`, add the same key to Codex's provider headers or bearer-token configuration so both HTTP and WebSocket requests authenticate successfully. For troubleshooting only, set `supports_websockets = false` in Codex to force its HTTP fallback path.
+
+> **Note:** When using Codex via GitHub Copilot, it is currently recommended to disable Codex multi-agent features because Copilot billing may count Codex traffic based on the final user-role message.
 
 ## Using with Claude Code
 
