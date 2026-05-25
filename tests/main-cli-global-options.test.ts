@@ -48,6 +48,16 @@ const runDebugJson = (...args: Array<string>): DebugInfo => {
 }
 
 describe("root-level global CLI options", () => {
+  test("keeps subcommands lazy so MCP can start under Node", () => {
+    const source = fs.readFileSync(
+      new URL("../src/main.ts", import.meta.url),
+      "utf8",
+    )
+
+    expect(source).not.toContain('const { start } = await import("./start")')
+    expect(source).toMatch(/mcp:\s*\(\)\s*=>\s*import\("\.\/mcp"\)/)
+  })
+
   test("reports the package version", () => {
     const info = runDebugJson()
 

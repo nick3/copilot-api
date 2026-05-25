@@ -35,7 +35,7 @@
 >
 > 2. **推荐给 opencode 用户：** 与 opencode 搭配时，推荐优先使用 opencode OAuth app 启动。该方式与 opencode 内置的 GitHub Copilot provider 行为一致，且不存在 Terms of Service 风险：
 >    ```sh
->    npx @nick3/copilot-api@latest --oauth-app=opencode start
+>    bunx --bun @nick3/copilot-api@latest --oauth-app=opencode start
 >    ```
 >
 > 3. **通过 codex 使用时请关闭 multi agent：** 如果你是通过 GitHub Copilot 使用 codex，建议关闭 multi agent 功能。目前 GitHub Copilot 在 codex 场景下会按最后一条消息是否为 user role 计费，而这部分计费逻辑尚未调整。
@@ -133,7 +133,7 @@
 ## 前置要求
 
 - Bun（>= 1.2.x）
-- 如果要通过 `npx` 运行已发布 CLI，需要 Node.js
+- 只有通过 `npx` 运行轻量 MCP bridge 时才需要 Node.js
 - 已订阅 Copilot 的 GitHub 账号（个人版、Business 或 Enterprise）
 
 ## 安装
@@ -150,25 +150,27 @@ bun install
 bun run start start
 ```
 
-## 通过 npx 使用
+## 通过 Bun 使用已发布 CLI
 
-你可以直接用 npx 运行本项目：
+服务端和账号管理命令是 Bun-only，因为 Admin UI 与请求历史使用 `bun:sqlite`。运行已发布 CLI 时请使用 Bun，避免 `#!/usr/bin/env node` shebang 强制走 Node.js：
 
 ```sh
-npx @nick3/copilot-api@latest start
+bunx --bun @nick3/copilot-api@latest start
 ```
 
 带参数示例：
 
 ```sh
-npx @nick3/copilot-api@latest start --port 8080
+bunx --bun @nick3/copilot-api@latest start --port 8080
 ```
 
 如果只想做认证：
 
 ```sh
-npx @nick3/copilot-api@latest auth
+bunx --bun @nick3/copilot-api@latest auth
 ```
+
+轻量 MCP bridge 是例外，仍可通过 `npx` 启动；见 [GPT Tool Search](#gpt-tool-search)。
 
 ## 配合 Docker 使用
 
@@ -580,84 +582,87 @@ curl "http://localhost:4141/usage/0"
 
 ## 使用示例
 
-通过 npx 使用：
+通过 Bun 使用已发布 CLI：
 
 ```sh
 # 基础启动
-npx @nick3/copilot-api@latest start
+bunx --bun @nick3/copilot-api@latest start
 
 # 自定义端口并开启详细日志
-npx @nick3/copilot-api@latest start --port 8080 --verbose
+bunx --bun @nick3/copilot-api@latest start --port 8080 --verbose
 
 # 使用 GitHub Business 方案账号
-npx @nick3/copilot-api@latest start --account-type business
+bunx --bun @nick3/copilot-api@latest start --account-type business
 
 # 使用 GitHub Enterprise 方案账号
-npx @nick3/copilot-api@latest start --account-type enterprise
+bunx --bun @nick3/copilot-api@latest start --account-type enterprise
 
 # 对每个请求启用手动审批
-npx @nick3/copilot-api@latest start --manual
+bunx --bun @nick3/copilot-api@latest start --manual
 
 # 将请求间隔限制为 30 秒
-npx @nick3/copilot-api@latest start --rate-limit 30
+bunx --bun @nick3/copilot-api@latest start --rate-limit 30
 
 # 命中速率限制时等待，而不是直接报错
-npx @nick3/copilot-api@latest start --rate-limit 30 --wait
+bunx --bun @nick3/copilot-api@latest start --rate-limit 30 --wait
 
 # 直接传入 GitHub token
-npx @nick3/copilot-api@latest start --github-token ghp_YOUR_TOKEN_HERE
+bunx --bun @nick3/copilot-api@latest start --github-token ghp_YOUR_TOKEN_HERE
 
 # 仅执行认证流程
-npx @nick3/copilot-api@latest auth
+bunx --bun @nick3/copilot-api@latest auth
 
 # 认证时启用详细日志
-npx @nick3/copilot-api@latest auth --verbose
+bunx --bun @nick3/copilot-api@latest auth --verbose
 
 # 添加多个账号（账号会按添加顺序记录）
-npx @nick3/copilot-api@latest auth add
-npx @nick3/copilot-api@latest auth add  # 添加第二个账号
+bunx --bun @nick3/copilot-api@latest auth add
+bunx --bun @nick3/copilot-api@latest auth add  # 添加第二个账号
 
 # 列出所有已注册账号
-npx @nick3/copilot-api@latest auth ls
+bunx --bun @nick3/copilot-api@latest auth ls
 
 # 列出账号并显示配额信息
-npx @nick3/copilot-api@latest auth ls -q
+bunx --bun @nick3/copilot-api@latest auth ls -q
 
 # 按索引删除账号（1-based）
-npx @nick3/copilot-api@latest auth rm 2
+bunx --bun @nick3/copilot-api@latest auth rm 2
 
 # 按 ID 删除账号（GitHub 用户名）
-npx @nick3/copilot-api@latest auth rm octocat
+bunx --bun @nick3/copilot-api@latest auth rm octocat
 
 # 在终端中查看 Copilot 用量与额度（无需启动服务）
-npx @nick3/copilot-api@latest check-usage
+bunx --bun @nick3/copilot-api@latest check-usage
 
 # 输出调试信息，便于排障
-npx @nick3/copilot-api@latest debug
+bunx --bun @nick3/copilot-api@latest debug
 
 # 以 JSON 格式输出调试信息
-npx @nick3/copilot-api@latest debug --json
+bunx --bun @nick3/copilot-api@latest debug --json
 
 # 从环境变量初始化代理（HTTP_PROXY、HTTPS_PROXY 等）
-npx @nick3/copilot-api@latest start --proxy-env
+bunx --bun @nick3/copilot-api@latest start --proxy-env
 
 # 使用 opencode GitHub Copilot 认证
-COPILOT_API_OAUTH_APP=opencode npx @nick3/copilot-api@latest start
+COPILOT_API_OAUTH_APP=opencode bunx --bun @nick3/copilot-api@latest start
 
 # 通过命令行设置自定义 API home 目录
-npx @nick3/copilot-api@latest --api-home=/path/to/custom/dir start
+bunx --bun @nick3/copilot-api@latest --api-home=/path/to/custom/dir start
 
 # 通过命令行使用 GitHub Enterprise
-npx @nick3/copilot-api@latest --enterprise-url=company.ghe.com start
+bunx --bun @nick3/copilot-api@latest --enterprise-url=company.ghe.com start
 
 # 通过命令行使用 opencode OAuth
-npx @nick3/copilot-api@latest --oauth-app=opencode start
+bunx --bun @nick3/copilot-api@latest --oauth-app=opencode start
 
 # 组合多个全局选项
-npx @nick3/copilot-api@latest --api-home=/custom/path --oauth-app=opencode --enterprise-url=company.ghe.com start
+bunx --bun @nick3/copilot-api@latest --api-home=/custom/path --oauth-app=opencode --enterprise-url=company.ghe.com start
+```
 
-# 用 Bun 而不是 Node.js 运行已发布 CLI
-bunx --bun @nick3/copilot-api@latest start
+只有 MCP tool-search bridge 仍支持 `npx`：
+
+```sh
+npx -y @nick3/copilot-api@latest mcp
 ```
 
 ### Opencode OAuth 认证
@@ -669,14 +674,14 @@ bunx --bun @nick3/copilot-api@latest start
 export COPILOT_API_OAUTH_APP=opencode
 
 # 然后执行 start 或 auth 命令
-npx @nick3/copilot-api@latest start
-npx @nick3/copilot-api@latest auth
+bunx --bun @nick3/copilot-api@latest start
+bunx --bun @nick3/copilot-api@latest auth
 ```
 
 也可以使用内联环境变量：
 
 ```sh
-COPILOT_API_OAUTH_APP=opencode npx @nick3/copilot-api@latest start
+COPILOT_API_OAUTH_APP=opencode bunx --bun @nick3/copilot-api@latest start
 ```
 
 ## 与 Claude Code 一起使用
@@ -690,7 +695,7 @@ COPILOT_API_OAUTH_APP=opencode npx @nick3/copilot-api@latest start
 执行带 `--claude-code` 的 `start` 命令开始：
 
 ```sh
-npx @nick3/copilot-api@latest start --claude-code
+bunx --bun @nick3/copilot-api@latest start --claude-code
 ```
 
 你会被提示选择一个主模型，以及一个用于后台任务的 “small, fast” 模型。选择完成后，会有一条命令被复制到剪贴板中。该命令会设置 Claude Code 使用该代理所需的环境变量。
@@ -748,6 +753,8 @@ GPT 模型不要设置 Claude Code 原生的 `ENABLE_TOOL_SEARCH`。这个开关
 
 如果你安装了 `tool-search@copilot-api-marketplace`，Claude Code 会自动带上这个 MCP bridge，可以跳过下面这段 Claude Code MCP 手动配置。
 
+这个 MCP bridge 很小，并且不会加载服务端或 SQLite 代码，因此仍可安全地通过 `npx` 运行。主 `start`、`auth`、`check-usage` 和 `debug` 命令请使用 Bun。
+
 请把 tool search bridge 加到 Claude Code 使用的 MCP 配置中：
 
 ```json
@@ -790,7 +797,7 @@ OpenCode 已经内置了 GitHub Copilot provider。本节适用于你希望让 O
 使用 OpenCode OAuth app 启动代理：
 
 ```sh
-npx @nick3/copilot-api@latest --oauth-app=opencode start
+bunx --bun @nick3/copilot-api@latest --oauth-app=opencode start
 ```
 
 然后让 OpenCode 通过 `@ai-sdk/anthropic` 指向该代理。
@@ -880,7 +887,7 @@ npx @nick3/copilot-api@latest --oauth-app=opencode start
 curl "http://localhost:4141/api/admin/meta"
 
 # 启用远程 Admin UI/API 访问（服务端）
-# ADMIN_TOKEN=your_admin_token_here npx @nick3/copilot-api@latest start
+# ADMIN_TOKEN=your_admin_token_here bunx --bun @nick3/copilot-api@latest start
 
 # 远程访问（需要 token）
 curl -H "x-admin-token: your_admin_token_here" "http://localhost:4141/api/admin/accounts?include_stats=1"
@@ -898,9 +905,9 @@ curl "http://localhost:4141/api/admin/requests/<requestId>"
 
 代理内置了一个随服务实例一起提供的 Admin UI。你可以用它查看代理捕获的账号状态与请求历史（模型/端点、tokens/usage、耗时以及错误摘要等）。
 
-1. 启动服务。例如使用 npx：
+1. 启动服务。例如使用 Bun：
    ```sh
-   npx @nick3/copilot-api@latest start
+   bunx --bun @nick3/copilot-api@latest start
    ```
 2. 在浏览器中打开：
    - `http://localhost:4141/admin`（如果改过端口，请替换为对应端口）

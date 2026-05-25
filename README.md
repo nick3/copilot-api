@@ -30,7 +30,7 @@ English | [简体中文](./README.zh-CN.md)
 >
 > 2. **Recommend for Opencode:** When using with opencode, we recommend starting with the opencode OAuth app. This approach behaves identically to opencode's built-in GitHub Copilot provider with no Terms of Service risk:
 >    ```sh
->    npx @nick3/copilot-api@latest --oauth-app=opencode start
+>    bunx --bun @nick3/copilot-api@latest --oauth-app=opencode start
 >    ```
 >
 > 3. **Disable multi agent when using codex:** If you're using codex via GitHub Copilot, it's recommended to disable the multi agent feature. Currently, GitHub Copilot charges based on the last message being a user role when using codex, and the billing logic has not been adjusted.
@@ -126,7 +126,7 @@ When an Anthropic API key is configured, the proxy forwards Claude model token c
 ## Prerequisites
 
 - Bun (>= 1.2.x)
-- Node.js if you plan to run the published CLI with `npx`
+- Node.js only if you want to run the lightweight MCP bridge through `npx`
 - GitHub account with Copilot subscription (individual, business, or enterprise)
 
 ## Installation
@@ -143,25 +143,27 @@ To start the server directly from source:
 bun run start start
 ```
 
-## Using with npx
+## Using the published CLI with Bun
 
-You can run the project directly using npx:
+The server and account-management commands are Bun-only because the Admin UI and request history use `bun:sqlite`. Run the published CLI with Bun so the `#!/usr/bin/env node` shebang does not force Node.js:
 
 ```sh
-npx @nick3/copilot-api@latest start
+bunx --bun @nick3/copilot-api@latest start
 ```
 
 With options:
 
 ```sh
-npx @nick3/copilot-api@latest start --port 8080
+bunx --bun @nick3/copilot-api@latest start --port 8080
 ```
 
 For authentication only:
 
 ```sh
-npx @nick3/copilot-api@latest auth
+bunx --bun @nick3/copilot-api@latest auth
 ```
+
+The lightweight MCP bridge is the exception and can still be launched with `npx`; see [GPT Tool Search](#gpt-tool-search).
 
 ## Using with Docker
 
@@ -570,84 +572,87 @@ The server also exposes a built-in admin UI and API for inspecting account statu
 
 ## Example Usage
 
-Using with npx:
+Using the published CLI with Bun:
 
 ```sh
 # Basic usage with start command
-npx @nick3/copilot-api@latest start
+bunx --bun @nick3/copilot-api@latest start
 
 # Run on custom port with verbose logging
-npx @nick3/copilot-api@latest start --port 8080 --verbose
+bunx --bun @nick3/copilot-api@latest start --port 8080 --verbose
 
 # Use with a business plan GitHub account
-npx @nick3/copilot-api@latest start --account-type business
+bunx --bun @nick3/copilot-api@latest start --account-type business
 
 # Use with an enterprise plan GitHub account
-npx @nick3/copilot-api@latest start --account-type enterprise
+bunx --bun @nick3/copilot-api@latest start --account-type enterprise
 
 # Enable manual approval for each request
-npx @nick3/copilot-api@latest start --manual
+bunx --bun @nick3/copilot-api@latest start --manual
 
 # Set rate limit to 30 seconds between requests
-npx @nick3/copilot-api@latest start --rate-limit 30
+bunx --bun @nick3/copilot-api@latest start --rate-limit 30
 
 # Wait instead of error when rate limit is hit
-npx @nick3/copilot-api@latest start --rate-limit 30 --wait
+bunx --bun @nick3/copilot-api@latest start --rate-limit 30 --wait
 
 # Provide GitHub token directly
-npx @nick3/copilot-api@latest start --github-token ghp_YOUR_TOKEN_HERE
+bunx --bun @nick3/copilot-api@latest start --github-token ghp_YOUR_TOKEN_HERE
 
 # Run only the auth flow
-npx @nick3/copilot-api@latest auth
+bunx --bun @nick3/copilot-api@latest auth
 
 # Run auth flow with verbose logging
-npx @nick3/copilot-api@latest auth --verbose
+bunx --bun @nick3/copilot-api@latest auth --verbose
 
 # Add multiple accounts (each account is added in order)
-npx @nick3/copilot-api@latest auth add
-npx @nick3/copilot-api@latest auth add  # add second account
+bunx --bun @nick3/copilot-api@latest auth add
+bunx --bun @nick3/copilot-api@latest auth add  # add second account
 
 # List all registered accounts
-npx @nick3/copilot-api@latest auth ls
+bunx --bun @nick3/copilot-api@latest auth ls
 
 # List accounts with quota information
-npx @nick3/copilot-api@latest auth ls -q
+bunx --bun @nick3/copilot-api@latest auth ls -q
 
 # Remove an account by index (1-based)
-npx @nick3/copilot-api@latest auth rm 2
+bunx --bun @nick3/copilot-api@latest auth rm 2
 
 # Remove an account by ID (GitHub login)
-npx @nick3/copilot-api@latest auth rm octocat
+bunx --bun @nick3/copilot-api@latest auth rm octocat
 
 # Show your Copilot usage/quota in the terminal (no server needed)
-npx @nick3/copilot-api@latest check-usage
+bunx --bun @nick3/copilot-api@latest check-usage
 
 # Display debug information for troubleshooting
-npx @nick3/copilot-api@latest debug
+bunx --bun @nick3/copilot-api@latest debug
 
 # Display debug information in JSON format
-npx @nick3/copilot-api@latest debug --json
+bunx --bun @nick3/copilot-api@latest debug --json
 
 # Initialize proxy from environment variables (HTTP_PROXY, HTTPS_PROXY, etc.)
-npx @nick3/copilot-api@latest start --proxy-env
+bunx --bun @nick3/copilot-api@latest start --proxy-env
 
 # Use opencode GitHub Copilot authentication
-COPILOT_API_OAUTH_APP=opencode npx @nick3/copilot-api@latest start
+COPILOT_API_OAUTH_APP=opencode bunx --bun @nick3/copilot-api@latest start
 
 # Set custom API home directory via command line
-npx @nick3/copilot-api@latest --api-home=/path/to/custom/dir start
+bunx --bun @nick3/copilot-api@latest --api-home=/path/to/custom/dir start
 
 # Use GitHub Enterprise via command line
-npx @nick3/copilot-api@latest --enterprise-url=company.ghe.com start
+bunx --bun @nick3/copilot-api@latest --enterprise-url=company.ghe.com start
 
 # Use opencode OAuth via command line
-npx @nick3/copilot-api@latest --oauth-app=opencode start
+bunx --bun @nick3/copilot-api@latest --oauth-app=opencode start
 
 # Combine multiple global options
-npx @nick3/copilot-api@latest --api-home=/custom/path --oauth-app=opencode --enterprise-url=company.ghe.com start
+bunx --bun @nick3/copilot-api@latest --api-home=/custom/path --oauth-app=opencode --enterprise-url=company.ghe.com start
+```
 
-# Run the published CLI with Bun instead of Node.js
-bunx --bun @nick3/copilot-api@latest start
+For the MCP tool-search bridge only, `npx` remains supported:
+
+```sh
+npx -y @nick3/copilot-api@latest mcp
 ```
 
 ### Opencode OAuth Authentication
@@ -659,14 +664,14 @@ You can use opencode GitHub Copilot authentication instead of the default one:
 export COPILOT_API_OAUTH_APP=opencode
 
 # Then run start or auth commands
-npx @nick3/copilot-api@latest start
-npx @nick3/copilot-api@latest auth
+bunx --bun @nick3/copilot-api@latest start
+bunx --bun @nick3/copilot-api@latest auth
 ```
 
 Or use inline environment variable:
 
 ```sh
-COPILOT_API_OAUTH_APP=opencode npx @nick3/copilot-api@latest start
+COPILOT_API_OAUTH_APP=opencode bunx --bun @nick3/copilot-api@latest start
 ```
 
 ## Using with Claude Code
@@ -680,7 +685,7 @@ There are two ways to configure Claude Code to use this proxy:
 To get started, run the `start` command with the `--claude-code` flag:
 
 ```sh
-npx @nick3/copilot-api@latest start --claude-code
+bunx --bun @nick3/copilot-api@latest start --claude-code
 ```
 
 You will be prompted to select a primary model and a "small, fast" model for background tasks. After selecting the models, a command will be copied to your clipboard. This command sets the necessary environment variables for Claude Code to use the proxy.
@@ -736,6 +741,8 @@ Do not set Claude Code's native `ENABLE_TOOL_SEARCH` for GPT models. That flag e
 
 If you install `tool-search@copilot-api-marketplace`, Claude Code receives this MCP bridge automatically and you can skip the manual Claude Code MCP setup below.
 
+This MCP bridge is intentionally small and does not load the server or SQLite code, so it remains safe to run through `npx`. Use Bun for the main `start`, `auth`, `check-usage`, and `debug` commands.
+
 Add the tool search bridge to the MCP config used by Claude Code:
 
 ```json
@@ -778,7 +785,7 @@ OpenCode already has a direct GitHub Copilot provider. Use this section when you
 Start the proxy with the OpenCode OAuth app:
 
 ```sh
-npx @nick3/copilot-api@latest --oauth-app=opencode start
+bunx --bun @nick3/copilot-api@latest --oauth-app=opencode start
 ```
 
 Then point OpenCode at the proxy with `@ai-sdk/anthropic`.
@@ -868,7 +875,7 @@ Why these fields matter:
 curl "http://localhost:4141/api/admin/meta"
 
 # Enable remote admin UI/API access (server-side)
-# ADMIN_TOKEN=your_admin_token_here npx @nick3/copilot-api@latest start
+# ADMIN_TOKEN=your_admin_token_here bunx --bun @nick3/copilot-api@latest start
 
 # Remote access (token required)
 curl -H "x-admin-token: your_admin_token_here" "http://localhost:4141/api/admin/accounts?include_stats=1"
@@ -886,9 +893,9 @@ curl "http://localhost:4141/api/admin/requests/<requestId>"
 
 The proxy includes a built-in admin UI served from your running instance. It lets you inspect account status and request history captured by the proxy (models/endpoints, tokens/usage, timing, and error summaries).
 
-1. Start the server. For example, using npx:
+1. Start the server. For example, using Bun:
     ```sh
-    npx @nick3/copilot-api@latest start
+    bunx --bun @nick3/copilot-api@latest start
     ```
 2. Open the UI in your browser:
     - `http://localhost:4141/admin` (replace the port if you changed it)

@@ -30,20 +30,19 @@ if (typeof args["enterprise-url"] === "string") {
   process.env.COPILOT_API_ENTERPRISE_URL = args["enterprise-url"]
 }
 
-// Dynamically import other modules to ensure environment variables are set
-const { auth } = await import("./auth")
-const { checkUsage } = await import("./check-usage")
-const { debug } = await import("./debug")
-const { mcp } = await import("./mcp")
-const { start } = await import("./start")
-
 const main = defineCommand({
   meta: {
     name: "copilot-api",
     description:
       "A wrapper around GitHub Copilot API to make it OpenAI compatible, making it usable for other tools.",
   },
-  subCommands: { auth, start, "check-usage": checkUsage, debug, mcp },
+  subCommands: {
+    auth: () => import("./auth").then((mod) => mod.auth),
+    start: () => import("./start").then((mod) => mod.start),
+    "check-usage": () => import("./check-usage").then((mod) => mod.checkUsage),
+    debug: () => import("./debug").then((mod) => mod.debug),
+    mcp: () => import("./mcp").then((mod) => mod.mcp),
+  },
   args: cliArgs,
 })
 
