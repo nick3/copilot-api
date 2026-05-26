@@ -32,16 +32,6 @@ export function createServer(options: CreateServerOptions = {}): Hono {
 
   app.use(traceIdMiddleware)
   app.use(logger())
-  app.use(cors())
-  app.use(
-    "*",
-    createAuthMiddleware({
-      allowUnauthenticatedPaths: ["/", DEFAULT_MCP_HTTP_PATH],
-      allowUnauthenticatedPathPrefixes: ["/admin", "/api/admin"],
-    }),
-  )
-
-  app.get("/", (c) => c.text("Server running"))
 
   if (enableMcpHttp) {
     app.use(DEFAULT_MCP_HTTP_PATH, cors(mcpHttpCorsOptions))
@@ -62,6 +52,17 @@ export function createServer(options: CreateServerOptions = {}): Hono {
       ),
     )
   }
+
+  app.use(cors())
+  app.use(
+    "*",
+    createAuthMiddleware({
+      allowUnauthenticatedPaths: ["/", DEFAULT_MCP_HTTP_PATH],
+      allowUnauthenticatedPathPrefixes: ["/admin", "/api/admin"],
+    }),
+  )
+
+  app.get("/", (c) => c.text("Server running"))
 
   app.route("/chat/completions", completionRoutes)
   app.route("/models", modelRoutes)

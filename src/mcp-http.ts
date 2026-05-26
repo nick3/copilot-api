@@ -69,7 +69,9 @@ export const createMcpHttpApp = (path = DEFAULT_MCP_HTTP_PATH): Hono => {
   const app = new Hono()
 
   app.use("*", cors(mcpHttpCorsOptions))
-  app.get("/", (c) => c.text("MCP server running"))
+  if (path !== "/") {
+    app.get("/", (c) => c.text("MCP server running"))
+  }
   app.all(path, (c) => handleStreamableHttpMcpRequest(c.req.raw))
 
   return app

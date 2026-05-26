@@ -231,6 +231,21 @@ describe("MCP Streamable HTTP", () => {
     await getStream.body?.cancel()
   })
 
+  test("does not let the health route intercept MCP root path GET", async () => {
+    const app = createMcpHttpApp("/")
+    const response = await app.fetch(
+      new Request("http://localhost/", {
+        headers: {
+          accept: "text/event-stream",
+        },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("content-type")).toContain("text/event-stream")
+    await response.body?.cancel()
+  })
+
   test("keeps main server /mcp disabled with a clear response", async () => {
     const previousApiKey = process.env.COPILOT_API_KEY
     process.env.COPILOT_API_KEY = "secret"
@@ -291,6 +306,31 @@ describe("MCP Streamable HTTP", () => {
     )
     expect(response.headers.get("access-control-allow-headers")).toBe(
       "authorization,x-api-key",
+    )
+  })
+
+  test("main server uses MCP-specific CORS for /mcp preflight", async () => {
+    const app = createServer({ enableMcpHttp: true })
+    const response = await app.fetch(
+      new Request("http://localhost/mcp", {
+        method: "OPTIONS",
+        headers: {
+          origin: "http://example.com",
+          "access-control-request-method": "PATCH",
+          "access-control-request-headers": "content-type,mcp-protocol-version",
+        },
+      }),
+    )
+
+    expect(response.status).toBe(204)
+    expect(response.headers.get("access-control-allow-methods")).toContain(
+      "POST",
+    )
+    expect(response.headers.get("access-control-allow-methods")).not.toContain(
+      "PATCH",
+    )
+    expect(response.headers.get("access-control-allow-headers")).toContain(
+      "mcp-protocol-version",
     )
   })
 
