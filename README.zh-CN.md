@@ -778,7 +778,7 @@ GPT 模型不要设置 Claude Code 原生的 `ENABLE_TOOL_SEARCH`。这个开关
 
 这个 MCP bridge 很小，并且不会加载服务端或 SQLite 代码，因此仍可安全地通过 `npx` 运行。主 `start`、`auth`、`check-usage` 和 `debug` 命令请使用 Bun。
 
-请把 tool search bridge 加到 Claude Code 使用的 MCP 配置中：
+通过 stdio 使用时，请把 tool search bridge 加到 Claude Code 使用的 MCP 配置中：
 
 ```json
 {
@@ -791,6 +791,33 @@ GPT 模型不要设置 Claude Code 原生的 `ENABLE_TOOL_SEARCH`。这个开关
   }
 }
 ```
+
+如果要改用 Streamable HTTP，先在一个终端中启动 MCP HTTP bridge：
+
+```sh
+npx -y @nick3/copilot-api@latest mcp --transport http --host 127.0.0.1 --port 4142 --path /mcp
+```
+
+然后把这个 HTTP MCP server 加到 Claude Code：
+
+```sh
+claude mcp add --transport http tool_search http://127.0.0.1:4142/mcp
+```
+
+等价的手动 MCP 配置如下：
+
+```json
+{
+  "mcpServers": {
+    "tool_search": {
+      "type": "http",
+      "url": "http://127.0.0.1:4142/mcp"
+    }
+  }
+}
+```
+
+如果希望由主代理进程暴露同一个 MCP server，请用 `--enable-mcp-http` 启动主服务，并在 Claude Code MCP URL 中使用 `http://127.0.0.1:4141/mcp`。`tool_search` 请在 stdio 配置和 HTTP 配置中二选一，不要同时启用。
 
 请把 tool search bridge 加到 opencode 使用的 MCP 配置中：
 

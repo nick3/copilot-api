@@ -766,7 +766,7 @@ If you install `tool-search@copilot-api-marketplace`, Claude Code receives this 
 
 This MCP bridge is intentionally small and does not load the server or SQLite code, so it remains safe to run through `npx`. Use Bun for the main `start`, `auth`, `check-usage`, and `debug` commands.
 
-Add the tool search bridge to the MCP config used by Claude Code:
+Add the tool search bridge to the MCP config used by Claude Code over stdio:
 
 ```json
 {
@@ -779,6 +779,33 @@ Add the tool search bridge to the MCP config used by Claude Code:
   }
 }
 ```
+
+To use Streamable HTTP instead, start the MCP HTTP bridge in one terminal:
+
+```sh
+npx -y @nick3/copilot-api@latest mcp --transport http --host 127.0.0.1 --port 4142 --path /mcp
+```
+
+Then add the HTTP MCP server to Claude Code:
+
+```sh
+claude mcp add --transport http tool_search http://127.0.0.1:4142/mcp
+```
+
+Equivalent manual MCP config:
+
+```json
+{
+  "mcpServers": {
+    "tool_search": {
+      "type": "http",
+      "url": "http://127.0.0.1:4142/mcp"
+    }
+  }
+}
+```
+
+If you prefer the main proxy process to expose the same MCP server, start it with `--enable-mcp-http` and use `http://127.0.0.1:4141/mcp` as the Claude Code MCP URL. Use either the stdio config or the HTTP config for `tool_search`, not both.
 
 Add the tool search bridge to the MCP config used by opencode:
 
