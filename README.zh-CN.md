@@ -315,6 +315,8 @@ Copilot API 现在使用子命令结构，主要命令包括：
 | `--port` | HTTP transport port | `4142` |
 | `--path` | HTTP transport path | `/mcp` |
 
+MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_API_MCP_HTTP_ALLOWED_ORIGINS=https://client.example.com,https://admin.example.com` 允许额外浏览器 origin，或显式设置为 `*` 启用 wildcard CORS。
+
 ### Auth 命令选项
 
 `auth` 命令提供三个子命令来管理多账号：
@@ -684,7 +686,7 @@ npx -y @nick3/copilot-api@latest mcp --transport http --host 127.0.0.1 --port 41
 bunx --bun @nick3/copilot-api@latest start --enable-mcp-http
 ```
 
-HTTP MCP 端点不带认证。独立模式请尽量保持默认 loopback host；不要把 `/mcp` 暴露到不可信网络，除非外层反向代理、防火墙或 tunnel access policy 已经保护它。
+HTTP MCP 端点不带认证。独立模式请尽量保持默认 loopback host；浏览器 CORS 默认只允许 loopback origin，仅为可信客户端设置 `COPILOT_API_MCP_HTTP_ALLOWED_ORIGINS`。不要把 `/mcp` 暴露到不可信网络，除非外层反向代理、防火墙或 tunnel access policy 已经保护它。
 
 ### Opencode OAuth 认证
 

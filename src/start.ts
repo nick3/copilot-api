@@ -10,10 +10,7 @@ import {
   startQuotaRefreshSchedulerFromConfig,
   stopQuotaRefreshScheduler,
 } from "~/lib/quota-refresh-scheduler-runtime"
-import {
-  MCP_HTTP_ENABLED_ENV,
-  isMcpHttpEnabledFromEnv,
-} from "~/mcp-http-config"
+import { isMcpHttpEnabledFromEnv } from "~/mcp-http-config"
 
 import { accountsManager } from "./lib/accounts-manager"
 import { addAccountToRegistry, saveAccountToken } from "./lib/accounts-registry"
@@ -167,9 +164,6 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     initProxyFromEnv()
   }
 
-  if (options.enableMcpHttp) {
-    process.env[MCP_HTTP_ENABLED_ENV] = "true"
-  }
   const enableMcpHttp = options.enableMcpHttp || isMcpHttpEnabledFromEnv()
   if (enableMcpHttp) {
     consola.warn(

@@ -6,12 +6,13 @@ import { serve } from "srvx"
 
 import {
   DEFAULT_MCP_HTTP_PATH,
+  resolveMcpHttpCorsOrigin,
   type McpHttpServerOptions,
 } from "~/mcp-http-config"
 import { createToolSearchMcpServer } from "~/mcp-server"
 
 export const mcpHttpCorsOptions = {
-  origin: "*",
+  origin: (origin: string) => resolveMcpHttpCorsOrigin(origin),
   allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
   allowHeaders: [
     "Content-Type",

@@ -28,7 +28,7 @@ export const runMcpServer = async (): Promise<void> => {
 }
 
 function parseMcpTransport(value: string | undefined): McpTransport {
-  const transport = value ?? "stdio"
+  const transport = (value ?? "stdio").trim()
 
   if (transport === "stdio" || transport === "http") {
     return transport
@@ -38,7 +38,7 @@ function parseMcpTransport(value: string | undefined): McpTransport {
 }
 
 function parseMcpHttpPort(value: string | undefined): number {
-  const portRaw = value ?? String(DEFAULT_MCP_HTTP_PORT)
+  const portRaw = (value ?? String(DEFAULT_MCP_HTTP_PORT)).trim()
 
   if (!/^\d+$/.test(portRaw)) {
     throw new Error("--port must be an integer from 1 to 65535")
@@ -55,10 +55,10 @@ function parseMcpHttpPort(value: string | undefined): number {
 export function parseMcpHttpOptions(
   args: Pick<McpCommandArgs, "host" | "path" | "port">,
 ): McpHttpServerOptions {
-  const host = args.host ?? DEFAULT_MCP_HTTP_HOST
-  const path = args.path ?? DEFAULT_MCP_HTTP_PATH
+  const host = (args.host ?? DEFAULT_MCP_HTTP_HOST).trim()
+  const path = (args.path ?? DEFAULT_MCP_HTTP_PATH).trim()
 
-  if (host.trim().length === 0) {
+  if (host.length === 0) {
     throw new Error("--host must not be empty")
   }
 

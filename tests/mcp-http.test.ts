@@ -4,8 +4,12 @@ import fs from "node:fs"
 import { fileURLToPath } from "node:url"
 
 import { parseMcpToolSearchSentinel } from "~/lib/tool-search"
-import { MCP_HTTP_ENABLED_ENV } from "~/mcp-http-config"
+import {
+  MCP_HTTP_ALLOWED_ORIGINS_ENV,
+  MCP_HTTP_ENABLED_ENV,
+} from "~/mcp-http-config"
 import { createMcpHttpApp } from "~/mcp-http"
+import { parseMcpHttpOptions } from "~/mcp"
 import { createToolSearchMcpServer } from "~/mcp-server"
 import { createServer } from "~/server"
 
@@ -200,14 +204,14 @@ describe("MCP Streamable HTTP", () => {
     expect(unsupported.status).toBe(405)
   })
 
-  test("supports CORS preflight and GET event-stream headers", async () => {
+  test("supports loopback CORS preflight and GET event-stream headers", async () => {
     const app = createMcpHttpApp()
 
     const preflight = await app.fetch(
       new Request("http://localhost/mcp", {
         method: "OPTIONS",
         headers: {
-          origin: "http://example.com",
+          origin: "http://localhost:3000",
           "access-control-request-method": "POST",
           "access-control-request-headers": "content-type,mcp-protocol-version",
         },
@@ -222,13 +226,60 @@ describe("MCP Streamable HTTP", () => {
     )
 
     expect(preflight.status).toBe(204)
-    expect(preflight.headers.get("access-control-allow-origin")).toBe("*")
+    expect(preflight.headers.get("access-control-allow-origin")).toBe(
+      "http://localhost:3000",
+    )
     expect(preflight.headers.get("access-control-allow-methods")).toContain(
       "POST",
     )
     expect(getStream.status).toBe(200)
     expect(getStream.headers.get("content-type")).toContain("text/event-stream")
     await getStream.body?.cancel()
+  })
+
+  test("rejects non-loopback MCP CORS origins by default", async () => {
+    const app = createMcpHttpApp()
+    const response = await app.fetch(
+      new Request("http://localhost/mcp", {
+        method: "OPTIONS",
+        headers: {
+          origin: "https://example.com",
+          "access-control-request-method": "POST",
+        },
+      }),
+    )
+
+    expect(response.status).toBe(204)
+    expect(response.headers.get("access-control-allow-origin")).toBeNull()
+  })
+
+  test("allows configured MCP CORS origins", async () => {
+    const previousValue = process.env[MCP_HTTP_ALLOWED_ORIGINS_ENV]
+    process.env[MCP_HTTP_ALLOWED_ORIGINS_ENV] = "https://mcp.example.com"
+
+    try {
+      const app = createMcpHttpApp()
+      const response = await app.fetch(
+        new Request("http://localhost/mcp", {
+          method: "OPTIONS",
+          headers: {
+            origin: "https://mcp.example.com",
+            "access-control-request-method": "POST",
+          },
+        }),
+      )
+
+      expect(response.status).toBe(204)
+      expect(response.headers.get("access-control-allow-origin")).toBe(
+        "https://mcp.example.com",
+      )
+    } finally {
+      if (previousValue === undefined) {
+        delete process.env[MCP_HTTP_ALLOWED_ORIGINS_ENV]
+      } else {
+        process.env[MCP_HTTP_ALLOWED_ORIGINS_ENV] = previousValue
+      }
+    }
   })
 
   test("does not let the health route intercept MCP root path GET", async () => {
@@ -315,7 +366,7 @@ describe("MCP Streamable HTTP", () => {
       new Request("http://localhost/mcp", {
         method: "OPTIONS",
         headers: {
-          origin: "http://example.com",
+          origin: "http://127.0.0.1:3000",
           "access-control-request-method": "PATCH",
           "access-control-request-headers": "content-type,mcp-protocol-version",
         },
@@ -323,6 +374,9 @@ describe("MCP Streamable HTTP", () => {
     )
 
     expect(response.status).toBe(204)
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "http://127.0.0.1:3000",
+    )
     expect(response.headers.get("access-control-allow-methods")).toContain(
       "POST",
     )
@@ -354,6 +408,20 @@ describe("MCP Streamable HTTP", () => {
         process.env.COPILOT_API_KEY = previousApiKey
       }
     }
+  })
+
+  test("normalizes standalone HTTP CLI option values", () => {
+    expect(
+      parseMcpHttpOptions({
+        host: " 127.0.0.1 ",
+        path: " /mcp ",
+        port: " 4142 ",
+      }),
+    ).toEqual({
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 4142,
+    })
   })
 
   test("rejects invalid standalone HTTP CLI options", () => {

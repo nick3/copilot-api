@@ -308,6 +308,8 @@ The `mcp` command defaults to stdio for local Claude Code compatibility. Use `--
 | --port      | HTTP transport port                 | 4142      |
 | --path      | HTTP transport path                 | /mcp      |
 
+MCP HTTP browser CORS is loopback-only by default. Set `COPILOT_API_MCP_HTTP_ALLOWED_ORIGINS=https://client.example.com,https://admin.example.com` to allow extra browser origins, or `*` to explicitly opt into wildcard CORS.
+
 ### Auth Command Options
 
 The `auth` command has three subcommands for managing multiple accounts:
@@ -674,7 +676,7 @@ npx -y @nick3/copilot-api@latest mcp --transport http --host 127.0.0.1 --port 41
 bunx --bun @nick3/copilot-api@latest start --enable-mcp-http
 ```
 
-The HTTP MCP endpoint is unauthenticated. Keep the default loopback host for standalone mode, and do not expose `/mcp` on an untrusted network unless an external proxy, firewall, or tunnel access policy protects it.
+The HTTP MCP endpoint is unauthenticated. Keep the default loopback host for standalone mode. Browser CORS defaults to loopback origins only; set `COPILOT_API_MCP_HTTP_ALLOWED_ORIGINS` only for trusted clients. Do not expose `/mcp` on an untrusted network unless an external proxy, firewall, or tunnel access policy protects it.
 
 ### Opencode OAuth Authentication
 
