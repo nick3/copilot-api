@@ -302,6 +302,18 @@ Copilot API 现在使用子命令结构，主要命令包括：
 | `--claude-code` | 生成一个使用 Copilot API 配置启动 Claude Code 的命令 | `false` | `-c` |
 | `--show-token` | 在获取和刷新时显示 GitHub 与 Copilot token | `false` | 无 |
 | `--proxy-env` | 从环境变量初始化代理 | `false` | 无 |
+| `--enable-mcp-http` | 在 `/mcp` 暴露未认证的 MCP Streamable HTTP 端点 | `false` | 无 |
+
+### MCP 命令选项
+
+`mcp` 命令默认使用 stdio，以保持本地 Claude Code 兼容性。只有当你的 MCP 客户端支持 Streamable HTTP 时，才使用 `--transport http`。
+
+| 选项 | 说明 | 默认值 |
+| --- | --- | --- |
+| `--transport` | 使用的 transport：`stdio` 或 `http` | `stdio` |
+| `--host` | HTTP transport host | `127.0.0.1` |
+| `--port` | HTTP transport port | `4142` |
+| `--path` | HTTP transport path | `/mcp` |
 
 ### Auth 命令选项
 
@@ -662,8 +674,17 @@ bunx --bun @nick3/copilot-api@latest --api-home=/custom/path --oauth-app=opencod
 只有 MCP tool-search bridge 仍支持 `npx`：
 
 ```sh
+# 本地 stdio MCP bridge，行为保持不变
 npx -y @nick3/copilot-api@latest mcp
+
+# 独立 Streamable HTTP MCP bridge
+npx -y @nick3/copilot-api@latest mcp --transport http --host 127.0.0.1 --port 4142 --path /mcp
+
+# 在主代理服务中显式启用 /mcp
+bunx --bun @nick3/copilot-api@latest start --enable-mcp-http
 ```
+
+HTTP MCP 端点不带认证。独立模式请尽量保持默认 loopback host；不要把 `/mcp` 暴露到不可信网络，除非外层反向代理、防火墙或 tunnel access policy 已经保护它。
 
 ### Opencode OAuth 认证
 
