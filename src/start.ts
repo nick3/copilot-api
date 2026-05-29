@@ -10,6 +10,7 @@ import {
   startQuotaRefreshSchedulerFromConfig,
   stopQuotaRefreshScheduler,
 } from "~/lib/quota-refresh-scheduler-runtime"
+import { isMcpHttpEnabledFromEnv } from "~/mcp-http-config"
 
 import { accountsManager } from "./lib/accounts-manager"
 import { addAccountToRegistry, saveAccountToken } from "./lib/accounts-registry"
@@ -47,6 +48,7 @@ interface RunServerOptions {
   showToken: boolean
   proxyEnv: boolean
   skipAuth: boolean
+  enableMcpHttp: boolean
 }
 
 /**
@@ -162,6 +164,13 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     initProxyFromEnv()
   }
 
+  const enableMcpHttp = options.enableMcpHttp || isMcpHttpEnabledFromEnv()
+  if (enableMcpHttp) {
+    consola.warn(
+      "Main server MCP endpoint is enabled and unauthenticated at /mcp.",
+    )
+  }
+
   state.verbose = options.verbose
   if (options.verbose) {
     consola.level = 5
@@ -244,7 +253,8 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   consola.box(`🌐 Admin UI: ${serverUrl}/admin`)
 
-  const { server } = await import("./server")
+  const { createServer } = await import("./server")
+  const server = createServer({ enableMcpHttp })
 
   serve({
     fetch: server.fetch,
@@ -325,6 +335,12 @@ export const start = defineCommand({
       description:
         "Skip the initial CLI auth flow when no accounts are found. Use this to add accounts via the Admin UI instead.",
     },
+    "enable-mcp-http": {
+      type: "boolean",
+      default: false,
+      description:
+        "Expose the unauthenticated MCP Streamable HTTP endpoint at /mcp.",
+    },
   },
   run({ args }) {
     const rateLimitRaw = args["rate-limit"]
@@ -352,6 +368,7 @@ export const start = defineCommand({
       showToken: args["show-token"],
       proxyEnv: args["proxy-env"],
       skipAuth: args["skip-auth"],
+      enableMcpHttp: args["enable-mcp-http"],
     })
   },
 })

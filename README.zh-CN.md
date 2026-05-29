@@ -302,6 +302,20 @@ Copilot API 现在使用子命令结构，主要命令包括：
 | `--claude-code` | 生成一个使用 Copilot API 配置启动 Claude Code 的命令 | `false` | `-c` |
 | `--show-token` | 在获取和刷新时显示 GitHub 与 Copilot token | `false` | 无 |
 | `--proxy-env` | 从环境变量初始化代理 | `false` | 无 |
+| `--enable-mcp-http` | 在 `/mcp` 暴露未认证的 MCP Streamable HTTP 端点 | `false` | 无 |
+
+### MCP 命令选项
+
+`mcp` 命令默认使用 stdio，以保持本地 Claude Code 兼容性。只有当你的 MCP 客户端支持 Streamable HTTP 时，才使用 `--transport http`。
+
+| 选项 | 说明 | 默认值 |
+| --- | --- | --- |
+| `--transport` | 使用的 transport：`stdio` 或 `http` | `stdio` |
+| `--host` | HTTP transport host | `127.0.0.1` |
+| `--port` | HTTP transport port | `4142` |
+| `--path` | HTTP transport path | `/mcp` |
+
+MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_API_MCP_HTTP_ALLOWED_ORIGINS=https://client.example.com,https://admin.example.com` 允许额外浏览器 origin，或显式设置为 `*` 启用 wildcard CORS。
 
 ### Auth 命令选项
 
@@ -662,8 +676,17 @@ bunx --bun @nick3/copilot-api@latest --api-home=/custom/path --oauth-app=opencod
 只有 MCP tool-search bridge 仍支持 `npx`：
 
 ```sh
+# 本地 stdio MCP bridge，行为保持不变
 npx -y @nick3/copilot-api@latest mcp
+
+# 独立 Streamable HTTP MCP bridge
+npx -y @nick3/copilot-api@latest mcp --transport http --host 127.0.0.1 --port 4142 --path /mcp
+
+# 在主代理服务中显式启用 /mcp
+bunx --bun @nick3/copilot-api@latest start --enable-mcp-http
 ```
+
+HTTP MCP 端点不带认证。独立模式请尽量保持默认 loopback host；浏览器 CORS 默认只允许 loopback origin，仅为可信客户端设置 `COPILOT_API_MCP_HTTP_ALLOWED_ORIGINS`。不要把 `/mcp` 暴露到不可信网络，除非外层反向代理、防火墙或 tunnel access policy 已经保护它。
 
 ### Opencode OAuth 认证
 
@@ -755,7 +778,7 @@ GPT 模型不要设置 Claude Code 原生的 `ENABLE_TOOL_SEARCH`。这个开关
 
 这个 MCP bridge 很小，并且不会加载服务端或 SQLite 代码，因此仍可安全地通过 `npx` 运行。主 `start`、`auth`、`check-usage` 和 `debug` 命令请使用 Bun。
 
-请把 tool search bridge 加到 Claude Code 使用的 MCP 配置中：
+通过 stdio 使用时，请把 tool search bridge 加到 Claude Code 使用的 MCP 配置中：
 
 ```json
 {
@@ -768,6 +791,33 @@ GPT 模型不要设置 Claude Code 原生的 `ENABLE_TOOL_SEARCH`。这个开关
   }
 }
 ```
+
+如果要改用 Streamable HTTP，先在一个终端中启动 MCP HTTP bridge：
+
+```sh
+npx -y @nick3/copilot-api@latest mcp --transport http --host 127.0.0.1 --port 4142 --path /mcp
+```
+
+然后把这个 HTTP MCP server 加到 Claude Code：
+
+```sh
+claude mcp add --transport http tool_search http://127.0.0.1:4142/mcp
+```
+
+等价的手动 MCP 配置如下：
+
+```json
+{
+  "mcpServers": {
+    "tool_search": {
+      "type": "http",
+      "url": "http://127.0.0.1:4142/mcp"
+    }
+  }
+}
+```
+
+如果希望由主代理进程暴露同一个 MCP server，请用 `--enable-mcp-http` 启动主服务，并在 Claude Code MCP URL 中使用 `http://127.0.0.1:4141/mcp`。`tool_search` 请在 stdio 配置和 HTTP 配置中二选一，不要同时启用。
 
 请把 tool search bridge 加到 opencode 使用的 MCP 配置中：
 

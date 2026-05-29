@@ -9,6 +9,7 @@ import {
   shouldEnableResponsesToolSearch,
 } from "~/lib/tool-search"
 import { runMcpServer } from "~/mcp"
+import { createToolSearchMcpServer } from "~/mcp-server"
 
 describe("tool search helpers", () => {
   test("detects eligible Responses tool search requests", () => {
@@ -186,7 +187,8 @@ describe("tool search helpers", () => {
     ).toBe(true)
   })
 
-  test("exports an mcp CLI command", () => {
+  test("exports MCP bridge entry points", () => {
     expect(typeof runMcpServer).toBe("function")
+    expect(typeof createToolSearchMcpServer).toBe("function")
   })
 })

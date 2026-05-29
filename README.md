@@ -295,6 +295,20 @@ The following command line options are available for the `start` command:
 | --claude-code  | Generate a command to launch Claude Code with Copilot API config              | false      | -c    |
 | --show-token   | Show GitHub and Copilot tokens on fetch and refresh                           | false      | none  |
 | --proxy-env    | Initialize proxy from environment variables                                   | false      | none  |
+| --enable-mcp-http | Expose the unauthenticated MCP Streamable HTTP endpoint at `/mcp`          | false      | none  |
+
+### MCP Command Options
+
+The `mcp` command defaults to stdio for local Claude Code compatibility. Use `--transport http` only when your MCP client supports Streamable HTTP.
+
+| Option      | Description                         | Default   |
+| ----------- | ----------------------------------- | --------- |
+| --transport | Transport to use: `stdio` or `http` | stdio     |
+| --host      | HTTP transport host                 | 127.0.0.1 |
+| --port      | HTTP transport port                 | 4142      |
+| --path      | HTTP transport path                 | /mcp      |
+
+MCP HTTP browser CORS is loopback-only by default. Set `COPILOT_API_MCP_HTTP_ALLOWED_ORIGINS=https://client.example.com,https://admin.example.com` to allow extra browser origins, or `*` to explicitly opt into wildcard CORS.
 
 ### Auth Command Options
 
@@ -652,8 +666,17 @@ bunx --bun @nick3/copilot-api@latest --api-home=/custom/path --oauth-app=opencod
 For the MCP tool-search bridge only, `npx` remains supported:
 
 ```sh
+# Local stdio MCP bridge, unchanged
 npx -y @nick3/copilot-api@latest mcp
+
+# Standalone Streamable HTTP MCP bridge
+npx -y @nick3/copilot-api@latest mcp --transport http --host 127.0.0.1 --port 4142 --path /mcp
+
+# Main proxy server with /mcp explicitly enabled
+bunx --bun @nick3/copilot-api@latest start --enable-mcp-http
 ```
+
+The HTTP MCP endpoint is unauthenticated. Keep the default loopback host for standalone mode. Browser CORS defaults to loopback origins only; set `COPILOT_API_MCP_HTTP_ALLOWED_ORIGINS` only for trusted clients. Do not expose `/mcp` on an untrusted network unless an external proxy, firewall, or tunnel access policy protects it.
 
 ### Opencode OAuth Authentication
 
@@ -743,7 +766,7 @@ If you install `tool-search@copilot-api-marketplace`, Claude Code receives this 
 
 This MCP bridge is intentionally small and does not load the server or SQLite code, so it remains safe to run through `npx`. Use Bun for the main `start`, `auth`, `check-usage`, and `debug` commands.
 
-Add the tool search bridge to the MCP config used by Claude Code:
+Add the tool search bridge to the MCP config used by Claude Code over stdio:
 
 ```json
 {
@@ -756,6 +779,33 @@ Add the tool search bridge to the MCP config used by Claude Code:
   }
 }
 ```
+
+To use Streamable HTTP instead, start the MCP HTTP bridge in one terminal:
+
+```sh
+npx -y @nick3/copilot-api@latest mcp --transport http --host 127.0.0.1 --port 4142 --path /mcp
+```
+
+Then add the HTTP MCP server to Claude Code:
+
+```sh
+claude mcp add --transport http tool_search http://127.0.0.1:4142/mcp
+```
+
+Equivalent manual MCP config:
+
+```json
+{
+  "mcpServers": {
+    "tool_search": {
+      "type": "http",
+      "url": "http://127.0.0.1:4142/mcp"
+    }
+  }
+}
+```
+
+If you prefer the main proxy process to expose the same MCP server, start it with `--enable-mcp-http` and use `http://127.0.0.1:4141/mcp` as the Claude Code MCP URL. Use either the stdio config or the HTTP config for `tool_search`, not both.
 
 Add the tool search bridge to the MCP config used by opencode:
 
