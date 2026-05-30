@@ -421,4 +421,33 @@ describe("createResponses websocket helpers", () => {
     expect(mainKey).toContain("gpt-test")
     expect(mainKey).toContain("request-1")
   })
+
+  test("websocket pool key is stable per session across turns", () => {
+    const basePayload: ResponsesPayload = {
+      input: "hello",
+      model: "gpt-test",
+    }
+
+    // Same session, different per-request ids (pipelined codex turns) must share
+    // a pool key so the upstream connection — and its server-side
+    // previous_response_id state — is reused.
+    const turnOne = buildResponsesWebSocketPoolKey(basePayload, {
+      copilotToken: "token-a",
+      requestId: "request-1",
+      sessionId: "session-abc",
+    })
+    const turnTwo = buildResponsesWebSocketPoolKey(basePayload, {
+      copilotToken: "token-a",
+      requestId: "request-2",
+      sessionId: "session-abc",
+    })
+    const otherSession = buildResponsesWebSocketPoolKey(basePayload, {
+      copilotToken: "token-a",
+      requestId: "request-3",
+      sessionId: "session-xyz",
+    })
+
+    expect(turnOne).toBe(turnTwo)
+    expect(turnOne).not.toBe(otherSession)
+  })
 })

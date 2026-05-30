@@ -21,8 +21,15 @@ type ServerWebSocket = Bun.ServerWebSocket<ResponsesWebSocketData>
 type AppFetch = (request: Request) => Response | Promise<Response>
 
 export type ResponsesWebSocketData = {
-  active: boolean
-  controller: AbortController | null
+  // Codex keeps a single persistent websocket per session and pipelines turns
+  // over it: a turn's `response.create` can arrive before the previous turn's
+  // SSE relay has finished tearing down. Bun does not serialize async `message`
+  // callbacks, so we chain work on this promise to process frames strictly in
+  // arrival order instead of rejecting concurrent frames.
+  queue: Promise<void>
+  // In-flight upstream requests, one AbortController per active `response.create`
+  // frame, so a client disconnect can abort all of them.
+  controllers: Set<AbortController>
   headers: Array<[string, string]>
   url: string
 }
@@ -42,9 +49,12 @@ export function createResponsesWebSocketHandler(
       await handleResponsesWebSocketMessage(ws, message, appFetch)
     },
     close(ws) {
-      // Abort any in-flight upstream Responses request so we stop consuming
+      // Abort every in-flight upstream Responses request so we stop consuming
       // tokens/quota and worker time once the client disconnects.
-      ws.data.controller?.abort()
+      for (const controller of ws.data.controllers) {
+        controller.abort()
+      }
+      ws.data.controllers.clear()
     },
   }
 }
@@ -109,26 +119,38 @@ export async function handleResponsesWebSocketMessage(
     return
   }
 
+  // Chain this frame after any in-flight work so pipelined turns are processed
+  // strictly in arrival order. The assignment is synchronous, so even though Bun
+  // may dispatch overlapping `message` callbacks, the ordering reflects the order
+  // frames were received. `processResponseCreateFrame` never rejects, keeping the
+  // chain alive for subsequent turns.
+  const queued = ws.data.queue.then(() =>
+    processResponseCreateFrame(ws, frame, appFetch),
+  )
+  ws.data.queue = queued
+  await queued
+}
+
+async function processResponseCreateFrame(
+  ws: ServerWebSocket,
+  frame: ResponsesWebSocketFrame,
+  appFetch: AppFetch,
+): Promise<void> {
   if (frame.generate === false) {
     sendResponsesWebSocketWarmupCompleted(ws)
     return
   }
 
-  if (ws.data.active) {
-    sendResponsesWebSocketError(
-      ws,
-      "Responses websocket request already active",
-      409,
-    )
-    return
-  }
-
-  ws.data.active = true
   const controller = new AbortController()
-  ws.data.controller = controller
+  ws.data.controllers.add(controller)
   try {
     await forwardResponseCreateFrame(ws, frame, appFetch, controller)
   } catch (error) {
+    // A client disconnect aborts in-flight controllers; that is expected
+    // teardown, not a failure to report back to the (now gone) client.
+    if (controller.signal.aborted) {
+      return
+    }
     consola.warn("Responses websocket bridge failed:", error)
     sendResponsesWebSocketError(
       ws,
@@ -136,8 +158,7 @@ export async function handleResponsesWebSocketMessage(
       500,
     )
   } finally {
-    ws.data.active = false
-    ws.data.controller = null
+    ws.data.controllers.delete(controller)
   }
 }
 
@@ -167,8 +188,8 @@ export function parseSseRecords(chunk: string): {
 
 function buildResponsesWebSocketData(req: Request): ResponsesWebSocketData {
   return {
-    active: false,
-    controller: null,
+    queue: Promise.resolve(),
+    controllers: new Set(),
     headers: collectForwardedHeaders(req.headers),
     url: req.url,
   }

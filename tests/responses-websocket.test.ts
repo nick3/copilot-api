@@ -18,8 +18,8 @@ function createMockWebSocket(): MockWebSocket {
   const sent: Array<string> = []
   return {
     data: {
-      active: false,
-      controller: null,
+      queue: Promise.resolve(),
+      controllers: new Set(),
       headers: [],
       url: "http://localhost:4141/v1/responses",
     },
@@ -215,6 +215,78 @@ test("relays upstream errors as spec-shaped error frames", async () => {
   })
 })
 
+test("serializes pipelined response.create frames instead of rejecting them", async () => {
+  // Reproduces the codex multi-turn bug: codex reuses one websocket and can
+  // send turn 2's `response.create` before turn 1's SSE relay has finished.
+  // The bridge must queue turn 2 (not reject it with a 409) and forward both.
+  const ws = createMockWebSocket()
+  const fetchOrder: Array<string> = []
+  let releaseTurnOne: (() => void) | undefined
+
+  const handler = createResponsesWebSocketHandler(() => {
+    const order = fetchOrder.length
+    fetchOrder.push(`fetch-${order}`)
+
+    if (order === 0) {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          releaseTurnOne = () => {
+            controller.enqueue(
+              new TextEncoder().encode(
+                'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp-1"}}\n\n',
+              ),
+            )
+            controller.close()
+          }
+        },
+      })
+      return Promise.resolve(
+        new Response(stream, {
+          headers: { "content-type": "text/event-stream" },
+        }),
+      )
+    }
+
+    return Promise.resolve(
+      new Response(
+        'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp-2"}}\n\n',
+        { headers: { "content-type": "text/event-stream" } },
+      ),
+    )
+  })
+
+  const turnOne = handler.message(
+    ws as never,
+    JSON.stringify({
+      input: "one",
+      model: "gpt-test",
+      type: "response.create",
+    }),
+  )
+  const turnTwo = handler.message(
+    ws as never,
+    JSON.stringify({
+      input: "two",
+      model: "gpt-test",
+      previous_response_id: "resp-1",
+      type: "response.create",
+    }),
+  )
+
+  // Turn 2 must wait: only turn 1 has reached the upstream fetch so far.
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  expect(fetchOrder).toEqual(["fetch-0"])
+
+  releaseTurnOne?.()
+  await Promise.all([turnOne, turnTwo])
+
+  expect(fetchOrder).toEqual(["fetch-0", "fetch-1"])
+  expect(ws.sent).toEqual([
+    '{"type":"response.completed","response":{"id":"resp-1"}}',
+    '{"type":"response.completed","response":{"id":"resp-2"}}',
+  ])
+})
+
 test("aborts the upstream stream when the client disconnects", async () => {
   const ws = createMockWebSocket()
   let cancelled = false
@@ -252,12 +324,12 @@ test("aborts the upstream stream when the client disconnects", async () => {
   // Let the first SSE event flow through before disconnecting.
   await new Promise((resolve) => setTimeout(resolve, 10))
   expect(ws.sent).toContain('{"type":"response.created"}')
-  expect(ws.data.controller).not.toBeNull()
+  expect(ws.data.controllers.size).toBe(1)
 
   // Simulate the client closing the websocket.
   void handler.close?.(ws as never, 1000, "client closed")
   await messagePromise
 
   expect(cancelled).toBe(true)
-  expect(ws.data.controller).toBeNull()
+  expect(ws.data.controllers.size).toBe(0)
 })

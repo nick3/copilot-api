@@ -498,6 +498,7 @@ export const createResponses = async (
       {
         copilotToken: ctx.copilotToken,
         requestId: requestId ?? upstreamRequestId ?? "missing-request-id",
+        sessionId,
         subagentMarker,
       },
     )
@@ -577,6 +578,7 @@ export const prepareResponsesWebSocketRequest = (
   options: {
     copilotToken?: string
     requestId: string
+    sessionId?: string
     subagentMarker?: SubagentMarker | null
   },
 ): ResponsesWebSocketRequest => {
@@ -594,10 +596,12 @@ export const buildResponsesWebSocketPoolKey = (
   {
     copilotToken,
     requestId,
+    sessionId,
     subagentMarker,
   }: {
     copilotToken?: string
     requestId: string
+    sessionId?: string
     subagentMarker?: SubagentMarker | null
   },
 ): string => {
@@ -614,7 +618,15 @@ export const buildResponsesWebSocketPoolKey = (
       ].join(":")
     : "main"
 
-  return [tokenFingerprint, payload.model, requestId, subagentKey]
+  // Key the upstream websocket on the session, not the per-request id. Copilot
+  // stores Responses conversation state (referenced by `previous_response_id`)
+  // per upstream connection, so every turn of a session must reuse the same
+  // socket. Codex derives a stable `prompt_cache_key` (its thread id) per
+  // session, which upstream callers turn into `sessionId`. Fall back to
+  // `requestId` when no session id is available (e.g. one-off HTTP callers).
+  const connectionAffinityKey = sessionId ?? requestId
+
+  return [tokenFingerprint, payload.model, connectionAffinityKey, subagentKey]
     .map(encodePoolKeyPart)
     .join("|")
 }
