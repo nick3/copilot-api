@@ -22,6 +22,7 @@ function createMockWebSocket(): MockWebSocket {
       controllers: new Set(),
       headers: [],
       url: "http://localhost:4141/v1/responses",
+      bridgeId: "test-bridge-id",
     },
     sent,
     send(message: string) {
@@ -164,6 +165,33 @@ test("forwards response.create to app fetch and relays SSE events", async () => 
   expect(ws.sent).toEqual([
     '{"type":"response.completed","response":{"id":"resp-1"}}',
   ])
+})
+
+test("forwards the bridge id so the upstream pool can reap the right socket", async () => {
+  const ws = createMockWebSocket()
+  let capturedRequest: Request | undefined
+
+  await handleResponsesWebSocketMessage(
+    ws as never,
+    JSON.stringify({
+      input: "hello",
+      model: "gpt-test",
+      type: "response.create",
+    }),
+    (request) => {
+      capturedRequest = request
+      return Promise.resolve(
+        new Response(
+          'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp-1"}}\n\n',
+          { headers: { "content-type": "text/event-stream" } },
+        ),
+      )
+    },
+  )
+
+  expect(capturedRequest?.headers.get("x-responses-bridge-id")).toBe(
+    "test-bridge-id",
+  )
 })
 
 test("preserves a single leading space in SSE data per spec", () => {

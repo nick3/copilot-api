@@ -382,6 +382,27 @@ describe("createResponses websocket helpers", () => {
     expect(request.headers["x-interaction-id"]).toBeUndefined()
   })
 
+  test("websocket request carries the bridge id through to the pool entry", () => {
+    const preparedHeaders = {
+      ...copilotHeaders(account, false, "request-1"),
+      "x-initiator": "user",
+    }
+
+    const withBridge = prepareResponsesWebSocketRequest(
+      { input: "hello", model: "gpt-test", stream: true },
+      preparedHeaders,
+      { requestId: "request-1", bridgeId: "bridge-123" },
+    )
+    expect(withBridge.bridgeId).toBe("bridge-123")
+
+    const withoutBridge = prepareResponsesWebSocketRequest(
+      { input: "hello", model: "gpt-test", stream: true },
+      preparedHeaders,
+      { requestId: "request-1" },
+    )
+    expect(withoutBridge.bridgeId).toBeUndefined()
+  })
+
   test("websocket pool key separates account token model request and subagent context", () => {
     const basePayload: ResponsesPayload = {
       input: "hello",

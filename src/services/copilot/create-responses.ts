@@ -26,6 +26,7 @@ import { resolveEffectiveInitiator } from "~/lib/request-initiator"
 import { accountFromState } from "~/lib/state"
 
 import { copilotFetch } from "./copilot-fetch"
+import { closeResponsesBridge } from "./responses-bridge-registry"
 
 export interface ResponsesPayload {
   model: string
@@ -448,6 +449,7 @@ interface ResponsesRequestOptions {
   requestId?: string
   fetchImpl?: typeof fetch
   transport?: ResponsesTransport
+  bridgeId?: string
 }
 
 const RESPONSES_WEBSOCKET_IDLE_TIMEOUT_MS = 60_000
@@ -464,6 +466,7 @@ export const createResponses = async (
     requestId,
     fetchImpl,
     transport = "http",
+    bridgeId,
   }: ResponsesRequestOptions,
   account?: AccountContext,
 ): Promise<CreateResponsesReturn> => {
@@ -500,6 +503,7 @@ export const createResponses = async (
         requestId: requestId ?? upstreamRequestId ?? "missing-request-id",
         sessionId,
         subagentMarker,
+        bridgeId,
       },
     )
     const stream = createPooledResponsesWebSocketStream(
@@ -566,6 +570,7 @@ interface ResponsesWebSocketRequest {
   headers: Record<string, string>
   poolKey: string
   payload: ResponsesWebSocketPayload
+  bridgeId?: string
 }
 
 type ResponsesWebSocketErrorEvent = Parameters<
@@ -580,6 +585,7 @@ export const prepareResponsesWebSocketRequest = (
     requestId: string
     sessionId?: string
     subagentMarker?: SubagentMarker | null
+    bridgeId?: string
   },
 ): ResponsesWebSocketRequest => {
   const initiator = getResponsesWebSocketInitiator(preparedHeaders)
@@ -588,6 +594,7 @@ export const prepareResponsesWebSocketRequest = (
     headers: copilotWebSocketHeaders(preparedHeaders),
     poolKey: buildResponsesWebSocketPoolKey(payload, options),
     payload: buildResponsesWebSocketPayload(payload, initiator),
+    bridgeId: options.bridgeId,
   }
 }
 
@@ -680,6 +687,11 @@ interface ResponsesWebSocketEntry {
   idleTimer: ReturnType<typeof setTimeout> | null
   requestCount: number
   websocketPromise: Promise<InstanceType<typeof WebSocket>>
+  // Bridge socket (WS #1) that originated this upstream connection, if any. When
+  // this entry is dropped while no turn is in flight, we close that bridge socket
+  // so Codex rebuilds a fresh full-context session instead of stalling on a stale
+  // `previous_response_id`.
+  bridgeId?: string
 }
 
 interface ResponsesWebSocketRequestTarget {
@@ -761,14 +773,17 @@ const createResponsesWebSocketEntry = (
       headers: request.headers,
       url: buildResponsesWebSocketUrl(baseUrl),
     }),
+    bridgeId: request.bridgeId,
   }
 
   entry.websocketPromise
     .then((websocket) => {
       websocket.addEventListener("close", () => {
+        maybeCloseResponsesBridgeForReapedEntry(request.poolKey, entry)
         removeResponsesWebSocketPoolEntry(request.poolKey, entry)
       })
       websocket.addEventListener("error", () => {
+        maybeCloseResponsesBridgeForReapedEntry(request.poolKey, entry)
         removeResponsesWebSocketPoolEntry(request.poolKey, entry)
       })
     })
@@ -777,6 +792,32 @@ const createResponsesWebSocketEntry = (
     })
 
   return entry
+}
+
+// Close the originating bridge socket (WS #1) when the upstream connection it was
+// keyed to is dropped while the session is idle, so Codex rebuilds a fresh
+// full-context request on its next turn instead of stalling ~5 minutes on a stale
+// `previous_response_id`.
+//
+// Gated to fire only for the live pooled entry (`responsesWebSocketPool` still
+// points at it) with no in-flight turn (`requestCount === 0`). This excludes:
+//   - throwaway non-pooled entries (never in the pool map), whose normal teardown
+//     would otherwise close the bridge after a concurrent turn, and
+//   - mid-turn upstream drops (`requestCount > 0`), which the active request's
+//     existing error path already surfaces to Codex.
+const maybeCloseResponsesBridgeForReapedEntry = (
+  poolKey: string,
+  entry: ResponsesWebSocketEntry,
+): void => {
+  if (
+    entry.bridgeId === undefined
+    || entry.requestCount > 0
+    || responsesWebSocketPool.get(poolKey) !== entry
+  ) {
+    return
+  }
+
+  closeResponsesBridge(entry.bridgeId)
 }
 
 const acquireResponsesWebSocketEntry = (
@@ -848,6 +889,7 @@ const scheduleResponsesWebSocketIdleClose = (
 ): void => {
   clearResponsesWebSocketIdleTimer(entry)
   entry.idleTimer = setTimeout(() => {
+    maybeCloseResponsesBridgeForReapedEntry(poolKey, entry)
     removeResponsesWebSocketPoolEntry(poolKey, entry)
   }, RESPONSES_WEBSOCKET_IDLE_TIMEOUT_MS)
   unrefTimer(entry.idleTimer)

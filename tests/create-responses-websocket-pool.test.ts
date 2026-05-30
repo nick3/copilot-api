@@ -3,6 +3,11 @@ import { afterEach, beforeEach, expect, mock, test } from "bun:test"
 import type { AccountContext } from "../src/lib/types/account"
 import type { ResponsesResult } from "../src/services/copilot/create-responses"
 
+import {
+  registerResponsesBridge,
+  unregisterResponsesBridge,
+} from "../src/services/copilot/responses-bridge-registry"
+
 type ListenerEvent = {
   data?: string
   error?: unknown
@@ -190,6 +195,15 @@ const createResponsesResult = (
   usage: null,
 })
 
+// Bridge ids registered during a test, unregistered in afterEach so the shared
+// registry map does not leak closers between tests.
+const registeredTestBridges = new Set<string>()
+
+const trackResponsesBridge = (bridgeId: string, closer: () => void): void => {
+  registeredTestBridges.add(bridgeId)
+  registerResponsesBridge(bridgeId, closer)
+}
+
 beforeEach(() => {
   MockWebSocket.autoComplete = true
   MockWebSocket.closeAfterComplete = false
@@ -211,6 +225,11 @@ afterEach(() => {
   for (const websocket of MockWebSocket.instances) {
     websocket.close()
   }
+
+  for (const bridgeId of registeredTestBridges) {
+    unregisterResponsesBridge(bridgeId)
+  }
+  registeredTestBridges.clear()
 
   state.accountType = originalState.accountType
   state.copilotApiUrl = originalState.copilotApiUrl
@@ -548,6 +567,96 @@ test("Responses websocket uses the proxy-env dispatcher when initialized", async
   }
 })
 
+test("closes the originating bridge when its pooled upstream connection drops while idle", async () => {
+  let bridgeClosed = 0
+  trackResponsesBridge("bridge-idle", () => {
+    bridgeClosed += 1
+  })
+
+  // Complete a turn so the entry returns to the pool with requestCount === 0.
+  await collectResponsesStreamWithBridge("request-1", "bridge-idle")
+
+  expect(MockWebSocket.instances).toHaveLength(1)
+  expect(bridgeClosed).toBe(0)
+
+  // The upstream connection being reaped/dropped while idle must close the
+  // originating bridge socket so Codex rebuilds a fresh full-context session.
+  MockWebSocket.instances[0]?.close()
+
+  expect(bridgeClosed).toBe(1)
+})
+
+test("leaves the bridge open when the upstream connection drops mid-turn", async () => {
+  MockWebSocket.autoComplete = false
+  let bridgeClosed = 0
+  trackResponsesBridge("bridge-midturn", () => {
+    bridgeClosed += 1
+  })
+
+  const streamPromise = collectResponsesStreamWithBridge(
+    "request-1",
+    "bridge-midturn",
+  )
+  await waitFor(() => MockWebSocket.instances[0]?.sent.length === 1)
+
+  // Drop the socket while the turn is still in flight (requestCount > 0). The
+  // active request's own error path surfaces this to Codex, so the bridge must
+  // NOT be force-closed here.
+  MockWebSocket.instances[0]?.emitError({
+    error: new Error("socket hang up"),
+  })
+
+  await streamPromise.catch(() => {})
+
+  expect(bridgeClosed).toBe(0)
+})
+
+test("does not close the bridge for a throwaway concurrent (non-pooled) connection", async () => {
+  MockWebSocket.autoComplete = false
+  let keptBridgeClosed = 0
+  let throwawayBridgeClosed = 0
+  trackResponsesBridge("bridge-keep", () => {
+    keptBridgeClosed += 1
+  })
+  trackResponsesBridge("bridge-throwaway", () => {
+    throwawayBridgeClosed += 1
+  })
+
+  // First request owns the pooled entry for this pool key.
+  const firstIterator = await openResponsesStreamWithBridge(
+    "request-1",
+    "bridge-keep",
+  )
+  const firstChunk = firstIterator.next()
+  await waitFor(() => MockWebSocket.instances[0]?.sent.length === 1)
+
+  // Concurrent request with the same pool key bypasses the pool and gets a
+  // dedicated, non-pooled connection.
+  const secondPromise = collectResponsesStreamWithBridge(
+    "request-1",
+    "bridge-throwaway",
+  )
+  await waitFor(
+    () =>
+      MockWebSocket.instances.length === 2
+      && MockWebSocket.instances[1]?.sent.length === 1,
+  )
+
+  // Finish and drop the throwaway connection. It was never the live pooled
+  // entry, so its bridge must NOT be closed.
+  MockWebSocket.instances[1]?.completeLatestResponse()
+  await secondPromise
+  MockWebSocket.instances[1]?.close()
+
+  expect(throwawayBridgeClosed).toBe(0)
+  expect(keptBridgeClosed).toBe(0)
+
+  // Drain the still-pooled first request.
+  MockWebSocket.instances[0]?.completeLatestResponse()
+  await firstChunk
+  await firstIterator.next()
+})
+
 const collectResponsesStream = async (requestId: string): Promise<void> => {
   const response = await createResponses(
     {
@@ -566,6 +675,42 @@ const collectResponsesStream = async (requestId: string): Promise<void> => {
 
   for await (const _chunk of response as AsyncIterable<unknown>) {
     // consume stream
+  }
+}
+
+const openResponsesStreamWithBridge = async (
+  requestId: string,
+  bridgeId: string,
+): Promise<AsyncIterableIterator<unknown>> => {
+  const response = await createResponses(
+    {
+      input: "hello",
+      model: "gpt-test",
+      stream: true,
+    },
+    {
+      bridgeId,
+      initiator: "user",
+      requestId,
+      transport: "websocket",
+      vision: false,
+    },
+    account,
+  )
+
+  return (response as AsyncIterable<unknown>)[
+    Symbol.asyncIterator
+  ]() as AsyncIterableIterator<unknown>
+}
+
+const collectResponsesStreamWithBridge = async (
+  requestId: string,
+  bridgeId: string,
+): Promise<void> => {
+  const iterator = await openResponsesStreamWithBridge(requestId, bridgeId)
+  let next = await iterator.next()
+  while (!next.done) {
+    next = await iterator.next()
   }
 }
 

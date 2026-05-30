@@ -178,6 +178,11 @@ export const handleResponses = async (c: Context) => {
   request.upstreamRequestId = upstreamRequestId
   request.upstreamSessionId = upstreamSessionId
 
+  // Set by the Responses websocket bridge (src/routes/responses/websocket.ts) so
+  // the upstream pool can close the originating bridge socket when its GitHub
+  // connection is reaped while idle. Absent for plain HTTP callers.
+  const bridgeId = c.req.header("x-responses-bridge-id") ?? undefined
+
   if (streamRequested) {
     return handleStreamingResponses({
       c,
@@ -192,6 +197,7 @@ export const handleResponses = async (c: Context) => {
       premiumRemainingBefore,
       premiumUnlimitedBefore,
       transport,
+      bridgeId,
     })
   }
 
@@ -208,6 +214,7 @@ export const handleResponses = async (c: Context) => {
     premiumRemainingBefore,
     premiumUnlimitedBefore,
     transport,
+    bridgeId,
   })
 }
 
@@ -455,6 +462,7 @@ async function handleStreamingResponses(params: {
   premiumRemainingBefore: number | undefined
   premiumUnlimitedBefore: boolean | undefined
   transport: ResponsesTransport
+  bridgeId: string | undefined
 }): Promise<Response> {
   const {
     c,
@@ -469,6 +477,7 @@ async function handleStreamingResponses(params: {
     premiumRemainingBefore,
     premiumUnlimitedBefore,
     transport,
+    bridgeId,
   } = params
 
   let response: Awaited<ReturnType<typeof createResponses>>
@@ -483,6 +492,7 @@ async function handleStreamingResponses(params: {
         sessionId: request.upstreamSessionId,
         requestId: request.requestId,
         transport,
+        bridgeId,
       },
       accountCtx,
     )
@@ -804,6 +814,7 @@ async function handleNonStreamingResponses(params: {
   premiumRemainingBefore: number | undefined
   premiumUnlimitedBefore: boolean | undefined
   transport: ResponsesTransport
+  bridgeId: string | undefined
 }): Promise<Response> {
   const {
     c,
@@ -818,6 +829,7 @@ async function handleNonStreamingResponses(params: {
     premiumRemainingBefore,
     premiumUnlimitedBefore,
     transport,
+    bridgeId,
   } = params
   const { account, reservation, selectedModel, endpoint, costUnits } = selection
   let usage: NormalizedUsage = {}
@@ -833,6 +845,7 @@ async function handleNonStreamingResponses(params: {
         sessionId: request.upstreamSessionId,
         requestId: request.requestId,
         transport,
+        bridgeId,
       },
       accountCtx,
     )

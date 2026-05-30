@@ -1,9 +1,16 @@
 import consola from "consola"
+import { randomUUID } from "node:crypto"
 
 import {
   createUnauthorizedRawResponse,
   isAuthorizedHeaders,
 } from "~/lib/request-auth"
+import {
+  registerResponsesBridge,
+  unregisterResponsesBridge,
+} from "~/services/copilot/responses-bridge-registry"
+
+const RESPONSES_BRIDGE_ID_HEADER = "x-responses-bridge-id"
 
 const RESPONSES_WEBSOCKET_PATHS = new Set(["/responses", "/v1/responses"])
 const SSE_RECORD_SEPARATOR = /\r?\n\r?\n/u
@@ -32,6 +39,12 @@ export type ResponsesWebSocketData = {
   controllers: Set<AbortController>
   headers: Array<[string, string]>
   url: string
+  // Stable id minted per bridge connection. It is forwarded to the upstream
+  // Responses pool (via `x-responses-bridge-id`) so the pool can close this exact
+  // socket when its upstream connection is reaped, forcing Codex to rebuild a
+  // fresh full-context session instead of stalling on a stale
+  // `previous_response_id`.
+  bridgeId: string
 }
 
 type ResponsesWebSocketFrame = {
@@ -45,10 +58,22 @@ export function createResponsesWebSocketHandler(
   return {
     data: {} as ResponsesWebSocketData,
     idleTimeout: 0,
+    open(ws) {
+      // Register a closer so the upstream pool can drop this socket when its
+      // GitHub connection is reaped while idle.
+      registerResponsesBridge(ws.data.bridgeId, () => {
+        try {
+          ws.close()
+        } catch (error) {
+          consola.warn("Failed to close Responses websocket bridge:", error)
+        }
+      })
+    },
     async message(ws, message) {
       await handleResponsesWebSocketMessage(ws, message, appFetch)
     },
     close(ws) {
+      unregisterResponsesBridge(ws.data.bridgeId)
       // Abort every in-flight upstream Responses request so we stop consuming
       // tokens/quota and worker time once the client disconnects.
       for (const controller of ws.data.controllers) {
@@ -192,6 +217,7 @@ function buildResponsesWebSocketData(req: Request): ResponsesWebSocketData {
     controllers: new Set(),
     headers: collectForwardedHeaders(req.headers),
     url: req.url,
+    bridgeId: randomUUID(),
   }
 }
 
@@ -218,7 +244,7 @@ async function forwardResponseCreateFrame(
   const response = await appFetch(
     new Request(buildInternalResponsesUrl(ws.data.url), {
       method: "POST",
-      headers: buildInternalResponsesHeaders(ws.data.headers),
+      headers: buildInternalResponsesHeaders(ws.data.headers, ws.data.bridgeId),
       body: JSON.stringify(payload),
       signal: controller.signal,
     }),
@@ -253,9 +279,11 @@ function buildInternalResponsesUrl(sourceUrl: string): string {
 
 function buildInternalResponsesHeaders(
   forwardedHeaders: Array<[string, string]>,
+  bridgeId: string,
 ): Headers {
   const headers = new Headers(forwardedHeaders)
   headers.set("content-type", "application/json")
+  headers.set(RESPONSES_BRIDGE_ID_HEADER, bridgeId)
   return headers
 }
 
