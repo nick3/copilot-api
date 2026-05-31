@@ -153,6 +153,17 @@ async function setupClaudeCode(
 }
 
 export async function runServer(options: RunServerOptions): Promise<void> {
+  // Fail fast before any config merge, account init, interactive auth, or quota
+  // scheduler work: the server relies on Bun.serve for the Responses WebSocket
+  // transport, so running under Node would otherwise crash with
+  // "ReferenceError: Bun is not defined" only after all that setup.
+  if (typeof Bun === "undefined") {
+    consola.error(
+      "The Responses WebSocket transport requires the Bun runtime. Start the proxy with 'bun' or 'bunx --bun' instead of Node.",
+    )
+    process.exit(1)
+  }
+
   // Work around unjs/consola#357 until a release includes PR #359.
   consola.options.throttle = 0
 
@@ -261,13 +272,6 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   const responsesWebSocketHandler = createResponsesWebSocketHandler(
     server.fetch,
   )
-
-  if (typeof Bun === "undefined") {
-    consola.error(
-      "The Responses WebSocket transport requires the Bun runtime. Start the proxy with 'bun' or 'bunx --bun' instead of Node.",
-    )
-    process.exit(1)
-  }
 
   Bun.serve({
     port: options.port,
