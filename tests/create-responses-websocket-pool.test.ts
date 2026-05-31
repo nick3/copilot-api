@@ -657,6 +657,38 @@ test("does not close the bridge for a throwaway concurrent (non-pooled) connecti
   await firstIterator.next()
 })
 
+test("rebinds a reused pooled entry to the reconnecting bridge so the idle reap closes the live bridge", async () => {
+  let oldBridgeClosed = 0
+  let newBridgeClosed = 0
+  trackResponsesBridge("bridge-old", () => {
+    oldBridgeClosed += 1
+  })
+  trackResponsesBridge("bridge-new", () => {
+    newBridgeClosed += 1
+  })
+
+  // Turn 1 over the original bridge. The upstream entry returns to the pool with
+  // requestCount === 0 and is keyed to "bridge-old".
+  await collectResponsesStreamWithBridge("request-1", "bridge-old")
+
+  // Codex reconnects for the same session (a fresh bridge, hence "bridge-new")
+  // BEFORE the pooled upstream entry is reaped. The pool reuses the existing
+  // connection, so it must be rebound to the currently connected bridge.
+  await collectResponsesStreamWithBridge("request-1", "bridge-new")
+
+  expect(MockWebSocket.instances).toHaveLength(1)
+  expect(oldBridgeClosed).toBe(0)
+  expect(newBridgeClosed).toBe(0)
+
+  // The idle reap now closes the LIVE bridge ("bridge-new"), not the original
+  // now-unregistered one. Without the rebind, the reap would target "bridge-old"
+  // and leave the connected bridge stalled on a stale previous_response_id.
+  MockWebSocket.instances[0]?.close()
+
+  expect(newBridgeClosed).toBe(1)
+  expect(oldBridgeClosed).toBe(0)
+})
+
 const collectResponsesStream = async (requestId: string): Promise<void> => {
   const response = await createResponses(
     {

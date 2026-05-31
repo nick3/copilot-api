@@ -147,13 +147,15 @@ export async function handleResponsesWebSocketMessage(
   // Chain this frame after any in-flight work so pipelined turns are processed
   // strictly in arrival order. The assignment is synchronous, so even though Bun
   // may dispatch overlapping `message` callbacks, the ordering reflects the order
-  // frames were received. `processResponseCreateFrame` never rejects, keeping the
-  // chain alive for subsequent turns.
-  const queued = ws.data.queue.then(() =>
-    processResponseCreateFrame(ws, frame, appFetch),
-  )
+  // frames were received. We swallow any rejection from the prior link before
+  // chaining so a single failed turn (e.g. `ws.send` throwing while the socket is
+  // closing) can never poison `ws.data.queue` and block every subsequent turn for
+  // the lifetime of the connection.
+  const queued = ws.data.queue
+    .catch(() => {})
+    .then(() => processResponseCreateFrame(ws, frame, appFetch))
   ws.data.queue = queued
-  await queued
+  await queued.catch(() => {})
 }
 
 async function processResponseCreateFrame(

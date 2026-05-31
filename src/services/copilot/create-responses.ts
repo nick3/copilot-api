@@ -747,6 +747,13 @@ const getResponsesWebSocketRequestTarget = (
   const existing = responsesWebSocketPool.get(request.poolKey)
   if (existing && !existing.closed) {
     clearResponsesWebSocketIdleTimer(existing)
+    // A Codex client can reconnect for the same session (minting a fresh bridge,
+    // hence a fresh bridgeId) before this pooled upstream entry is reaped. Rebind
+    // the entry to the currently connected bridge so a later idle reap closes the
+    // live WS #1, not the original now-unregistered one — otherwise the multi-turn
+    // recovery would target a dead bridge and the next turn could still stall on a
+    // stale `previous_response_id`.
+    existing.bridgeId = request.bridgeId
     return {
       entry: existing,
       pooled: true,

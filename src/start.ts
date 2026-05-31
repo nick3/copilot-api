@@ -262,6 +262,13 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     server.fetch,
   )
 
+  if (typeof Bun === "undefined") {
+    consola.error(
+      "The Responses WebSocket transport requires the Bun runtime. Start the proxy with 'bun' or 'bunx --bun' instead of Node.",
+    )
+    process.exit(1)
+  }
+
   Bun.serve({
     port: options.port,
     idleTimeout: 0,

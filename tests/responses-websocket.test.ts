@@ -14,6 +14,19 @@ type MockWebSocket = {
   send: (message: string) => number
 }
 
+type Deferred<T> = {
+  promise: Promise<T>
+  resolve: (value: T) => void
+}
+
+function createDeferred<T = void>(): Deferred<T> {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
 function createMockWebSocket(): MockWebSocket {
   const sent: Array<string> = []
   return {
@@ -250,6 +263,7 @@ test("serializes pipelined response.create frames instead of rejecting them", as
   const ws = createMockWebSocket()
   const fetchOrder: Array<string> = []
   let releaseTurnOne: (() => void) | undefined
+  const turnOneFetchStarted = createDeferred()
 
   const handler = createResponsesWebSocketHandler(() => {
     const order = fetchOrder.length
@@ -268,6 +282,7 @@ test("serializes pipelined response.create frames instead of rejecting them", as
           }
         },
       })
+      turnOneFetchStarted.resolve()
       return Promise.resolve(
         new Response(stream, {
           headers: { "content-type": "text/event-stream" },
@@ -302,7 +317,7 @@ test("serializes pipelined response.create frames instead of rejecting them", as
   )
 
   // Turn 2 must wait: only turn 1 has reached the upstream fetch so far.
-  await new Promise((resolve) => setTimeout(resolve, 10))
+  await turnOneFetchStarted.promise
   expect(fetchOrder).toEqual(["fetch-0"])
 
   releaseTurnOne?.()
@@ -344,13 +359,27 @@ test("aborts the upstream stream when the client disconnects", async () => {
     ),
   )
 
+  // Resolve once the bridge relays its first SSE event to the client, so we wait
+  // on the real signal instead of a fixed delay.
+  const firstEventSent = createDeferred()
+  const originalSend = ws.send.bind(ws)
+  let sendCount = 0
+  ws.send = (message: string) => {
+    const result = originalSend(message)
+    sendCount += 1
+    if (sendCount === 1) {
+      firstEventSent.resolve()
+    }
+    return result
+  }
+
   const messagePromise = handler.message(
     ws as never,
     JSON.stringify({ input: "hi", model: "gpt-test", type: "response.create" }),
   )
 
   // Let the first SSE event flow through before disconnecting.
-  await new Promise((resolve) => setTimeout(resolve, 10))
+  await firstEventSent.promise
   expect(ws.sent).toContain('{"type":"response.created"}')
   expect(ws.data.controllers.size).toBe(1)
 
@@ -360,4 +389,62 @@ test("aborts the upstream stream when the client disconnects", async () => {
 
   expect(cancelled).toBe(true)
   expect(ws.data.controllers.size).toBe(0)
+})
+
+test("a failed turn does not poison the queue for subsequent turns", async () => {
+  // If processing one frame rejects (e.g. `ws.send` throws while the socket is
+  // closing), the shared `ws.data.queue` promise must not stay rejected and
+  // silently drop every later frame for the lifetime of the connection.
+  const ws = createMockWebSocket()
+  let fetchCount = 0
+
+  // While turn 1 is processing, every send throws (simulating a socket that is
+  // tearing down): the relay send throws AND the fallback error send throws, so
+  // processing rejects and would poison `ws.data.queue` without the guard.
+  let failSends = true
+  ws.send = (message: string) => {
+    if (failSends) {
+      throw new Error("send failed during teardown")
+    }
+    ws.sent.push(message)
+    return message.length
+  }
+
+  const handler = createResponsesWebSocketHandler(() => {
+    fetchCount += 1
+    const id = fetchCount
+    return Promise.resolve(
+      new Response(
+        `event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp-${id}"}}\n\n`,
+        { headers: { "content-type": "text/event-stream" } },
+      ),
+    )
+  })
+
+  // Turn 1: every send throws -> processing rejects internally.
+  await handler.message(
+    ws as never,
+    JSON.stringify({
+      input: "one",
+      model: "gpt-test",
+      type: "response.create",
+    }),
+  )
+
+  // The socket has recovered; turn 2 must still be processed and forwarded.
+  failSends = false
+  await handler.message(
+    ws as never,
+    JSON.stringify({
+      input: "two",
+      model: "gpt-test",
+      previous_response_id: "resp-1",
+      type: "response.create",
+    }),
+  )
+
+  expect(fetchCount).toBe(2)
+  expect(ws.sent).toContain(
+    '{"type":"response.completed","response":{"id":"resp-2"}}',
+  )
 })
