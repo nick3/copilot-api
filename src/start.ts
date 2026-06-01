@@ -3,7 +3,6 @@
 import { defineCommand } from "citty"
 import clipboard from "clipboardy"
 import consola from "consola"
-import { serve } from "srvx"
 
 import {
   registerQuotaRefreshSchedulerShutdownCleanup,
@@ -11,6 +10,10 @@ import {
   stopQuotaRefreshScheduler,
 } from "~/lib/quota-refresh-scheduler-runtime"
 import { isMcpHttpEnabledFromEnv } from "~/mcp-http-config"
+import {
+  createResponsesWebSocketHandler,
+  handleResponsesWebSocketUpgrade,
+} from "~/routes/responses/websocket"
 
 import { accountsManager } from "./lib/accounts-manager"
 import { addAccountToRegistry, saveAccountToken } from "./lib/accounts-registry"
@@ -150,6 +153,17 @@ async function setupClaudeCode(
 }
 
 export async function runServer(options: RunServerOptions): Promise<void> {
+  // Fail fast before any config merge, account init, interactive auth, or quota
+  // scheduler work: the server relies on Bun.serve for the Responses WebSocket
+  // transport, so running under Node would otherwise crash with
+  // "ReferenceError: Bun is not defined" only after all that setup.
+  if (typeof Bun === "undefined") {
+    consola.error(
+      "The Responses WebSocket transport requires the Bun runtime. Start the proxy with 'bun' or 'bunx --bun' instead of Node.",
+    )
+    process.exit(1)
+  }
+
   // Work around unjs/consola#357 until a release includes PR #359.
   consola.options.throttle = 0
 
@@ -255,13 +269,25 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   const { createServer } = await import("./server")
   const server = createServer({ enableMcpHttp })
+  const responsesWebSocketHandler = createResponsesWebSocketHandler(
+    server.fetch,
+  )
 
-  serve({
-    fetch: server.fetch,
+  Bun.serve({
     port: options.port,
-    bun: {
-      idleTimeout: 0,
+    idleTimeout: 0,
+    fetch: (request, bunServer) => {
+      const websocketResponse = handleResponsesWebSocketUpgrade(
+        request,
+        bunServer,
+      )
+      if (websocketResponse !== null) {
+        return websocketResponse
+      }
+
+      return server.fetch(request)
     },
+    websocket: responsesWebSocketHandler,
   })
 }
 

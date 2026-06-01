@@ -51,6 +51,7 @@
 ## 功能特性
 
 - **OpenAI 与 Anthropic 双兼容**：以 OpenAI 兼容接口（`/v1/responses`、`/v1/chat/completions`、`/v1/models`、`/v1/embeddings`）和 Anthropic 兼容接口（`/v1/messages`）对外暴露 GitHub Copilot。
+- **Codex Responses WebSocket 兼容**：在 `/v1/responses` 接受 Codex 偏好的 Responses WebSocket transport，并桥接到现有 Responses handler。
 - **Claude 模型优先走 Anthropic 原生路由**：当模型支持 Copilot 原生 `/v1/messages` 端点时，代理会优先使用它，而不是 `/responses` 或 `/chat/completions`，从而保留 Anthropic 风格的 `tool_use` / `tool_result` 流程以及更原生的 Claude 行为。
 - **减少不必要的 Premium 请求**：通过把预热请求路由到 `smallModel`、将 `tool_result` 的后续消息重新并入工具流，以及把恢复的工具轮次视为延续流量而非全新高级交互，减少浪费的 premium 使用量。
 - **分阶段的 `gpt-5.4` 与 `gpt-5.3-codex`**：这些模型可以在更深入推理或调用工具前先发出面向用户的 commentary，让长时间运行的编码操作更容易理解，而不是突然开始一串工具调用。
@@ -476,7 +477,7 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
 - **modelRefreshIntervalHours：** 后台刷新账号模型列表的间隔小时数。设为 `0` 可关闭自动刷新。默认值为 `24`。
 - **sessionAffinityRetentionDays：** session affinity 绑定的保留天数。默认值为 `7`。
 - **useMessagesApi：** 当为 `true`（默认）时，支持 Copilot 原生 `/v1/messages` 端点的 Claude 系模型会走 Messages API 路径。设为 `false` 时，将跳过 Messages API 候选，回退到 `/responses`（如支持）或 `/chat/completions`。
-- **useResponsesApiWebSocket：** 当为 `true`（默认）时，Responses API 请求会对声明了 `ws:/responses` 的模型使用 Copilot WebSocket transport；仅声明 `/responses` 的模型仍走 HTTP。设为 `false` 可禁用 WebSocket 路由。
+- **useResponsesApiWebSocket：** 当为 `true`（默认）时，发往上游 Copilot Responses API 的请求会对声明了 `ws:/responses` 的模型使用 Copilot WebSocket transport；仅声明 `/responses` 的模型仍走 HTTP。设为 `false` 可禁用上游 WebSocket 路由。该配置不会禁用 `/v1/responses` 上面向 Codex 的入站 WebSocket listener。
 - **useResponsesApiWebSearch：** 当为 `true`（默认）时，`/v1/responses` 会保留 `type: "web_search"` 的工具并转发到上游。设为 `false` 则会在发送 Copilot 请求之前将其剥离。
 - **logLevel：** 控制 `logs/*.log` 下 handler 文件日志的详细级别。可选值：`error`、`warn`、`info`、`debug`。默认值为 `info`。如果你需要把 payload 级或 stream 级的调试内容写入文件日志，请显式设置为 `debug`。
 - **anthropicApiKey：** 可选的 Anthropic API key，用于精确的 Claude token 计数（见下文 [精确的 Claude Token 计数](#accurate-claude-token-counting)）。也可通过环境变量 `ANTHROPIC_API_KEY` 设置。未配置时会回退到 GPT tokenizer 估算。
@@ -514,6 +515,7 @@ curl http://localhost:4141/v1/models \
 | 端点 | 方法 | 说明 |
 | --- | --- | --- |
 | `POST /v1/responses` | `POST` | OpenAI 中用于生成模型响应的高级接口。 |
+| `GET /v1/responses` | `WS` | Codex 兼容的 Responses WebSocket transport。 |
 | `POST /v1/chat/completions` | `POST` | 为给定聊天对话创建模型响应。 |
 | `GET /v1/models` | `GET` | 列出当前可用模型。 |
 | `POST /v1/embeddings` | `POST` | 创建表示输入文本的向量嵌入。 |
@@ -706,6 +708,42 @@ bunx --bun @nick3/copilot-api@latest auth
 ```sh
 COPILOT_API_OAUTH_APP=opencode bunx --bun @nick3/copilot-api@latest start
 ```
+
+## 与 Codex CLI 一起使用
+
+Codex 可以把本代理作为 OpenAI 兼容的 Responses API provider 使用。本代理同时支持 Codex 的 HTTP `POST /v1/responses` 路径，以及它偏好的 `GET /v1/responses` WebSocket upgrade。
+
+启动代理：
+
+```sh
+bunx --bun @nick3/copilot-api@latest start
+```
+
+> **注意：** `GET /v1/responses` 上的入站 Codex WebSocket listener 需要 Bun 服务端运行时，因此请使用 `bunx --bun`（或本地安装的 Bun）启动代理。`npx` 路径仅支持轻量级 MCP bridge，不会运行该 WebSocket listener。
+
+在 `~/.codex/config.toml` 中添加 provider：
+
+```toml
+[model_providers.copilot-api]
+name = "copilot-api"
+base_url = "http://localhost:4141/v1"
+wire_api = "responses"
+supports_websockets = true
+
+[profiles.copilot-api]
+model_provider = "copilot-api"
+model = "gpt-5.4"
+```
+
+然后使用该 profile 启动 Codex：
+
+```sh
+codex -p copilot-api
+```
+
+如果你配置了 `auth.apiKeys`，需要在 Codex 的 provider headers 或 bearer-token 配置里使用同一个 key，这样 HTTP 与 WebSocket 请求都能通过认证。仅在排障时，可以在 Codex 中设置 `supports_websockets = false` 来强制走 HTTP fallback。
+
+> **注意：** 通过 GitHub Copilot 使用 Codex 时，目前建议关闭 Codex multi-agent 功能，因为 Copilot 可能会根据最后一条 user-role 消息来计算 Codex 流量。
 
 ## 与 Claude Code 一起使用
 
