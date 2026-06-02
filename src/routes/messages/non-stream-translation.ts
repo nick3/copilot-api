@@ -16,6 +16,7 @@ import {
   type AnthropicAssistantContentBlock,
   type AnthropicAssistantMessage,
   type AnthropicDocumentBlock,
+  type AnthropicMessage,
   type AnthropicMessagesPayload,
   type AnthropicResponse,
   type AnthropicTextBlock,
@@ -124,10 +125,11 @@ function translateAnthropicMessagesToOpenAI(
   capabilities: TranslationCapabilities,
 ): Array<Message> {
   const systemMessages = handleSystemPrompt(payload.system)
-  const otherMessages = payload.messages.flatMap((message) =>
-    message.role === "user" ?
-      handleUserMessage(message, capabilities)
-    : handleAssistantMessage(message, modelId, capabilities),
+  const otherMessages = (payload.messages as Array<AnthropicMessage>).flatMap(
+    (message) =>
+      message.role === "user" ?
+        handleUserMessage(message, capabilities)
+      : handleAssistantMessage(message, modelId, capabilities),
   )
   return [...systemMessages, ...otherMessages]
 }

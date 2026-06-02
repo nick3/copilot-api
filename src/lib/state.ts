@@ -6,6 +6,10 @@ export interface State {
   githubToken?: string
   userName?: string
   copilotToken?: string
+  codexAccessToken?: string
+  codexRefreshToken?: string
+  codexExpiresAt?: number
+  codexAccountId?: string
 
   accountType: AccountType
   vsCodeVersion?: string

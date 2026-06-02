@@ -11,7 +11,8 @@ export const traceIdMiddleware: MiddlewareHandler = async (c, next) => {
     traceId,
     startTime: Date.now(),
     userAgent: c.req.header("user-agent") || "",
-    sessionAffinity: c.req.header("x-session-affinity"),
+    sessionAffinity:
+      c.req.header("x-session-affinity") ?? c.req.header("x-client-request-id"),
     parentSessionId: c.req.header("x-parent-session-id"),
   }
 

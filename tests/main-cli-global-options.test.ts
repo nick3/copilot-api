@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -22,9 +23,21 @@ const packageJson = JSON.parse(
   // JSON.parse() can actually parse buffers
   fs.readFileSync(new URL("../package.json", import.meta.url)),
 ) as PackageJson
+const tempApiHomes: Array<string> = []
+
+function createTempApiHome(): string {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "copilot-api-debug-"))
+  tempApiHomes.push(tempDir)
+  return tempDir
+}
+
+const defaultApiHome = fs.mkdtempSync(
+  path.join(os.tmpdir(), "copilot-api-debug-default-"),
+)
+
 const baseEnv = {
   ...process.env,
-  COPILOT_API_HOME: "",
+  COPILOT_API_HOME: defaultApiHome,
   COPILOT_API_OAUTH_APP: "",
   COPILOT_API_ENTERPRISE_URL: "",
 }
@@ -47,6 +60,13 @@ const runDebugJson = (...args: Array<string>): DebugInfo => {
   return JSON.parse(stdout) as DebugInfo
 }
 
+afterEach(() => {
+  fs.rmSync(defaultApiHome, { recursive: true, force: true })
+  while (tempApiHomes.length > 0) {
+    fs.rmSync(tempApiHomes.pop()!, { recursive: true, force: true })
+  }
+})
+
 describe("root-level global CLI options", () => {
   test("keeps subcommands lazy so MCP can start under Node", () => {
     const source = fs.readFileSync(
@@ -65,10 +85,13 @@ describe("root-level global CLI options", () => {
   })
 
   test("supports --api-home=value before the subcommand", () => {
-    const info = runDebugJson("--api-home=foo")
+    const apiHome = createTempApiHome()
+    const info = runDebugJson(`--api-home=${apiHome}`)
 
-    expect(info.paths.APP_DIR).toBe("foo")
-    expect(info.paths.GITHUB_TOKEN_PATH).toBe(path.join("foo", "github_token"))
+    expect(info.paths.APP_DIR).toBe(apiHome)
+    expect(info.paths.GITHUB_TOKEN_PATH).toBe(
+      path.join(apiHome, "github_token"),
+    )
   })
 
   test("supports --oauth-app=value before the subcommand", () => {
@@ -87,15 +110,16 @@ describe("root-level global CLI options", () => {
   })
 
   test("supports combining root-level global CLI options", () => {
+    const apiHome = createTempApiHome()
     const info = runDebugJson(
-      "--api-home=foo",
+      `--api-home=${apiHome}`,
       "--oauth-app=myapp",
       "--enterprise-url=ghe.example.com",
     )
 
-    expect(info.paths.APP_DIR).toBe("foo")
+    expect(info.paths.APP_DIR).toBe(apiHome)
     expect(info.paths.GITHUB_TOKEN_PATH).toBe(
-      path.join("foo", "myapp", "ent_github_token"),
+      path.join(apiHome, "myapp", "ent_github_token"),
     )
   })
 })

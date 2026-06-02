@@ -11,21 +11,27 @@ import {
   type CompactType,
 } from "~/lib/compact"
 import { getReasoningEffortForModel } from "~/lib/config"
+import { normalizeSdkModelId } from "~/lib/models"
 
 import type {
   AnthropicAssistantContentBlock,
   AnthropicCacheControl,
   AnthropicDocumentBlock,
   AnthropicImageBlock,
+  AnthropicInputMessage,
   AnthropicMessage,
   AnthropicMessagesPayload,
   AnthropicTextBlock,
   AnthropicToolResultBlock,
   AnthropicToolResultContentBlock,
   AnthropicUserContentBlock,
+  AnthropicUserMessage,
 } from "./anthropic-types"
 
 export const TOOL_REFERENCE_TURN_BOUNDARY = "Tool loaded."
+const SYSTEM_REMINDER_START = "<system-reminder>"
+const SYSTEM_REMINDER_END = "</system-reminder>"
+const SUBAGENT_START_HOOK_ADDITIONAL_PREFIX = "SubagentStart hook additional"
 
 const IDE_EXECUTE_CODE_TOOL = "mcp__ide__executeCode"
 const IDE_GET_DIAGNOSTICS_TOOL = "mcp__ide__getDiagnostics"
@@ -37,6 +43,176 @@ type AnthropicAttachmentBlock = AnthropicImageBlock | AnthropicDocumentBlock
 type AnthropicMessageContentBlock =
   | AnthropicUserContentBlock
   | AnthropicAssistantContentBlock
+
+const createTextBlock = (text: string): AnthropicTextBlock => ({
+  type: "text",
+  text,
+})
+
+const appendTextSegment = (base: string, addition: string): string => {
+  if (base.length === 0) {
+    return addition
+  }
+  if (addition.length === 0) {
+    return base
+  }
+
+  return `${base}\n\n${addition}`
+}
+
+const ensureSystemReminderText = (text: string): string => {
+  if (text.startsWith(SYSTEM_REMINDER_START)) {
+    return text
+  }
+
+  return `${SYSTEM_REMINDER_START}\n${text.trim()}\n${SYSTEM_REMINDER_END}`
+}
+
+const normalizeSystemStringForMerge = (
+  text: string,
+): string | Array<AnthropicTextBlock> => {
+  if (!text.startsWith(SUBAGENT_START_HOOK_ADDITIONAL_PREFIX)) {
+    return ensureSystemReminderText(text)
+  }
+
+  const lineBreakMatch = /\r?\n/.exec(text)
+  if (!lineBreakMatch) {
+    return [createTextBlock(ensureSystemReminderText(text))]
+  }
+
+  const firstLine = text.slice(0, lineBreakMatch.index)
+  const rest = text.slice(lineBreakMatch.index + lineBreakMatch[0].length)
+  return [
+    createTextBlock(ensureSystemReminderText(firstLine)),
+    ...(rest.length > 0 ?
+      [createTextBlock(ensureSystemReminderText(rest))]
+    : []),
+  ]
+}
+
+const normalizeSystemContentForMerge = (
+  content: string | Array<AnthropicTextBlock>,
+): string | Array<AnthropicTextBlock> => {
+  if (typeof content === "string") {
+    return normalizeSystemStringForMerge(content)
+  }
+
+  return content.map((block) =>
+    block.text.startsWith(SYSTEM_REMINDER_START) ?
+      block
+    : {
+        ...block,
+        text: ensureSystemReminderText(block.text),
+      },
+  )
+}
+
+const toSystemTextBlocks = (
+  content: string | Array<AnthropicTextBlock>,
+): Array<AnthropicTextBlock> => {
+  return typeof content === "string" ? [createTextBlock(content)] : [...content]
+}
+
+const mergeSystemPromptContent = (
+  current: string | Array<AnthropicTextBlock> | undefined,
+  addition: string | Array<AnthropicTextBlock>,
+): string | Array<AnthropicTextBlock> => {
+  if (current === undefined) {
+    return typeof addition === "string" ? addition : [...addition]
+  }
+
+  if (typeof current === "string" && typeof addition === "string") {
+    return appendTextSegment(current, addition)
+  }
+
+  return [...toSystemTextBlocks(current), ...toSystemTextBlocks(addition)]
+}
+
+const prependSystemContentToUserMessage = (
+  message: AnthropicUserMessage,
+  addition: string | Array<AnthropicTextBlock>,
+): void => {
+  if (typeof message.content === "string" && typeof addition === "string") {
+    message.content = appendTextSegment(addition, message.content)
+    return
+  }
+
+  if (Array.isArray(message.content)) {
+    const lastToolResultIndex = message.content.findLastIndex(
+      (block) => block.type === "tool_result",
+    )
+    if (lastToolResultIndex >= 0) {
+      message.content = [
+        ...message.content.slice(0, lastToolResultIndex + 1),
+        ...toSystemTextBlocks(addition),
+        ...message.content.slice(lastToolResultIndex + 1),
+      ]
+      return
+    }
+  }
+
+  message.content = [
+    ...toSystemTextBlocks(addition),
+    ...(typeof message.content === "string" ?
+      [createTextBlock(message.content)]
+    : message.content),
+  ]
+}
+
+export const normalizeSystemMessages = (
+  payload: AnthropicMessagesPayload,
+): void => {
+  if (
+    !Array.isArray(payload.messages)
+    || !payload.messages.some((msg) => msg.role === "system")
+  ) {
+    return
+  }
+
+  const normalizedMessages: Array<AnthropicMessage> = []
+  let system = payload.system
+
+  for (const message of payload.messages) {
+    if (message.role === "system") {
+      const normalizedContent = normalizeSystemContentForMerge(message.content)
+      const previousMessage = normalizedMessages.at(-1)
+      if (previousMessage?.role === "user") {
+        prependSystemContentToUserMessage(previousMessage, normalizedContent)
+      } else if (!previousMessage) {
+        system = mergeSystemPromptContent(system, normalizedContent)
+      }
+      continue
+    }
+
+    normalizedMessages.push(message)
+  }
+
+  payload.messages = normalizedMessages
+  payload.system = system
+}
+
+const isVersionAtLeast = (
+  version: string,
+  minimumMajor: number,
+  minimumMinor: number,
+): boolean => {
+  const [majorPart, minorPart = "0"] = version.split(".")
+  const major = Number.parseInt(majorPart, 10)
+  const minor = Number.parseInt(minorPart, 10)
+  if (!Number.isInteger(major) || !Number.isInteger(minor)) {
+    return false
+  }
+
+  return (
+    major > minimumMajor || (major === minimumMajor && minor >= minimumMinor)
+  )
+}
+
+const shouldSummarizeThinkingDisplayForModel = (model: string): boolean => {
+  const normalized = normalizeSdkModelId(model)
+  return Boolean(normalized && isVersionAtLeast(normalized.version, 4, 7))
+}
+
 type IndexedAttachment = {
   attachment: AnthropicAttachmentBlock
   order: number
@@ -58,7 +234,7 @@ const getBlockCacheControl = (
 }
 
 export const getLastMessageContentCacheControl = (
-  lastMessage: AnthropicMessage | undefined,
+  lastMessage: AnthropicInputMessage | undefined,
 ): AnthropicCacheControl | undefined => {
   if (!lastMessage || !Array.isArray(lastMessage.content)) {
     return undefined
@@ -91,7 +267,7 @@ export const applyLastMessageCacheControl = (
   lastBlock.cache_control = { ...cacheControl }
 }
 
-const getCompactCandidateText = (message: AnthropicMessage): string => {
+const getCompactCandidateText = (message: AnthropicInputMessage): string => {
   if (message.role !== "user") {
     return ""
   }
@@ -109,7 +285,7 @@ const getCompactCandidateText = (message: AnthropicMessage): string => {
     .join("\n\n")
 }
 
-const isCompactMessage = (lastMessage: AnthropicMessage): boolean => {
+const isCompactMessage = (lastMessage: AnthropicInputMessage): boolean => {
   const text = getCompactCandidateText(lastMessage)
   if (!text) {
     return false
@@ -123,7 +299,7 @@ const isCompactMessage = (lastMessage: AnthropicMessage): boolean => {
 }
 
 const isCompactAutoContinueMessage = (
-  lastMessage: AnthropicMessage,
+  lastMessage: AnthropicInputMessage,
 ): boolean => {
   const text = getCompactCandidateText(lastMessage)
   return (
@@ -655,7 +831,7 @@ export const prepareMessagesApiPayload = (
     if (!hasThinking) {
       payload.thinking.display = "summarized"
     }
-    if (payload.model === "claude-opus-4.7") {
+    if (shouldSummarizeThinkingDisplayForModel(payload.model)) {
       payload.thinking.display = "summarized"
     }
     let effort = getReasoningEffortForModel(payload.model)

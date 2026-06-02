@@ -39,7 +39,7 @@ import {
 import {
   forwardProviderChatCompletions,
   forwardProviderMessages,
-} from "~/services/providers/anthropic-proxy"
+} from "~/services/providers/provider-proxy"
 
 const logger = createHandlerLogger("provider-messages-handler")
 

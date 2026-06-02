@@ -6,9 +6,14 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import { fileURLToPath } from "node:url"
 
+import { getRawProviderConfig, listEnabledProviders } from "./lib/config"
 import { PATHS } from "./lib/paths"
 
 interface DebugInfo {
+  providers: {
+    codexConfigured: boolean
+    enabled: Array<string>
+  }
   version: string
   runtime: {
     name: string
@@ -18,6 +23,7 @@ interface DebugInfo {
   }
   paths: {
     APP_DIR: string
+    CONFIG_PATH: string
     GITHUB_TOKEN_PATH: string
   }
   tokenExists: boolean
@@ -54,12 +60,12 @@ function getRuntimeInfo() {
   }
 }
 
-async function checkTokenExists(): Promise<boolean> {
+async function checkFileExists(filePath: string): Promise<boolean> {
   try {
-    const stats = await fs.stat(PATHS.GITHUB_TOKEN_PATH)
+    const stats = await fs.stat(filePath)
     if (!stats.isFile()) return false
 
-    const content = await fs.readFile(PATHS.GITHUB_TOKEN_PATH, "utf8")
+    const content = await fs.readFile(filePath, "utf8")
     return content.trim().length > 0
   } catch {
     return false
@@ -69,14 +75,19 @@ async function checkTokenExists(): Promise<boolean> {
 async function getDebugInfo(): Promise<DebugInfo> {
   const [version, tokenExists] = await Promise.all([
     getPackageVersion(),
-    checkTokenExists(),
+    checkFileExists(PATHS.GITHUB_TOKEN_PATH),
   ])
 
   return {
+    providers: {
+      codexConfigured: getRawProviderConfig("codex") !== null,
+      enabled: listEnabledProviders(),
+    },
     version,
     runtime: getRuntimeInfo(),
     paths: {
       APP_DIR: PATHS.APP_DIR,
+      CONFIG_PATH: PATHS.CONFIG_PATH,
       GITHUB_TOKEN_PATH: PATHS.GITHUB_TOKEN_PATH,
     },
     tokenExists,
@@ -89,11 +100,16 @@ function printDebugInfoPlain(info: DebugInfo): void {
 Version: ${info.version}
 Runtime: ${info.runtime.name} ${info.runtime.version} (${info.runtime.platform} ${info.runtime.arch})
 
+Providers:
+- enabled: ${info.providers.enabled.join(", ") || "none"}
+- codex configured: ${info.providers.codexConfigured ? "Yes" : "No"}
+
 Paths:
 - APP_DIR: ${info.paths.APP_DIR}
+- CONFIG_PATH: ${info.paths.CONFIG_PATH}
 - GITHUB_TOKEN_PATH: ${info.paths.GITHUB_TOKEN_PATH}
 
-Token exists: ${info.tokenExists ? "Yes" : "No"}`)
+GitHub token exists: ${info.tokenExists ? "Yes" : "No"}`)
 }
 
 function printDebugInfoJson(info: DebugInfo): void {

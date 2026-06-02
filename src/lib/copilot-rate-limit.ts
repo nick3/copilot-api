@@ -136,7 +136,7 @@ export const logCopilotQuotaSnapshots = (
 const logCopilotRateLimitUsage = (usage: CopilotRateLimitUsage): void => {
   const d = new Date(usage.resetAt)
   const dateStr = Number.isNaN(d.getTime()) ? usage.resetAt : d.toLocaleString()
-  consola.info(
+  consola.log(
     `Copilot ${usage.type} quota remaining: ${usage.remaining}, resets at: ${dateStr}`,
   )
 }

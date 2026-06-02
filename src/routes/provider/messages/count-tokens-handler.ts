@@ -7,6 +7,7 @@ import { createFallbackModel } from "~/lib/provider-model"
 import { getTokenCount } from "~/lib/tokenizer"
 import { type AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
 import { translateToOpenAI } from "~/routes/messages/non-stream-translation"
+import { normalizeSystemMessages } from "~/routes/messages/preprocess"
 
 const logger = createHandlerLogger("provider-count-tokens-handler")
 
@@ -40,6 +41,7 @@ export async function handleProviderCountTokensForProvider(
   },
 ): Promise<Response> {
   const { payload: anthropicPayload, provider } = options
+  normalizeSystemMessages(anthropicPayload)
   const providerConfig = resolveProviderConfig(c, provider)
   if (!providerConfig) {
     return c.json(
@@ -71,7 +73,10 @@ export async function handleProviderCountTokensForProvider(
   const modelId = anthropicPayload.model.trim()
   const modelConfig = providerConfig.models?.[modelId]
   const translationOptions =
-    providerConfig.type === "openai-compatible" ?
+    (
+      providerConfig.type === "openai-compatible"
+      || providerConfig.type === "openai-responses"
+    ) ?
       {
         supportPdf: modelConfig?.supportPdf,
         toolContentSupportType: modelConfig?.toolContentSupportType ?? [],

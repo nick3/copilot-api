@@ -7,12 +7,12 @@
     {
       "name": "agent-inject",
       "description": "Inject copilot-api rules and SubagentStart agent context",
-      "source": "./claude-plugin/agent-inject"
+      "source": "./plugin/claude/agent-inject"
     },
     {
       "name": "tool-search",
       "description": "Register the tool_search MCP bridge for GPT Responses deferred tools",
-      "source": "./claude-plugin/tool-search"
+      "source": "./plugin/claude/tool-search"
     }
   ]
 }

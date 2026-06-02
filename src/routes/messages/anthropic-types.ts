@@ -2,7 +2,7 @@
 
 export interface AnthropicMessagesPayload {
   model: string
-  messages: Array<AnthropicMessage>
+  messages: Array<AnthropicInputMessage>
   cache_control?: AnthropicCacheControl | null
   system?: string | Array<AnthropicTextBlock>
   stop_sequences?: Array<string>
@@ -119,7 +119,13 @@ export interface AnthropicAssistantMessage {
   content: string | Array<AnthropicAssistantContentBlock>
 }
 
+export interface AnthropicSystemMessage {
+  role: "system"
+  content: string | Array<AnthropicTextBlock>
+}
+
 export type AnthropicMessage = AnthropicUserMessage | AnthropicAssistantMessage
+export type AnthropicInputMessage = AnthropicMessage | AnthropicSystemMessage
 
 export interface AnthropicTool {
   name: string

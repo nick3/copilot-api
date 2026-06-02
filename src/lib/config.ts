@@ -38,13 +38,16 @@ export interface AppConfig {
   accountAffinity?: boolean
   /** @deprecated */
   apiKey?: string
+  /** @deprecated use useResponsesApiContextManagement */
   responsesApiContextManagementModels?: Array<string>
+  useResponsesApiContextManagement?: boolean
   modelReasoningEfforts?: Record<
     string,
     "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
   >
   modelAliases?: Record<string, { target: string; allowOriginal?: boolean }>
   allowOriginalModelNamesForAliases?: boolean
+  modelMappings?: Record<string, string>
   forceAgent?: boolean
   compactUseSmallModel?: boolean
   messageStartInputTokensFallback?: boolean
@@ -72,8 +75,11 @@ export interface ModelConfig {
 
 export const PROVIDER_TYPE_ANTHROPIC = "anthropic" as const
 
-export type ProviderType = "anthropic" | "openai-compatible"
-export type ProviderAuthType = "authorization" | "x-api-key"
+export type ProviderAuthType = "authorization" | "oauth2" | "x-api-key"
+export type ProviderType =
+  | "anthropic"
+  | "openai-compatible"
+  | "openai-responses"
 export type ToolContentSupportType = "array" | "image" | "pdf"
 
 export interface ProviderConfig {
@@ -147,7 +153,7 @@ const defaultConfig: AppConfig = {
   },
   smallModel: "gpt-5-mini",
   accountAffinity: true,
-  responsesApiContextManagementModels: [],
+  useResponsesApiContextManagement: true,
   modelReasoningEfforts: {
     "gpt-5-mini": "low",
     "gpt-5.3-codex": "xhigh",
@@ -156,6 +162,7 @@ const defaultConfig: AppConfig = {
     "gpt-5.5": "xhigh",
   },
   allowOriginalModelNamesForAliases: false,
+  modelMappings: {},
   forceAgent: false,
   compactUseSmallModel: true,
   messageStartInputTokensFallback: false,
@@ -285,6 +292,19 @@ function readConfigFromDisk(): AppConfig {
     consola.error("Failed to read config file, using default config", error)
     return defaultConfig
   }
+}
+
+function writeConfigToDisk(config: AppConfig): void {
+  fs.mkdirSync(PATHS.APP_DIR, { recursive: true })
+  fs.writeFileSync(
+    PATHS.CONFIG_PATH,
+    `${JSON.stringify(config, null, 2)}\n`,
+    "utf8",
+  )
+}
+
+function reloadConfig(): AppConfig {
+  return mergeConfigWithDefaults()
 }
 
 function mergeDefaultConfig(config: AppConfig): {
@@ -731,6 +751,61 @@ export function getExtraPromptForModel(model: string): string {
   return fallback ?? ""
 }
 
+export function getModelMappings(): Record<string, string> {
+  const config = getConfig()
+  const modelMappings = config.modelMappings
+  if (!modelMappings) {
+    return { ...defaultConfig.modelMappings }
+  }
+
+  const validMappings: Record<string, string> = {}
+  for (const [sourceModel, targetModel] of Object.entries(modelMappings)) {
+    if (
+      !sourceModel
+      || typeof targetModel !== "string"
+      || targetModel.length === 0
+    ) {
+      continue
+    }
+    validMappings[sourceModel] = targetModel
+  }
+
+  return validMappings
+}
+
+function validateModelMappings(
+  modelMappings: Record<string, string>,
+): Record<string, string> {
+  const validatedMappings: Record<string, string> = {}
+  for (const [sourceModel, targetModel] of Object.entries(modelMappings)) {
+    if (!sourceModel || !targetModel) {
+      throw new Error(
+        "Each model mapping must use non-empty source and target values.",
+      )
+    }
+    validatedMappings[sourceModel] = targetModel
+  }
+
+  return validatedMappings
+}
+
+export function setModelMappings(
+  modelMappings: Record<string, string>,
+): Record<string, string> {
+  const nextConfig = {
+    ...readConfigFromDisk(),
+    modelMappings: validateModelMappings(modelMappings),
+  }
+
+  writeConfigToDisk(nextConfig)
+  cachedConfig = reloadConfig()
+  return getModelMappings()
+}
+
+export function resolveMappedModel(model: string): string {
+  return getModelMappings()[model] ?? model
+}
+
 export function getSmallModel(): string {
   const config = getConfig()
   const model = config.smallModel ?? "gpt-5-mini"
@@ -794,17 +869,9 @@ export function shouldCompactUseSmallModel(): boolean {
   return config.compactUseSmallModel ?? true
 }
 
-export function getResponsesApiContextManagementModels(): Array<string> {
+export function isResponsesApiContextManagementEnabled(): boolean {
   const config = getConfig()
-  return (
-    config.responsesApiContextManagementModels
-    ?? defaultConfig.responsesApiContextManagementModels
-    ?? []
-  )
-}
-
-export function isResponsesApiContextManagementModel(model: string): boolean {
-  return getResponsesApiContextManagementModels().includes(model)
+  return config.useResponsesApiContextManagement ?? true
 }
 
 export function getReasoningEffortForModel(
@@ -835,7 +902,7 @@ export function normalizeProviderBaseUrl(url: string): string {
 function getDefaultProviderAuthType(
   providerType: ProviderType,
 ): ProviderAuthType {
-  return providerType === "openai-compatible" ? "authorization" : "x-api-key"
+  return providerType === "anthropic" ? "x-api-key" : "authorization"
 }
 
 export function resolveProviderAuthType(
@@ -843,12 +910,24 @@ export function resolveProviderAuthType(
   authType: string | undefined,
   providerType: ProviderType,
 ): ProviderAuthType {
+  const defaultAuthType = getDefaultProviderAuthType(providerType)
   if (authType === undefined) {
-    return getDefaultProviderAuthType(providerType)
+    return defaultAuthType
   }
 
   if (authType === "x-api-key") {
     return "x-api-key"
+  }
+
+  if (authType === "oauth2") {
+    if (providerName === "codex") {
+      return authType
+    }
+
+    consola.warn(
+      `Provider ${providerName} has authType 'oauth2', which is only supported by the builtin codex provider, falling back to ${defaultAuthType}`,
+    )
+    return defaultAuthType
   }
 
   if (authType === "authorization") {
@@ -856,9 +935,55 @@ export function resolveProviderAuthType(
   }
 
   consola.warn(
-    `Provider ${providerName} has invalid authType '${authType}', falling back to ${getDefaultProviderAuthType(providerType)}`,
+    `Provider ${providerName} has invalid authType '${authType}', falling back to ${defaultAuthType}`,
   )
-  return getDefaultProviderAuthType(providerType)
+  return defaultAuthType
+}
+
+function isProviderApiKeyRequired(
+  providerName: string,
+  authType: ProviderAuthType,
+): boolean {
+  return !(providerName === "codex" && authType === "oauth2")
+}
+
+export function getRawProviderConfig(name: string): ProviderConfig | null {
+  const providerName = name.trim()
+  if (!providerName) {
+    return null
+  }
+
+  const config = getConfig()
+  return config.providers?.[providerName] ?? null
+}
+
+export function setProviderConfig(
+  name: string,
+  provider: ProviderConfig,
+): ProviderConfig {
+  const providerName = name.trim()
+  if (!providerName) {
+    throw new Error("Provider name must be a non-empty string")
+  }
+
+  if (isReservedProviderName(providerName)) {
+    throw new Error(
+      `Provider ${providerName} is reserved and cannot be configured in config.providers`,
+    )
+  }
+
+  const editableConfig = readConfigFromDisk()
+  const nextConfig = {
+    ...editableConfig,
+    providers: {
+      ...editableConfig.providers,
+      [providerName]: provider,
+    },
+  }
+
+  writeConfigToDisk(nextConfig)
+  cachedConfig = reloadConfig()
+  return getRawProviderConfig(providerName) ?? provider
 }
 
 export function getProviderConfig(name: string): ResolvedProviderConfig | null {
@@ -867,8 +992,14 @@ export function getProviderConfig(name: string): ResolvedProviderConfig | null {
     return null
   }
 
-  const config = getConfig()
-  const provider = config.providers?.[providerName]
+  if (isReservedProviderName(providerName)) {
+    consola.warn(
+      `Provider ${providerName} is reserved and cannot be configured in config.providers`,
+    )
+    return null
+  }
+
+  const provider = getRawProviderConfig(providerName)
   if (!provider) {
     return null
   }
@@ -878,7 +1009,11 @@ export function getProviderConfig(name: string): ResolvedProviderConfig | null {
   }
 
   const type = provider.type ?? PROVIDER_TYPE_ANTHROPIC
-  if (type !== PROVIDER_TYPE_ANTHROPIC && type !== "openai-compatible") {
+  if (
+    type !== PROVIDER_TYPE_ANTHROPIC
+    && type !== "openai-compatible"
+    && type !== "openai-responses"
+  ) {
     consola.warn(
       `Provider ${providerName} is ignored because type '${type}' is not supported`,
     )
@@ -886,15 +1021,22 @@ export function getProviderConfig(name: string): ResolvedProviderConfig | null {
   }
 
   const baseUrl = normalizeProviderBaseUrl(provider.baseUrl ?? "")
-  const apiKey = (provider.apiKey ?? "").trim()
   const authType = resolveProviderAuthType(
     providerName,
     provider.authType,
     type,
   )
-  if (!baseUrl || !apiKey) {
+  const apiKey = (provider.apiKey ?? "").trim()
+  const missingFields = [
+    ...(!baseUrl ? ["baseUrl"] : []),
+    ...(isProviderApiKeyRequired(providerName, authType) && !apiKey ?
+      ["apiKey"]
+    : []),
+  ]
+
+  if (missingFields.length > 0) {
     consola.warn(
-      `Provider ${providerName} is enabled but missing baseUrl or apiKey`,
+      `Provider ${providerName} is enabled but missing ${missingFields.join(" or ")}`,
     )
     return null
   }
@@ -914,6 +1056,10 @@ export function listEnabledProviders(): Array<string> {
   const config = getConfig()
   const providerNames = Object.keys(config.providers ?? {})
   return providerNames.filter((name) => getProviderConfig(name) !== null)
+}
+
+export function isReservedProviderName(name: string): boolean {
+  return name.trim() === "copilot"
 }
 
 export function isMessagesApiEnabled(): boolean {

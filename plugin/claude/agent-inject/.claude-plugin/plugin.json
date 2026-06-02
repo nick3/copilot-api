@@ -1,7 +1,7 @@
 {
   "name": "agent-inject",
   "description": "Inject copilot-api rules and SubagentStart agent context",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "author": {
     "name": "copilot-api maintainers"
   }

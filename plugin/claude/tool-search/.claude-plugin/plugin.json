@@ -1,7 +1,7 @@
 {
   "name": "tool-search",
   "description": "Register the copilot-api tool_search MCP bridge for Claude Code",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": {
     "name": "copilot-api maintainers"
   }

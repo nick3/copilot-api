@@ -479,7 +479,7 @@ test("POST /api/admin/config rejects invalid provider authType", async () => {
 
     const body = (await res.json()) as { error?: { message?: string } }
     expect(body.error?.message).toBe(
-      'providers.custom.authType must be one of: "authorization", "x-api-key"',
+      'providers.custom.authType must be one of: "authorization", "oauth2", "x-api-key"',
     )
   })
 })

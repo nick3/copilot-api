@@ -111,6 +111,7 @@ import {
   getCompactType,
   getLastMessageContentCacheControl,
   mergeToolResultForClaude,
+  normalizeSystemMessages,
   prepareMessagesApiPayload,
   sanitizeIdeTools,
   stripToolReferenceTurnBoundary,
@@ -360,6 +361,7 @@ export async function handleCompletion(c: Context) {
   const path = new URL(c.req.url, "http://local").pathname
   const { ip: clientIp, source: clientIpSource } = getClientIpInfo(c)
   const userAgent = c.req.header("user-agent") ?? undefined
+  normalizeSystemMessages(anthropicPayload)
   sanitizeIdeTools(anthropicPayload)
   debugJson(logger, "Anthropic request payload:", anthropicPayload)
 

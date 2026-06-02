@@ -1,6 +1,7 @@
 import type { ResolvedProviderConfig } from "~/lib/config"
 import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
 import type { ChatCompletionsPayload } from "~/services/copilot/create-chat-completions"
+import type { ResponsesPayload } from "~/services/copilot/create-responses"
 
 const SHARED_FORWARDABLE_HEADERS = ["accept", "user-agent"] as const
 
@@ -27,10 +28,10 @@ export function buildProviderUpstreamHeaders(
   requestHeaders: Headers,
 ): Record<string, string> {
   const authHeaders: Record<string, string> = {}
-  if (providerConfig.authType === "authorization") {
-    authHeaders.authorization = `Bearer ${providerConfig.apiKey}`
-  } else {
+  if (providerConfig.authType === "x-api-key") {
     authHeaders["x-api-key"] = providerConfig.apiKey
+  } else {
+    authHeaders.authorization = `Bearer ${providerConfig.apiKey}`
   }
 
   const headers: Record<string, string> = {
@@ -62,6 +63,7 @@ export function buildProviderUpstreamHeaders(
 
 export function createProviderProxyResponse(
   upstreamResponse: Response,
+  body?: ReadableStream<Uint8Array> | null,
 ): Response {
   const headers = new Headers(upstreamResponse.headers)
 
@@ -69,7 +71,7 @@ export function createProviderProxyResponse(
     headers.delete(headerName)
   }
 
-  return new Response(upstreamResponse.body, {
+  return new Response(body ?? upstreamResponse.body, {
     headers,
     status: upstreamResponse.status,
     statusText: upstreamResponse.statusText,
@@ -96,6 +98,18 @@ export async function forwardProviderChatCompletions(
   fetchImpl: typeof fetch = fetch,
 ): Promise<Response> {
   return await fetchImpl(`${providerConfig.baseUrl}/v1/chat/completions`, {
+    method: "POST",
+    headers: buildProviderUpstreamHeaders(providerConfig, requestHeaders),
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function forwardProviderResponses(
+  providerConfig: ResolvedProviderConfig,
+  payload: ResponsesPayload,
+  requestHeaders: Headers,
+): Promise<Response> {
+  return await fetch(`${providerConfig.baseUrl}/v1/responses`, {
     method: "POST",
     headers: buildProviderUpstreamHeaders(providerConfig, requestHeaders),
     body: JSON.stringify(payload),

@@ -387,7 +387,7 @@ type ProviderConfigField = (typeof PROVIDER_CONFIG_FIELDS)[number]
 
 type ProviderAuthTypeValue = NonNullable<ProviderConfig["authType"]>
 
-const PROVIDER_AUTH_TYPES = ["authorization", "x-api-key"] as const
+const PROVIDER_AUTH_TYPES = ["authorization", "oauth2", "x-api-key"] as const
 
 const PROVIDER_CONFIG_KEYS = new Set<ProviderConfigField>(
   PROVIDER_CONFIG_FIELDS,

@@ -19,6 +19,7 @@ import { type Model } from "~/services/copilot/get-models"
 import { findEndpointModel } from "../../lib/models"
 import { type AnthropicMessagesPayload } from "./anthropic-types"
 import { translateToOpenAI } from "./non-stream-translation"
+import { normalizeSystemMessages } from "./preprocess"
 
 const getProviderConfigResolver = (c: Context): typeof getProviderConfig => {
   const resolver = c.get("providerConfigResolver" as never) as
@@ -100,6 +101,8 @@ async function countTokensViaAnthropic(
 export async function handleCountTokens(c: Context) {
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
   anthropicPayload.model = resolveModelAlias(anthropicPayload.model)
+  normalizeSystemMessages(anthropicPayload)
+
   const providerModelAlias = resolveExistingProviderModelAlias(
     anthropicPayload.model,
     getProviderConfigResolver(c),

@@ -196,7 +196,20 @@ const buildMessagesHeaders = ({
 
   prepareForCompact(headers, options?.compactType)
 
-  if (shouldUseMessageProxyHeaders(payload)) {
+  // claude-opus-4.8 is excluded: Copilot's upstream WAF returns a generic
+  // "Access to this endpoint is forbidden" 403 whenever a request carries
+  // the Claude-Code-style user-agent without a `copilot-integration-id`
+  // header. The exact same header set is accepted on claude-opus-4.7, so
+  // the gate is a model-id rollout gap on Copilot's side. Skipping the
+  // rewrite for 4.8 keeps the default Copilot identity
+  // (copilot-integration-id: vscode-chat + GitHubCopilotChat UA +
+  // conversation-agent intent) in place; that path is 200. Remove this
+  // skip once Copilot's upstream accepts the Claude-Code identity on 4.8.
+  // Probed 2026-05-29.
+  if (
+    shouldUseMessageProxyHeaders(payload)
+    && payload.model !== "claude-opus-4.8"
+  ) {
     prepareMessageProxyHeaders(headers)
   }
 

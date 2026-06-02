@@ -3,10 +3,11 @@ import { type Context, Hono } from "hono"
 import { getProviderConfig, type ResolvedProviderConfig } from "~/lib/config"
 import { forwardError } from "~/lib/error"
 import { createHandlerLogger } from "~/lib/logger"
+import { getModels as getCodexModels } from "~/services/codex/get-models"
 import {
   createProviderProxyResponse,
   forwardProviderModels,
-} from "~/services/providers/anthropic-proxy"
+} from "~/services/providers/provider-proxy"
 
 const logger = createHandlerLogger("provider-models-handler")
 
@@ -44,6 +45,15 @@ providerModelRoutes.get("/", async (c) => {
         },
         404,
       )
+    }
+
+    if (providerConfig.name === "codex") {
+      const models = getCodexModels()
+      return c.json({
+        object: "list",
+        data: models.data,
+        has_more: false,
+      })
     }
 
     const upstreamResponse = await forwardProviderModels(

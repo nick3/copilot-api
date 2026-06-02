@@ -1,6 +1,10 @@
 import type {
   ResponseContextManagementCompactionItem,
+  ResponseFunctionCallOutputItem,
+  ResponseInputContent,
+  ResponseInputImage,
   ResponseInputItem,
+  ResponseInputMessage,
   ResponsesPayload,
   ResponsesTransport,
 } from "~/services/copilot/create-responses"
@@ -8,16 +12,17 @@ import type {
 import { COMPACT_REQUEST, type CompactType } from "~/lib/compact"
 import {
   isForceAgentEnabled,
-  isResponsesApiContextManagementModel as isConfiguredResponsesApiContextManagementModel,
+  isResponsesApiContextManagementEnabled as isConfiguredResponsesApiContextManagementEnabled,
   isResponsesApiWebSocketEnabled as isConfiguredResponsesApiWebSocketEnabled,
 } from "~/lib/config"
 
 export const RESPONSES_ENDPOINT = "/responses"
 export const RESPONSES_WS_ENDPOINT = "ws:/responses"
+export const DEFAULT_RESPONSES_COMPACT_THRESHOLD_RATIO = 0.9
 
 export const responsesUtilsDependencies = {
-  isResponsesApiContextManagementModel:
-    isConfiguredResponsesApiContextManagementModel,
+  isResponsesApiContextManagementEnabled:
+    isConfiguredResponsesApiContextManagementEnabled,
   isResponsesApiWebSocketEnabled: isConfiguredResponsesApiWebSocketEnabled,
 }
 
@@ -89,14 +94,188 @@ export const hasVisionInput = (payload: ResponsesPayload): boolean => {
   return values.some((item) => containsVisionContent(item))
 }
 
-export const resolveResponsesCompactThreshold = (
-  maxPromptTokens?: number,
+const DATA_URL_PREFIX = "data:"
+// Static 96x32 PNG reading "Image too large / Redacted".
+const REDACTED_IMAGE_PLACEHOLDER_DATA_URL =
+  "data:image/png;base64,"
+  + [
+    "iVBORw0KGgoAAAANSUhEUgAAAGAAAAAgCAMAAADaHo1mAAADAFBMVEX///8fKTfR1dsAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "AAAAAAAAAAAAAAAAAAAAAACae8QWAAAAvElEQVR42u1WixKAIAhj/f9Hdz2BXJiVed3pVSYtpgwsGSo3GaRq6wSd4F8EyIJx",
+    "ydSUAMB8il51sHT2fiVQu8czguQwXWAyFvswIJhmoS9gmzYlcFiHj1aAgzcJVgCyguYhAhNZmMhYQZs1EJnnIAqKiuHjSrZT",
+    "ucSQ4s8JkKDDIYr3IuR8vEWgqroKP9b1bYKk2wfgeVmqATQLXdXamsXdEKkz3QXEEeTTuWWImMhW6qci94/+hwSVf99HqVoD",
+    "OAuj2SEAAAAASUVORK5CYII=",
+  ].join("")
+
+export const sanitizeOversizedInputImages = (
+  payload: ResponsesPayload,
+  maxPromptImageSize?: number,
 ): number => {
-  if (typeof maxPromptTokens === "number" && maxPromptTokens > 0) {
-    return Math.floor(maxPromptTokens * 0.9)
+  const limit =
+    typeof maxPromptImageSize === "number" && maxPromptImageSize > 0 ?
+      maxPromptImageSize
+    : undefined
+
+  if (limit === undefined || !Array.isArray(payload.input)) {
+    return 0
   }
 
-  return 50000
+  return sanitizeInputImages(
+    payload.input,
+    (image) => image.decodedBytes > limit,
+  )
+}
+
+export const sanitizeAllInputImages = (payload: ResponsesPayload): number => {
+  if (!Array.isArray(payload.input)) {
+    return 0
+  }
+
+  return sanitizeInputImages(payload.input, () => true)
+}
+
+interface InputImageDataUrl {
+  decodedBytes: number
+  record: ResponseInputImage
+}
+
+const sanitizeInputImages = (
+  input: Array<ResponseInputItem>,
+  shouldReplace: (image: InputImageDataUrl) => boolean,
+): number => {
+  let count = 0
+  for (const image of collectInputImageDataUrls(input)) {
+    if (!shouldReplace(image)) {
+      continue
+    }
+
+    replaceInputImageWithPlaceholder(image)
+    count += 1
+  }
+
+  return count
+}
+
+const collectInputImageDataUrls = (
+  input: Array<ResponseInputItem>,
+  images: Array<InputImageDataUrl> = [],
+): Array<InputImageDataUrl> => {
+  for (const item of input) {
+    collectInputItemImageDataUrls(item, images)
+  }
+
+  return images
+}
+
+const collectInputItemImageDataUrls = (
+  item: ResponseInputItem,
+  images: Array<InputImageDataUrl>,
+): void => {
+  if (isResponseInputMessage(item)) {
+    collectContentImageDataUrls(item.content, images)
+  } else if (isResponseFunctionCallOutputItem(item)) {
+    collectContentImageDataUrls(item.output, images)
+  }
+}
+
+const collectContentImageDataUrls = (
+  content: string | Array<ResponseInputContent> | undefined,
+  images: Array<InputImageDataUrl>,
+): void => {
+  if (!Array.isArray(content)) {
+    return
+  }
+
+  for (const block of content) {
+    const image = getInputImageDataUrl(block)
+    if (image) {
+      images.push(image)
+    }
+  }
+}
+
+const getInputImageDataUrl = (
+  content: ResponseInputContent,
+): InputImageDataUrl | null => {
+  if (!isResponseInputImage(content) || typeof content.image_url !== "string") {
+    return null
+  }
+
+  const imageUrl = content.image_url
+  if (!imageUrl.startsWith(DATA_URL_PREFIX)) {
+    return null
+  }
+
+  const decodedBytes = estimateDataUrlByteLength(imageUrl)
+
+  return {
+    decodedBytes,
+    record: content,
+  }
+}
+
+const estimateDataUrlByteLength = (value: string): number => {
+  return Math.max(0, Math.floor((value.length * 3) / 4))
+}
+
+const replaceInputImageWithPlaceholder = (image: InputImageDataUrl): void => {
+  image.record.type = "input_image"
+  image.record.image_url = REDACTED_IMAGE_PLACEHOLDER_DATA_URL
+  image.record.detail = "low"
+  delete image.record.file_id
+}
+
+const isResponseInputMessage = (
+  item: ResponseInputItem,
+): item is ResponseInputMessage => {
+  return (
+    typeof item === "object"
+    && item !== null
+    && "role" in item
+    && typeof item.role === "string"
+  )
+}
+
+const isResponseFunctionCallOutputItem = (
+  item: ResponseInputItem,
+): item is ResponseFunctionCallOutputItem => {
+  return (
+    typeof item === "object"
+    && item !== null
+    && "type" in item
+    && item.type === "function_call_output"
+  )
+}
+
+const isResponseInputImage = (
+  content: ResponseInputContent,
+): content is ResponseInputImage => {
+  return (
+    typeof content === "object"
+    && content !== null
+    && "type" in content
+    && content.type === "input_image"
+  )
+}
+
+export const resolveResponsesCompactThreshold = (
+  maxPromptTokens?: number,
+  compactThresholdRatio = DEFAULT_RESPONSES_COMPACT_THRESHOLD_RATIO,
+): number => {
+  if (typeof maxPromptTokens === "number" && maxPromptTokens > 0) {
+    return Math.floor(maxPromptTokens * compactThresholdRatio)
+  }
+
+  return 200_000 * compactThresholdRatio
 }
 
 const createCompactionContextManagement = (
@@ -111,21 +290,18 @@ const createCompactionContextManagement = (
 export const applyResponsesApiContextManagement = (
   payload: ResponsesPayload,
   maxPromptTokens?: number,
+  compactThresholdRatio = DEFAULT_RESPONSES_COMPACT_THRESHOLD_RATIO,
 ): void => {
   if (payload.context_management !== undefined) {
     return
   }
 
-  if (
-    !responsesUtilsDependencies.isResponsesApiContextManagementModel(
-      payload.model,
-    )
-  ) {
+  if (!responsesUtilsDependencies.isResponsesApiContextManagementEnabled()) {
     return
   }
 
   payload.context_management = createCompactionContextManagement(
-    resolveResponsesCompactThreshold(maxPromptTokens),
+    resolveResponsesCompactThreshold(maxPromptTokens, compactThresholdRatio),
   )
 }
 
