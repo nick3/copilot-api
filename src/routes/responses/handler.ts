@@ -3,12 +3,18 @@ import type { Context } from "hono"
 import { streamSSE } from "hono/streaming"
 import { randomUUID } from "node:crypto"
 
+import type { SubagentMarker } from "~/lib/subagent"
+
 import {
   accountsManager,
   type AccountSelectionReason,
 } from "~/lib/accounts-manager"
 import { awaitApproval } from "~/lib/approval"
-import { getAliasTargetSet, isResponsesApiWebSearchEnabled } from "~/lib/config"
+import {
+  getAliasTargetSet,
+  isResponsesApiWebSearchEnabled,
+  resolveMappedModel,
+} from "~/lib/config"
 import {
   computeDiff,
   extractErrorObservability,
@@ -17,6 +23,7 @@ import {
   toAccountContext,
 } from "~/lib/handler-utils"
 import { createHandlerLogger, debugJson, debugJsonTail } from "~/lib/logger"
+import { parseProviderModelAlias } from "~/lib/provider-model"
 import { checkRateLimit } from "~/lib/rate-limit"
 import {
   extractResponsesUsageFromResult,
@@ -33,6 +40,7 @@ import {
   resolveAffinityKey,
   type AffinityKeySource,
 } from "~/lib/utils"
+import { handleProviderResponsesForProvider } from "~/routes/provider/responses/handler"
 import { flushPendingCapture } from "~/services/copilot/copilot-fetch"
 import {
   createResponses,
@@ -52,6 +60,7 @@ import {
   getStreamChunkFields,
   isAsyncIterable,
   removeWebSearchTool,
+  sanitizeOversizedInputImages,
 } from "./utils"
 
 const logger = createHandlerLogger("responses-handler")
@@ -60,14 +69,39 @@ const RESPONSES_ENDPOINT = "/responses"
 
 // eslint-disable-next-line max-lines-per-function
 export const handleResponses = async (c: Context) => {
+  const payload = await c.req.json<ResponsesPayload>()
+  debugJson(logger, "Responses request payload:", payload)
+
+  const requestedModel = payload.model
+  payload.model = resolveMappedModel(payload.model)
+  if (payload.model !== requestedModel) {
+    logger.debug(
+      `Resolved model mapping: ${requestedModel} -> ${payload.model}`,
+    )
+  }
+
+  const providerModelAlias = parseProviderModelAlias(payload.model)
+  if (providerModelAlias) {
+    payload.model = providerModelAlias.model
+    return await handleProviderResponsesForProvider(c, {
+      payload,
+      provider: providerModelAlias.provider,
+    })
+  }
+
+  const subagentMarker = getCodexResponsesSubagentMarker(c)
+  if (subagentMarker) {
+    debugJson(logger, "Detected Codex subagent headers:", subagentMarker)
+  }
+  const incomingSessionId =
+    subagentMarker ? getIncomingResponsesSessionId(c) : undefined
+
   await checkRateLimit(state)
 
   const store = getRequestHistoryStore()
   const request = buildRequestContext(c)
 
-  const payload = await c.req.json<ResponsesPayload>()
   const clientModel = payload.model
-  debugJson(logger, "Responses request payload:", payload)
 
   if (!isResponsesApiWebSearchEnabled()) {
     removeWebSearchTool(payload)
@@ -75,7 +109,8 @@ export const handleResponses = async (c: Context) => {
   compactInputByLatestCompaction(payload)
 
   const streamRequested = Boolean(payload.stream)
-  const { initiator: initialInitiator } = getResponsesRequestOptions(payload)
+  const { initiator: inferredInitiator } = getResponsesRequestOptions(payload)
+  const initialInitiator = subagentMarker ? "agent" : inferredInitiator
   const userId = (payload.metadata as { user_id?: string } | null | undefined)
     ?.user_id
   const requestBodyPromptCacheKey =
@@ -109,12 +144,12 @@ export const handleResponses = async (c: Context) => {
     })
   }
 
+  const headerSessionId = c.req.header("x-session-id") ?? null
   const upstreamRequestId = generateRequestIdFromPayload(
     { messages: payload.input },
-    normalizedPromptCacheKey,
+    incomingSessionId ?? normalizedPromptCacheKey,
   )
 
-  const headerSessionId = c.req.header("x-session-id") ?? null
   const affinityKey = resolveAffinityKey({
     promptCacheKey: requestBodyPromptCacheKey,
     metadataSessionId,
@@ -157,6 +192,17 @@ export const handleResponses = async (c: Context) => {
 
   const upstreamPayload = { ...payload, model: selectedModel.id }
   removeUnsupportedTools(upstreamPayload)
+
+  const sanitizedImageCount = sanitizeOversizedInputImages(
+    upstreamPayload,
+    selectedModel.capabilities.limits.vision?.max_prompt_image_size,
+  )
+  if (sanitizedImageCount > 0) {
+    logger.warn(
+      `Omitted ${sanitizedImageCount} oversized input image(s) before forwarding to Copilot Responses`,
+    )
+  }
+
   applyResponsesApiContextManagement(
     upstreamPayload,
     selectedModel.capabilities.limits.max_prompt_tokens,
@@ -167,13 +213,18 @@ export const handleResponses = async (c: Context) => {
   const premiumUnlimitedBefore = account.unlimited
 
   const transport = getResponsesTransportForModel(selectedModel) ?? "http"
-  const { vision, initiator } = getResponsesRequestOptions(upstreamPayload)
+  const { vision, initiator: inferredUpstreamInitiator } =
+    getResponsesRequestOptions(upstreamPayload)
+  const initiator = subagentMarker ? "agent" : inferredUpstreamInitiator
   request.initiator = initiator
   if (state.manualApprove) await awaitApproval()
 
   const accountCtx = toAccountContext(account)
   const upstreamSessionId = getUUID(
-    normalizedPromptCacheKey ?? headerSessionId ?? upstreamRequestId,
+    incomingSessionId
+      ?? normalizedPromptCacheKey
+      ?? headerSessionId
+      ?? upstreamRequestId,
   )
   request.upstreamRequestId = upstreamRequestId
   request.upstreamSessionId = upstreamSessionId
@@ -194,6 +245,7 @@ export const handleResponses = async (c: Context) => {
       accountCtx,
       vision,
       initiator,
+      subagentMarker,
       premiumRemainingBefore,
       premiumUnlimitedBefore,
       transport,
@@ -211,6 +263,7 @@ export const handleResponses = async (c: Context) => {
     accountCtx,
     vision,
     initiator,
+    subagentMarker,
     premiumRemainingBefore,
     premiumUnlimitedBefore,
     transport,
@@ -459,6 +512,7 @@ async function handleStreamingResponses(params: {
   accountCtx: Parameters<typeof createResponses>[2]
   vision: boolean
   initiator: "agent" | "user"
+  subagentMarker: SubagentMarker | null
   premiumRemainingBefore: number | undefined
   premiumUnlimitedBefore: boolean | undefined
   transport: ResponsesTransport
@@ -474,6 +528,7 @@ async function handleStreamingResponses(params: {
     accountCtx,
     vision,
     initiator,
+    subagentMarker,
     premiumRemainingBefore,
     premiumUnlimitedBefore,
     transport,
@@ -488,6 +543,7 @@ async function handleStreamingResponses(params: {
       {
         vision,
         initiator,
+        subagentMarker,
         upstreamRequestId: request.upstreamRequestId,
         sessionId: request.upstreamSessionId,
         requestId: request.requestId,
@@ -811,6 +867,7 @@ async function handleNonStreamingResponses(params: {
   accountCtx: Parameters<typeof createResponses>[2]
   vision: boolean
   initiator: "agent" | "user"
+  subagentMarker: SubagentMarker | null
   premiumRemainingBefore: number | undefined
   premiumUnlimitedBefore: boolean | undefined
   transport: ResponsesTransport
@@ -826,6 +883,7 @@ async function handleNonStreamingResponses(params: {
     accountCtx,
     vision,
     initiator,
+    subagentMarker,
     premiumRemainingBefore,
     premiumUnlimitedBefore,
     transport,
@@ -841,6 +899,7 @@ async function handleNonStreamingResponses(params: {
       {
         vision,
         initiator,
+        subagentMarker,
         upstreamRequestId: request.upstreamRequestId,
         sessionId: request.upstreamSessionId,
         requestId: request.requestId,
@@ -920,5 +979,42 @@ export const removeUnsupportedTools = (payload: ResponsesPayload): void => {
   })
   if (dropped.length > 0) {
     logger.debug("Removed unsupported tools:", dropped)
+  }
+}
+
+const getTrimmedHeader = (c: Context, name: string): string | undefined => {
+  const value = c.req.header(name)?.trim()
+  return value ? value : undefined
+}
+
+const getIncomingResponsesSessionId = (c: Context): string | undefined =>
+  getTrimmedHeader(c, "session-id") ?? getTrimmedHeader(c, "x-session-id")
+
+const codexSubagentHeaderValues = new Set([
+  "collab_spawn",
+  "compact",
+  "memory_consolidation",
+  "review",
+])
+
+const getCodexResponsesSubagentMarker = (c: Context): SubagentMarker | null => {
+  const agentType = getTrimmedHeader(c, "x-openai-subagent")
+  if (!agentType || !codexSubagentHeaderValues.has(agentType)) {
+    return null
+  }
+
+  const threadId = getTrimmedHeader(c, "thread-id")
+  const rootSessionId = getIncomingResponsesSessionId(c)
+  const parentThreadId = getTrimmedHeader(c, "x-codex-parent-thread-id")
+  if (!threadId && !rootSessionId && !parentThreadId) {
+    return null
+  }
+
+  const agentId = threadId ?? parentThreadId ?? rootSessionId ?? agentType
+
+  return {
+    agent_id: agentId,
+    agent_type: agentType,
+    session_id: threadId ?? rootSessionId ?? agentId,
   }
 }
