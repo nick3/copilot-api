@@ -8,6 +8,7 @@ import {
   AdminApiError,
   type AdminModelDetailsItem,
   getAdminModelDetails,
+  refreshAllModels,
 } from "@/lib/admin-api"
 import { i18n } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
@@ -398,6 +399,7 @@ export function ModelsPage(): React.JSX.Element {
   const { t } = useTranslation()
 
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [models, setModels] = useState<AdminModelDetailsItem[]>([])
 
@@ -538,6 +540,34 @@ export function ModelsPage(): React.JSX.Element {
     void load()
   }, [load])
 
+  const handleRefreshModels = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      const { failedCount } = await refreshAllModels()
+      toast.success(
+        failedCount > 0
+          ? t("modelsPage.toast.refreshModelsPartial", { count: failedCount })
+          : t("modelsPage.toast.refreshModelsSuccess"),
+      )
+    } catch (err) {
+      const msg = err instanceof AdminApiError ? err.message : String(err)
+      toast.error(t("modelsPage.toast.refreshModelsFailed"), {
+        description: msg,
+      })
+      setRefreshing(false)
+      return
+    }
+
+    try {
+      await load()
+    } catch (err) {
+      const msg = err instanceof AdminApiError ? err.message : String(err)
+      toast.error(t("modelsPage.toast.reloadFailed"), { description: msg })
+    } finally {
+      setRefreshing(false)
+    }
+  }, [load, t])
+
   return (
     <div className="space-y-4">
       {error ? (
@@ -557,19 +587,36 @@ export function ModelsPage(): React.JSX.Element {
               <CardTitle>{t("modelsPage.title")}</CardTitle>
               <CardDescription>{t("modelsPage.description")}</CardDescription>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void load()}
-              disabled={loading}
-            >
-              {loading ? (
-                <LoaderCircleIcon className="size-4 motion-safe:animate-spin" />
-              ) : (
-                <RefreshCwIcon className="size-4" />
-              )}
-              {t("common.refresh")}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleRefreshModels()}
+                disabled={loading || refreshing}
+              >
+                {refreshing ? (
+                  <LoaderCircleIcon className="size-4 motion-safe:animate-spin" />
+                ) : (
+                  <RefreshCwIcon className="size-4" />
+                )}
+                {refreshing
+                  ? t("modelsPage.refreshingModelsButton")
+                  : t("modelsPage.refreshModelsButton")}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void load()}
+                disabled={loading || refreshing}
+              >
+                {loading ? (
+                  <LoaderCircleIcon className="size-4 motion-safe:animate-spin" />
+                ) : (
+                  <RefreshCwIcon className="size-4" />
+                )}
+                {t("common.refresh")}
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">

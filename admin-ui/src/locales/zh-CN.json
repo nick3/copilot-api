@@ -157,7 +157,10 @@
       "premiumUsageAria": "Premium 请求使用进度",
       "premiumUnlimitedNote": "另有 {{count}} 个无限额度账号未计入"
     },
-    "enabledToggleFailed": "更新账号启用状态失败"
+    "enabledToggleFailed": "更新账号启用状态失败",
+    "modelsLastFetched": "模型获取",
+    "modelsNeverFetched": "从未获取",
+    "modelsRefreshing": "刷新中…"
   },
   "requestsPage": {
     "loadFailedTitle": "加载请求失败",
@@ -221,8 +224,14 @@
     "searchAriaLabel": "按名称或 ID 搜索模型",
     "aliasesMore": "+{{count}} 个",
     "loadFailedTitle": "加载模型失败",
+    "refreshModelsButton": "刷新模型",
+    "refreshingModelsButton": "刷新模型中…",
     "toast": {
-      "loadFailed": "加载模型失败"
+      "loadFailed": "加载模型失败",
+      "refreshModelsSuccess": "模型已刷新",
+      "refreshModelsPartial": "模型已刷新（{{count}} 个账号失败）",
+      "refreshModelsFailed": "刷新模型失败",
+      "reloadFailed": "重新加载模型列表失败"
     },
     "columns": {
       "name": "模型",

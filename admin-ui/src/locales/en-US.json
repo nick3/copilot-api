@@ -157,7 +157,10 @@
       "premiumUsageAria": "Premium request usage progress",
       "premiumUnlimitedNote": "+{{count}} unlimited account(s) not included"
     },
-    "enabledToggleFailed": "Failed to update account enabled state"
+    "enabledToggleFailed": "Failed to update account enabled state",
+    "modelsLastFetched": "Models fetched",
+    "modelsNeverFetched": "Never fetched",
+    "modelsRefreshing": "Refreshing…"
   },
   "requestsPage": {
     "loadFailedTitle": "Failed to load requests",
@@ -221,8 +224,14 @@
     "searchAriaLabel": "Search models by name or ID",
     "aliasesMore": "+{{count}} more",
     "loadFailedTitle": "Failed to load models",
+    "refreshModelsButton": "Refresh models",
+    "refreshingModelsButton": "Refreshing models…",
     "toast": {
-      "loadFailed": "Failed to load models"
+      "loadFailed": "Failed to load models",
+      "refreshModelsSuccess": "Models refreshed",
+      "refreshModelsPartial": "Models refreshed ({{count}} accounts failed)",
+      "refreshModelsFailed": "Failed to refresh models",
+      "reloadFailed": "Failed to reload models list"
     },
     "columns": {
       "name": "Model",
