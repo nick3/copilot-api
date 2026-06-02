@@ -155,6 +155,7 @@ afterEach(() => {
   accountsManager.markAccountFailed = originalMarkFailed
 
   setModelMappings({})
+  setProviderConfig("acme", { enabled: false })
 })
 
 describe("responses handler model mapping", () => {
