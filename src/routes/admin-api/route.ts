@@ -143,6 +143,9 @@ type AccountItem = {
     unlimited?: boolean
     failed?: boolean
     failureReason?: string
+    enabled?: boolean
+    lastModelsFetch?: number
+    isRefreshingModels?: boolean
   }
   stats?: {
     since_ms: number
@@ -1498,12 +1501,19 @@ adminApiRoutes.get("/accounts", async (c) => {
         failed: s.failed,
         failureReason: s.failureReason,
         enabled: s.enabled,
+        lastModelsFetch: s.lastModelsFetch,
+        isRefreshingModels: s.isRefreshingModels,
       },
       stats,
     }
   })
 
   return c.json({ items })
+})
+
+adminApiRoutes.post("/accounts/models/refresh", async (c) => {
+  await accountsManager.refreshAllModelsNow()
+  return c.json({ ok: true })
 })
 
 adminApiRoutes.get("/requests", (c) => {

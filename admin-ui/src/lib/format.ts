@@ -241,3 +241,28 @@ export function fmtMaybeNum(n?: number | null): string {
   if (n == null) return ""
   return String(n)
 }
+
+export function fmtRelativeTime(ms: number, locale = "en-US"): string {
+  const diffSec = Math.round((ms - Date.now()) / 1000)
+  const absSec = Math.abs(diffSec)
+
+  let value: number
+  let unit: Intl.RelativeTimeFormatUnit
+
+  if (absSec < 60) {
+    value = diffSec
+    unit = "second"
+  } else if (absSec < 3600) {
+    value = Math.round(diffSec / 60)
+    unit = "minute"
+  } else if (absSec < 86400) {
+    value = Math.round(diffSec / 3600)
+    unit = "hour"
+  } else {
+    value = Math.round(diffSec / 86400)
+    unit = "day"
+  }
+
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" })
+  return rtf.format(value, unit)
+}

@@ -155,6 +155,8 @@ export type AccountStatusEntry = {
   failed?: boolean
   failureReason?: string
   enabled?: boolean
+  lastModelsFetch?: number
+  isRefreshingModels?: boolean
 }
 
 function getInitialSelectionReason(
@@ -311,6 +313,10 @@ export class AccountsManager {
     this.modelsRefreshIntervalMs =
       Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 0
     this.scheduleModelsRefresh()
+  }
+
+  async refreshAllModelsNow(): Promise<void> {
+    await this.refreshAllModels()
   }
 
   getQuotaRefreshAccounts(): Array<AccountRuntime> {
@@ -1676,6 +1682,8 @@ export class AccountsManager {
         overagePermitted: this.temporaryAccount.overagePermitted,
         failed: this.temporaryAccount.failed,
         failureReason: this.temporaryAccount.failureReason,
+        lastModelsFetch: this.temporaryAccount.lastModelsFetch,
+        isRefreshingModels: this.temporaryAccount.isRefreshingModels,
       })
     }
 
@@ -1691,6 +1699,8 @@ export class AccountsManager {
           failed: account.failed,
           failureReason: account.failureReason,
           enabled: account.enabled,
+          lastModelsFetch: account.lastModelsFetch,
+          isRefreshingModels: account.isRefreshingModels,
         })
       }
     }

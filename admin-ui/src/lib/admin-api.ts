@@ -97,6 +97,8 @@ export type AdminAccountItem = {
     failed?: boolean
     failureReason?: string
     enabled?: boolean
+    lastModelsFetch?: number
+    isRefreshingModels?: boolean
   }
   stats?: {
     since_ms: number
@@ -434,6 +436,12 @@ export async function getAdminModels(): Promise<AdminModelsResponse> {
 
 export async function getAdminModelDetails(): Promise<AdminModelsDetailsResponse> {
   return fetchAdminJson<AdminModelsDetailsResponse>("/api/admin/models/details")
+}
+
+export async function refreshAllModels(): Promise<{ ok: boolean }> {
+  return fetchAdminJson<{ ok: boolean }>("/api/admin/accounts/models/refresh", {
+    method: "POST",
+  })
 }
 
 export async function getAdminPremiumStats(params: {

@@ -1,4 +1,4 @@
-import { DownloadIcon, PlusIcon, RefreshCwIcon, UserPlusIcon } from "lucide-react"
+import { DownloadIcon, LoaderCircleIcon, PlusIcon, RefreshCwIcon, UserPlusIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
@@ -16,7 +16,7 @@ import {
   buildAccountsCsv,
   getAccountsCsvFilename,
 } from "@/lib/accounts-export"
-import { fmtDurationSeconds, fmtLocalDateTime, fmtNum } from "@/lib/format"
+import { fmtDurationSeconds, fmtLocalDateTime, fmtNum, fmtRelativeTime } from "@/lib/format"
 import { i18n } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -753,6 +753,21 @@ export function AccountsPage(): React.JSX.Element {
                               {a.runtime.failureReason}
                             </div>
                           ) : null}
+                          <div className="text-muted-foreground text-xs">
+                            {a.runtime?.isRefreshingModels ? (
+                              <span className="flex items-center gap-1">
+                                <LoaderCircleIcon className="size-3 motion-safe:animate-spin" />
+                                {t("accountsPage.modelsRefreshing")}
+                              </span>
+                            ) : (
+                              <span>
+                                {t("accountsPage.modelsLastFetched")}:{" "}
+                                {a.runtime?.lastModelsFetch
+                                  ? fmtRelativeTime(a.runtime.lastModelsFetch, i18n.language)
+                                  : t("accountsPage.modelsNeverFetched")}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell className={cn(accountsTableColVisibility[2])}>

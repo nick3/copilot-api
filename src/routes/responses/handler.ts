@@ -1010,7 +1010,8 @@ const getCodexResponsesSubagentMarker = (c: Context): SubagentMarker | null => {
     return null
   }
 
-  const agentId = threadId ?? parentThreadId ?? rootSessionId ?? agentType
+  // At least one of these is non-null (checked above), so the cast is safe.
+  const agentId = (threadId ?? parentThreadId ?? rootSessionId) as string
 
   return {
     agent_id: agentId,
