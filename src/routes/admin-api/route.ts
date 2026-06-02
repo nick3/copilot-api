@@ -1512,8 +1512,8 @@ adminApiRoutes.get("/accounts", async (c) => {
 })
 
 adminApiRoutes.post("/accounts/models/refresh", async (c) => {
-  await accountsManager.refreshAllModelsNow()
-  return c.json({ ok: true })
+  const { failedCount } = await accountsManager.refreshAllModelsNow()
+  return c.json({ ok: true, failedCount })
 })
 
 adminApiRoutes.get("/requests", (c) => {

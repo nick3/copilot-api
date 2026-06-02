@@ -315,8 +315,9 @@ export class AccountsManager {
     this.scheduleModelsRefresh()
   }
 
-  async refreshAllModelsNow(): Promise<void> {
-    await this.refreshAllModels()
+  async refreshAllModelsNow(): Promise<{ failedCount: number }> {
+    const failedCount = await this.refreshAllModels()
+    return { failedCount }
   }
 
   getQuotaRefreshAccounts(): Array<AccountRuntime> {
@@ -717,7 +718,7 @@ export class AccountsManager {
     await promise
   }
 
-  private async refreshAllModels(): Promise<void> {
+  private async refreshAllModels(): Promise<number> {
     const accounts: Array<AccountRuntime> = []
 
     if (this.temporaryAccount) {
@@ -732,12 +733,13 @@ export class AccountsManager {
     }
 
     if (accounts.length === 0) {
-      return
+      return 0
     }
 
-    await Promise.allSettled(
+    const results = await Promise.allSettled(
       accounts.map((account) => this.refreshModels(account)),
     )
+    return results.filter((r) => r.status === "rejected").length
   }
 
   /** Refresh quota information for an account. */

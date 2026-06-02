@@ -229,7 +229,9 @@
     "toast": {
       "loadFailed": "加载模型失败",
       "refreshModelsSuccess": "模型已刷新",
-      "refreshModelsFailed": "刷新模型失败"
+      "refreshModelsPartial": "模型已刷新（{{count}} 个账号失败）",
+      "refreshModelsFailed": "刷新模型失败",
+      "reloadFailed": "重新加载模型列表失败"
     },
     "columns": {
       "name": "模型",

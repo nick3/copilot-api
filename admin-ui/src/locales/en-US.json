@@ -229,7 +229,9 @@
     "toast": {
       "loadFailed": "Failed to load models",
       "refreshModelsSuccess": "Models refreshed",
-      "refreshModelsFailed": "Failed to refresh models"
+      "refreshModelsPartial": "Models refreshed ({{count}} accounts failed)",
+      "refreshModelsFailed": "Failed to refresh models",
+      "reloadFailed": "Failed to reload models list"
     },
     "columns": {
       "name": "Model",

@@ -543,18 +543,30 @@ export function ModelsPage(): React.JSX.Element {
   const handleRefreshModels = useCallback(async () => {
     setRefreshing(true)
     try {
-      await refreshAllModels()
-      await load()
-      toast.success(i18n.t("modelsPage.toast.refreshModelsSuccess"))
+      const { failedCount } = await refreshAllModels()
+      toast.success(
+        failedCount > 0
+          ? t("modelsPage.toast.refreshModelsPartial", { count: failedCount })
+          : t("modelsPage.toast.refreshModelsSuccess"),
+      )
     } catch (err) {
       const msg = err instanceof AdminApiError ? err.message : String(err)
-      toast.error(i18n.t("modelsPage.toast.refreshModelsFailed"), {
+      toast.error(t("modelsPage.toast.refreshModelsFailed"), {
         description: msg,
       })
+      setRefreshing(false)
+      return
+    }
+
+    try {
+      await load()
+    } catch (err) {
+      const msg = err instanceof AdminApiError ? err.message : String(err)
+      toast.error(t("modelsPage.toast.reloadFailed"), { description: msg })
     } finally {
       setRefreshing(false)
     }
-  }, [load])
+  }, [load, t])
 
   return (
     <div className="space-y-4">
