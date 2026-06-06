@@ -477,10 +477,10 @@
       "general": "通用",
       "accountAffinity": "账号亲和性",
       "reasoning": "推理",
-      "compactThresholds": "压缩阈值",
       "aliases": "别名",
       "prompts": "提示词",
       "advanced": "高级",
+      "responsesApi": "Responses API",
       "devMode": "开发者模式",
       "providers": "上游提供方"
     },
@@ -580,6 +580,24 @@
       "blockOriginal": "阻止原始模型 ID",
       "emptyState": "未配置模型别名。",
       "addButton": "添加别名"
+    },
+    "responsesApi": {
+      "title": "Responses API",
+      "description": "配置 Responses API transport、web 工具和上下文管理。",
+      "transportGroupTitle": "Transport",
+      "contextManagementGroupTitle": "上下文管理",
+      "useResponsesApiWebSocketLabel": "启用 Responses API WebSocket",
+      "useResponsesApiWebSocketHint": "启用后，声明 ws:/responses 的模型会使用 Copilot WebSocket transport；仅支持 /responses 的模型仍走 HTTP。",
+      "useResponsesApiWebSearchLabel": "启用 Responses API WebSearch",
+      "useResponsesApiWebSearchHint": "启用后，/v1/responses 会保留 web_search 工具并继续向上游转发。",
+      "useResponsesApiContextManagementLabel": "启用 Responses API 上下文管理",
+      "useResponsesApiContextManagementHint": "默认启用。启用后，代理会为长任务自动附加 context_management 压缩指令。",
+      "contextManagementInactiveTitle": "上下文管理已关闭",
+      "contextManagementInactiveHint": "该旧模型列表会被保存，但在上下文管理关闭时不会生效。",
+      "compactThresholdsInactiveHint": "压缩阈值覆盖会被保存，但在上下文管理关闭时不会生效。",
+      "responsesApiContextManagementModelsLabel": "旧版上下文管理模型",
+      "responsesApiContextManagementModelsPlaceholder": "每行一个 model id",
+      "responsesApiContextManagementModelsDeprecatedHint": "已弃用的旧 allowlist。推荐使用全局 Responses API 上下文管理开关。"
     },
     "devMode": {
       "title": "开发者模式",

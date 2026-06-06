@@ -12,12 +12,14 @@ const [
   { state },
   { setModelMappings, setProviderConfig },
   { responsesRoutes },
+  { responsesUtilsDependencies },
 ] = await Promise.all([
   import("~/lib/accounts-manager"),
   import("~/lib/admin-db"),
   import("~/lib/state"),
   import("~/lib/config"),
   import("~/routes/responses/route"),
+  import("~/routes/responses/utils"),
 ])
 
 type SelectionResult = Awaited<
@@ -37,6 +39,10 @@ const originalSelect =
 const originalFinalize = accountsManager.finalizeQuota.bind(accountsManager)
 const originalMarkFailed =
   accountsManager.markAccountFailed.bind(accountsManager)
+const originalContextManagementEnabled =
+  responsesUtilsDependencies.isResponsesApiContextManagementEnabled
+const originalModelCompactThreshold =
+  responsesUtilsDependencies.getModelResponsesApiCompactThreshold
 
 function buildAccount(): AccountRuntime {
   return {
@@ -153,6 +159,11 @@ afterEach(() => {
   accountsManager.selectAccountForRequest = originalSelect
   accountsManager.finalizeQuota = originalFinalize
   accountsManager.markAccountFailed = originalMarkFailed
+
+  responsesUtilsDependencies.isResponsesApiContextManagementEnabled =
+    originalContextManagementEnabled
+  responsesUtilsDependencies.getModelResponsesApiCompactThreshold =
+    originalModelCompactThreshold
 
   setModelMappings({})
   setProviderConfig("acme", { enabled: false })
@@ -325,6 +336,86 @@ describe("responses handler context management", () => {
         compact_threshold: 217600,
       },
     ])
+  })
+
+  test("does not add context_management when disabled", async () => {
+    responsesUtilsDependencies.isResponsesApiContextManagementEnabled = () =>
+      false
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("/responses", "gpt-5.4"))
+
+    let forwardedPayload: ResponsesPayload | undefined
+    const fetchMock = mock((_url: string, options?: FetchOptions) => {
+      forwardedPayload = JSON.parse(options?.body as string) as ResponsesPayload
+      return Promise.resolve(
+        new Response(JSON.stringify(buildResponsesResult("gpt-5.4", "ok")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-5.4",
+          input: "hello",
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(forwardedPayload?.context_management).toBeUndefined()
+  })
+
+  test("preserves request-provided context_management", async () => {
+    responsesUtilsDependencies.isResponsesApiContextManagementEnabled = () =>
+      true
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("/responses", "gpt-5.4"))
+
+    let forwardedPayload: ResponsesPayload | undefined
+    const fetchMock = mock((_url: string, options?: FetchOptions) => {
+      forwardedPayload = JSON.parse(options?.body as string) as ResponsesPayload
+      return Promise.resolve(
+        new Response(JSON.stringify(buildResponsesResult("gpt-5.4", "ok")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-5.4",
+          input: "hello",
+          context_management: [
+            {
+              type: "compaction",
+              compact_threshold: 12345,
+            },
+          ],
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(forwardedPayload?.context_management?.[0]?.compact_threshold).toBe(
+      12345,
+    )
   })
 })
 

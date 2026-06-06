@@ -477,10 +477,10 @@
       "general": "General",
       "accountAffinity": "Account Affinity",
       "reasoning": "Reasoning",
-      "compactThresholds": "Compact Thresholds",
       "aliases": "Aliases",
       "prompts": "Prompts",
       "advanced": "Advanced",
+      "responsesApi": "Responses API",
       "devMode": "Developer Mode",
       "providers": "Providers"
     },
@@ -580,6 +580,24 @@
       "blockOriginal": "Block original model ID",
       "emptyState": "No model aliases configured.",
       "addButton": "Add alias"
+    },
+    "responsesApi": {
+      "title": "Responses API",
+      "description": "Configure Responses API transport, web tools, and context management.",
+      "transportGroupTitle": "Transport",
+      "contextManagementGroupTitle": "Context management",
+      "useResponsesApiWebSocketLabel": "Enable Responses API WebSocket",
+      "useResponsesApiWebSocketHint": "When enabled, models advertising ws:/responses use Copilot's WebSocket transport; HTTP remains available for /responses-only models.",
+      "useResponsesApiWebSearchLabel": "Enable Responses API WebSearch",
+      "useResponsesApiWebSearchHint": "When enabled, /v1/responses keeps web_search tools and forwards them upstream.",
+      "useResponsesApiContextManagementLabel": "Enable Responses API context management",
+      "useResponsesApiContextManagementHint": "Default: enabled. When enabled, the proxy automatically adds context_management compaction instructions for long Responses API tasks.",
+      "contextManagementInactiveTitle": "Context management is disabled",
+      "contextManagementInactiveHint": "This legacy list is saved but does not take effect while context management is disabled.",
+      "compactThresholdsInactiveHint": "Compact threshold overrides are saved but do not take effect while context management is disabled.",
+      "responsesApiContextManagementModelsLabel": "Legacy context management models",
+      "responsesApiContextManagementModelsPlaceholder": "one model id per line",
+      "responsesApiContextManagementModelsDeprecatedHint": "Deprecated legacy allowlist. Prefer the global Responses API context management switch."
     },
     "devMode": {
       "title": "Developer Mode",

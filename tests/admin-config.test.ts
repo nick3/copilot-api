@@ -749,6 +749,78 @@ test("POST /api/admin/config refreshes the running quota scheduler config", asyn
   })
 })
 
+test("POST /api/admin/config updates useResponsesApiContextManagement to false then true", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res1 = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ useResponsesApiContextManagement: false }),
+      }),
+    )
+    expect(res1.status).toBe(200)
+    const body1 = (await res1.json()) as {
+      useResponsesApiContextManagement?: boolean
+    }
+    expect(body1.useResponsesApiContextManagement).toBe(false)
+
+    const res2 = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ useResponsesApiContextManagement: true }),
+      }),
+    )
+    expect(res2.status).toBe(200)
+    const body2 = (await res2.json()) as {
+      useResponsesApiContextManagement?: boolean
+    }
+    expect(body2.useResponsesApiContextManagement).toBe(true)
+  })
+})
+
+test("POST /api/admin/config clears useResponsesApiContextManagement to default", async () => {
+  await withConfig({ useResponsesApiContextManagement: false }, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ useResponsesApiContextManagement: null }),
+      }),
+    )
+
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as {
+      useResponsesApiContextManagement?: boolean
+    }
+    expect(body.useResponsesApiContextManagement).toBe(true)
+  })
+})
+
+test("POST /api/admin/config rejects non-boolean useResponsesApiContextManagement", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ useResponsesApiContextManagement: "false" }),
+      }),
+    )
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { error?: { message?: string } }
+    expect(body.error?.message).toContain(
+      "useResponsesApiContextManagement must be a boolean",
+    )
+  })
+})
+
 test("POST /api/admin/config rejects invalid quotaRefresh fields", async () => {
   await withConfig({}, async () => {
     const { server } = await import("../src/server")

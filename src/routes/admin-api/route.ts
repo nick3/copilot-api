@@ -199,6 +199,7 @@ const CONFIG_KEYS = new Set<keyof AppConfig>([
   "useMessagesApi",
   "useResponsesApiWebSocket",
   "useResponsesApiWebSearch",
+  "useResponsesApiContextManagement",
   "devMode",
   "quotaRefresh",
 ])
@@ -899,7 +900,8 @@ function applyOptionalBoolean(
     | "useResponsesApiWebSearch"
     | "compactUseSmallModel"
     | "messageStartInputTokensFallback"
-    | "allowOriginalModelNamesForAliases",
+    | "allowOriginalModelNamesForAliases"
+    | "useResponsesApiContextManagement",
   value: unknown,
 ): string | undefined {
   const parsed = parseOptionalBoolean(value, key)
@@ -1158,6 +1160,8 @@ const CONFIG_PATCH_HANDLERS: Partial<Record<string, ConfigPatchHandler>> = {
     applyOptionalBoolean(next, "useResponsesApiWebSocket", value),
   useResponsesApiWebSearch: (next, value) =>
     applyOptionalBoolean(next, "useResponsesApiWebSearch", value),
+  useResponsesApiContextManagement: (next, value) =>
+    applyOptionalBoolean(next, "useResponsesApiContextManagement", value),
   devMode: applyDevModeConfig,
   quotaRefresh: applyQuotaRefreshConfig,
 }
@@ -1213,9 +1217,16 @@ adminApiRoutes.get("/meta", (c) => {
   return c.json(store.meta())
 })
 
+function applyAdminConfigResponseDefaults(config: AppConfig): AppConfig {
+  if (typeof config.useResponsesApiContextManagement === "boolean") {
+    return config
+  }
+  return { ...config, useResponsesApiContextManagement: true }
+}
+
 adminApiRoutes.get("/config", (c) => {
   try {
-    const config = mergeConfigWithDefaults()
+    const config = applyAdminConfigResponseDefaults(mergeConfigWithDefaults())
     return c.json({ ...config, _configPath: PATHS.CONFIG_PATH })
   } catch {
     return jsonError(c, 500, {
@@ -1253,7 +1264,7 @@ adminApiRoutes.post("/config", async (c) => {
 
   try {
     await writeConfigFile(result.config)
-    const merged = mergeConfigWithDefaults()
+    const merged = applyAdminConfigResponseDefaults(mergeConfigWithDefaults())
     accountsManager.setAccountAffinityEnabled(isAccountAffinityEnabled())
     accountsManager.setModelsRefreshIntervalMs(getModelRefreshIntervalMs())
     updateQuotaRefreshSchedulerFromConfig()
