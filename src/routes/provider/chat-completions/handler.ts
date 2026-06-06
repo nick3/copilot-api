@@ -3,7 +3,7 @@ import type { Context } from "hono"
 
 import { streamSSE } from "hono/streaming"
 
-import type { ModelConfig } from "~/lib/config"
+import type { ModelConfig, ResolvedProviderConfig } from "~/lib/config"
 import { HTTPError } from "~/lib/error"
 import { createHandlerLogger, debugJson } from "~/lib/logger"
 import { resolveProviderConfig } from "~/lib/provider-resolver"
@@ -32,7 +32,13 @@ export async function handleProviderChatCompletionsForProvider(
   },
 ): Promise<Response> {
   const { payload, provider } = options
-  const providerConfig = await resolveProviderConfig(provider)
+  type ProviderResolver = (
+    name: string,
+  ) => ResolvedProviderConfig | null | Promise<ResolvedProviderConfig | null>
+  const resolverFn =
+    (c.get("providerConfigResolver" as never) as ProviderResolver | undefined)
+    ?? resolveProviderConfig
+  const providerConfig = await resolverFn(provider)
   if (providerConfig?.type !== "openai-compatible") {
     return c.json(
       {

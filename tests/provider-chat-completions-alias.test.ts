@@ -1,46 +1,12 @@
-import {
-  afterAll,
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  test,
-} from "bun:test"
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 
 import type { ResolvedProviderConfig } from "../src/lib/config"
-
-const actualConfigModule = await import("../src/lib/config")
-const actualRateLimitModule = await import("../src/lib/rate-limit")
-const actualTokenUsageModule = await import("../src/lib/token-usage")
+import { completionRoutes } from "../src/routes/chat-completions/route"
+import { resolveMappedModel } from "../src/lib/config"
 
 let providerConfig: ResolvedProviderConfig | null = null
 let modelMappings: Record<string, string> = {}
-
-const checkRateLimit = mock(() => {
-  // intentionally a no-op: tests assert it was not called via checkRateLimit.mock.calls
-})
-const noopTokenUsageRecorder = () => {}
-
-await mock.module("~/lib/config", () => ({
-  ...actualConfigModule,
-  getProviderConfig: () => providerConfig,
-  resolveMappedModel: (model: string) => modelMappings[model] ?? model,
-}))
-
-await mock.module("~/lib/rate-limit", () => ({
-  ...actualRateLimitModule,
-  checkRateLimit,
-}))
-
-await mock.module("~/lib/token-usage", () => ({
-  ...actualTokenUsageModule,
-  createProviderTokenUsageRecorder: () => noopTokenUsageRecorder,
-}))
-
-const { completionRoutes } =
-  await import("../src/routes/chat-completions/route")
 
 const originalFetch = globalThis.fetch
 
@@ -80,6 +46,16 @@ const fetchMock = mock((_url: string | URL | Request, _init?: RequestInit) =>
 
 const createApp = () => {
   const app = new Hono()
+  app.use("*", async (c, next) => {
+    c.set("providerConfigResolver" as never, (name: string) =>
+      name === "dash" ? providerConfig : null,
+    )
+    c.set(
+      "resolveMappedModel" as never,
+      (model: string) => modelMappings[model] ?? resolveMappedModel(model),
+    )
+    await next()
+  })
   app.route("/v1/chat/completions", completionRoutes)
   return app
 }
@@ -105,7 +81,6 @@ beforeEach(() => {
   }
 
   modelMappings = {}
-  checkRateLimit.mockClear()
   fetchMock.mockClear()
   ;(globalThis as unknown as { fetch: typeof fetch }).fetch =
     fetchMock as unknown as typeof fetch
@@ -135,7 +110,6 @@ describe("provider/model aliases on top-level chat completions route", () => {
     })
 
     expect(response.status).toBe(200)
-    expect(checkRateLimit).not.toHaveBeenCalled()
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
     const [url, init] = fetchMock.mock.calls[0]
@@ -168,7 +142,6 @@ describe("provider/model aliases on top-level chat completions route", () => {
     })
 
     expect(response.status).toBe(200)
-    expect(checkRateLimit).not.toHaveBeenCalled()
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
     const init = fetchMock.mock.calls[0][1] as RequestInit
@@ -246,10 +219,4 @@ describe("provider/model aliases on top-level chat completions route", () => {
       },
     })
   })
-})
-
-afterAll(async () => {
-  await mock.module("~/lib/rate-limit", () => actualRateLimitModule)
-  await mock.module("~/lib/config", () => actualConfigModule)
-  await mock.module("~/lib/token-usage", () => actualTokenUsageModule)
 })

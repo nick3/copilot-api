@@ -6,6 +6,7 @@ import { accountsManager } from "~/lib/accounts-manager"
 import { awaitApproval } from "~/lib/approval"
 import {
   getAliasTargetSet,
+  getProviderConfig,
   resolveModelAlias,
   resolveMappedModel,
 } from "~/lib/config"
@@ -17,7 +18,7 @@ import {
   toAccountContext,
 } from "~/lib/handler-utils"
 import { createHandlerLogger, debugJson, debugJsonTail } from "~/lib/logger"
-import { parseProviderModelAlias } from "~/lib/provider-model"
+import { resolveExistingProviderModelAlias } from "~/lib/provider-model"
 import { checkRateLimit } from "~/lib/rate-limit"
 import {
   getRequestHistoryStore,
@@ -107,9 +108,20 @@ function maybeRejectChatCompletionsClientModel(
 
 export async function handleCompletion(c: Context) {
   const payload = await c.req.json<ChatCompletionsPayload>()
-  payload.model = resolveMappedModel(payload.model)
+  const mappedModelResolver =
+    (c.get("resolveMappedModel" as never) as
+      | typeof resolveMappedModel
+      | undefined) ?? resolveMappedModel
+  const providerConfigResolver =
+    (c.get("providerConfigResolver" as never) as
+      | typeof getProviderConfig
+      | undefined) ?? getProviderConfig
+  payload.model = mappedModelResolver(payload.model)
 
-  const providerModelAlias = parseProviderModelAlias(payload.model)
+  const providerModelAlias = resolveExistingProviderModelAlias(
+    payload.model,
+    providerConfigResolver,
+  )
   if (providerModelAlias) {
     payload.model = providerModelAlias.model
     return await handleProviderChatCompletionsForProvider(c, {
