@@ -57,7 +57,7 @@ import {
 const SETTINGS_SECTION_IDS = [
   "general",
   "reasoning",
-  "compactThresholds",
+  "responsesApi",
   "aliases",
   "prompts",
   "advanced",
@@ -1584,6 +1584,8 @@ type CompactThresholdsCardProps = {
   jsonIssue: string | null
   items: Array<CompactThresholdItem>
   models: Array<string>
+  contextManagementEnabled?: boolean
+  embedded?: boolean
   onToggleMode: (next: boolean) => void
   onJsonChange: (value: string) => void
   onAddItem: () => void
@@ -1597,6 +1599,8 @@ function CompactThresholdsCard({
   jsonIssue,
   items,
   models,
+  contextManagementEnabled = true,
+  embedded = false,
   onToggleMode,
   onJsonChange,
   onAddItem,
@@ -1607,6 +1611,164 @@ function CompactThresholdsCard({
   const hasModels = models.length > 0
   const { t } = useTranslation()
 
+  const formBody = (
+    <div className="space-y-2">
+      {items.length === 0 ? (
+        <div className="text-muted-foreground text-sm">
+          {t("settingsPage.compactThresholds.emptyState")}
+        </div>
+      ) : (
+        items.map((item) => {
+          const modelValue = item.model || defaultModelValue
+          const showCustomModel =
+            modelValue !== defaultModelValue
+            && !models.includes(modelValue)
+          const disableModelSelect = !hasModels && !showCustomModel
+          const trimmed = item.threshold.trim()
+          const numericValue = trimmed === "" ? NaN : Number(trimmed)
+          const itemInvalid =
+            trimmed !== ""
+            && (!Number.isFinite(numericValue) || numericValue <= 0)
+
+          return (
+            <div
+              key={item.id}
+              className="grid gap-2 rounded-lg border p-3"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={modelValue}
+                  onValueChange={(value) =>
+                    onUpdateItem(item.id, {
+                      model: value === defaultModelValue ? "" : value,
+                    })
+                  }
+                  disabled={disableModelSelect}
+                >
+                  <SelectTrigger className="min-w-[220px]">
+                    <SelectValue
+                      placeholder={
+                        hasModels
+                          ? t("settingsPage.common.selectModelPlaceholder")
+                          : t("settingsPage.common.noModelsAvailable")
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={defaultModelValue}>
+                      {t("settingsPage.common.defaultOption")}
+                    </SelectItem>
+                    {showCustomModel ? (
+                      <SelectItem value={modelValue}>
+                        {t("settingsPage.common.customModel", {
+                          value: modelValue,
+                        })}
+                      </SelectItem>
+                    ) : null}
+                    {models.map((model) => (
+                      <SelectItem key={model} value={model}>
+                        {model}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  step={1}
+                  className="w-40"
+                  value={item.threshold}
+                  placeholder={t(
+                    "settingsPage.compactThresholds.thresholdPlaceholder",
+                  )}
+                  onChange={(e) =>
+                    onUpdateItem(item.id, { threshold: e.target.value })
+                  }
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onRemoveItem(item.id)}
+                >
+                  {t("settingsPage.common.remove")}
+                </Button>
+              </div>
+              {itemInvalid ? (
+                <div className="text-destructive text-xs">
+                  {t("settingsPage.compactThresholds.itemInvalid")}
+                </div>
+              ) : (
+                <div className="text-muted-foreground text-xs">
+                  {t("settingsPage.compactThresholds.itemHint")}
+                </div>
+              )}
+            </div>
+          )
+        })
+      )}
+
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={onAddItem}
+      >
+        {t("settingsPage.compactThresholds.addButton")}
+      </Button>
+    </div>
+  )
+
+  const content = (
+    <>
+      {!contextManagementEnabled ? (
+        <InlineAlert
+          variant="warning"
+          title={t("settingsPage.responsesApi.contextManagementInactiveTitle")}
+          description={t(
+            "settingsPage.responsesApi.compactThresholdsInactiveHint",
+          )}
+        />
+      ) : null}
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-muted-foreground text-xs">
+          {t("settingsPage.compactThresholds.hint")}
+        </div>
+        <div className="flex items-center gap-2">
+          <Switch checked={mode === "json"} onCheckedChange={onToggleMode} />
+          <Label className="text-muted-foreground text-xs">
+            {t("settingsPage.common.jsonMode")}
+          </Label>
+        </div>
+      </div>
+
+      {mode === "json" ? (
+        <div className="space-y-2">
+          <Textarea
+            value={json}
+            onChange={(e) => onJsonChange(e.target.value)}
+            className="min-h-[160px] lg:min-h-[120px] max-h-[36vh] overflow-auto font-mono text-xs"
+            placeholder={t("settingsPage.compactThresholds.jsonPlaceholder")}
+          />
+          {jsonIssue ? (
+            <InlineAlert
+              variant="warning"
+              title={t("settingsPage.common.invalidJsonTitle")}
+              description={jsonIssue}
+            />
+          ) : null}
+        </div>
+      ) : (
+        formBody
+      )}
+    </>
+  )
+
+  if (embedded) {
+    return <div className="space-y-3">{content}</div>
+  }
+
   return (
     <Card className="gap-4 py-4">
       <CardHeader className="px-4">
@@ -1615,144 +1777,7 @@ function CompactThresholdsCard({
           {t("settingsPage.compactThresholds.description")}
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-3 px-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-muted-foreground text-xs">
-            {t("settingsPage.compactThresholds.hint")}
-          </div>
-          <div className="flex items-center gap-2">
-            <Switch checked={mode === "json"} onCheckedChange={onToggleMode} />
-            <Label className="text-muted-foreground text-xs">
-              {t("settingsPage.common.jsonMode")}
-            </Label>
-          </div>
-        </div>
-
-        {mode === "json" ? (
-          <div className="space-y-2">
-            <Textarea
-              value={json}
-              onChange={(e) => onJsonChange(e.target.value)}
-              className="min-h-[160px] lg:min-h-[120px] max-h-[36vh] overflow-auto font-mono text-xs"
-              placeholder={t("settingsPage.compactThresholds.jsonPlaceholder")}
-            />
-            {jsonIssue ? (
-              <InlineAlert
-                variant="warning"
-                title={t("settingsPage.common.invalidJsonTitle")}
-                description={jsonIssue}
-              />
-            ) : null}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {items.length === 0 ? (
-              <div className="text-muted-foreground text-sm">
-                {t("settingsPage.compactThresholds.emptyState")}
-              </div>
-            ) : (
-              items.map((item) => {
-                const modelValue = item.model || defaultModelValue
-                const showCustomModel =
-                  modelValue !== defaultModelValue
-                  && !models.includes(modelValue)
-                const disableModelSelect = !hasModels && !showCustomModel
-                const trimmed = item.threshold.trim()
-                const numericValue = trimmed === "" ? NaN : Number(trimmed)
-                const itemInvalid =
-                  trimmed !== ""
-                  && (!Number.isFinite(numericValue) || numericValue <= 0)
-
-                return (
-                  <div
-                    key={item.id}
-                    className="grid gap-2 rounded-lg border p-3"
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Select
-                        value={modelValue}
-                        onValueChange={(value) =>
-                          onUpdateItem(item.id, {
-                            model: value === defaultModelValue ? "" : value,
-                          })
-                        }
-                        disabled={disableModelSelect}
-                      >
-                        <SelectTrigger className="min-w-[220px]">
-                          <SelectValue
-                            placeholder={
-                              hasModels
-                                ? t("settingsPage.common.selectModelPlaceholder")
-                                : t("settingsPage.common.noModelsAvailable")
-                            }
-                          />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={defaultModelValue}>
-                            {t("settingsPage.common.defaultOption")}
-                          </SelectItem>
-                          {showCustomModel ? (
-                            <SelectItem value={modelValue}>
-                              {t("settingsPage.common.customModel", {
-                                value: modelValue,
-                              })}
-                            </SelectItem>
-                          ) : null}
-                          {models.map((model) => (
-                            <SelectItem key={model} value={model}>
-                              {model}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Input
-                        type="number"
-                        inputMode="numeric"
-                        min={1}
-                        step={1}
-                        className="w-40"
-                        value={item.threshold}
-                        placeholder={t(
-                          "settingsPage.compactThresholds.thresholdPlaceholder",
-                        )}
-                        onChange={(e) =>
-                          onUpdateItem(item.id, { threshold: e.target.value })
-                        }
-                      />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => onRemoveItem(item.id)}
-                      >
-                        {t("settingsPage.common.remove")}
-                      </Button>
-                    </div>
-                    {itemInvalid ? (
-                      <div className="text-destructive text-xs">
-                        {t("settingsPage.compactThresholds.itemInvalid")}
-                      </div>
-                    ) : (
-                      <div className="text-muted-foreground text-xs">
-                        {t("settingsPage.compactThresholds.itemHint")}
-                      </div>
-                    )}
-                  </div>
-                )
-              })
-            )}
-
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={onAddItem}
-            >
-              {t("settingsPage.compactThresholds.addButton")}
-            </Button>
-          </div>
-        )}
-      </CardContent>
+      <CardContent className="space-y-3 px-4">{content}</CardContent>
     </Card>
   )
 }
@@ -2184,6 +2209,180 @@ function ModelAliasesCard({
   )
 }
 
+type ResponsesApiSettingsCardProps = {
+  useResponsesApiWebSocket: boolean
+  useResponsesApiWebSearch: boolean
+  useResponsesApiContextManagement: boolean
+  responsesApiContextManagementModelsValue: string
+  compactThresholdsMode: JsonMode
+  compactThresholdsJson: string
+  compactThresholdsJsonIssue: string | null
+  compactThresholdsItems: Array<CompactThresholdItem>
+  models: Array<string>
+  onToggleUseResponsesApiWebSocket: (value: boolean) => void
+  onToggleUseResponsesApiWebSearch: (value: boolean) => void
+  onToggleUseResponsesApiContextManagement: (value: boolean) => void
+  onResponsesApiContextManagementModelsChange: (value: string) => void
+  onCompactThresholdsToggleMode: (next: boolean) => void
+  onCompactThresholdsJsonChange: (value: string) => void
+  onCompactThresholdsAddItem: () => void
+  onCompactThresholdsRemoveItem: (id: string) => void
+  onCompactThresholdsUpdateItem: (
+    id: string,
+    patch: Partial<CompactThresholdItem>,
+  ) => void
+}
+
+export function ResponsesApiSettingsCard({
+  useResponsesApiWebSocket,
+  useResponsesApiWebSearch,
+  useResponsesApiContextManagement,
+  responsesApiContextManagementModelsValue,
+  compactThresholdsMode,
+  compactThresholdsJson,
+  compactThresholdsJsonIssue,
+  compactThresholdsItems,
+  models,
+  onToggleUseResponsesApiWebSocket,
+  onToggleUseResponsesApiWebSearch,
+  onToggleUseResponsesApiContextManagement,
+  onResponsesApiContextManagementModelsChange,
+  onCompactThresholdsToggleMode,
+  onCompactThresholdsJsonChange,
+  onCompactThresholdsAddItem,
+  onCompactThresholdsRemoveItem,
+  onCompactThresholdsUpdateItem,
+}: ResponsesApiSettingsCardProps): React.JSX.Element {
+  const { t } = useTranslation()
+
+  return (
+    <Card className="gap-4 py-4">
+      <CardHeader className="px-4">
+        <CardTitle>{t("settingsPage.responsesApi.title")}</CardTitle>
+        <CardDescription className="hidden sm:block">
+          {t("settingsPage.responsesApi.description")}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 px-4">
+        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          {t("settingsPage.responsesApi.transportGroupTitle")}
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="text-sm font-medium">
+              {t("settingsPage.responsesApi.useResponsesApiWebSocketLabel")}
+            </div>
+            <div className="text-muted-foreground text-xs">
+              {t("settingsPage.responsesApi.useResponsesApiWebSocketHint")}
+            </div>
+          </div>
+          <Switch
+            checked={useResponsesApiWebSocket}
+            onCheckedChange={onToggleUseResponsesApiWebSocket}
+          />
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="text-sm font-medium">
+              {t("settingsPage.responsesApi.useResponsesApiWebSearchLabel")}
+            </div>
+            <div className="text-muted-foreground text-xs">
+              {t("settingsPage.responsesApi.useResponsesApiWebSearchHint")}
+            </div>
+          </div>
+          <Switch
+            checked={useResponsesApiWebSearch}
+            onCheckedChange={onToggleUseResponsesApiWebSearch}
+          />
+        </div>
+
+        <hr className="border-t" />
+        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          {t("settingsPage.responsesApi.contextManagementGroupTitle")}
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="text-sm font-medium">
+              {t(
+                "settingsPage.responsesApi.useResponsesApiContextManagementLabel",
+              )}
+            </div>
+            <div className="text-muted-foreground text-xs">
+              {t(
+                "settingsPage.responsesApi.useResponsesApiContextManagementHint",
+              )}
+            </div>
+          </div>
+          <Switch
+            checked={useResponsesApiContextManagement}
+            onCheckedChange={onToggleUseResponsesApiContextManagement}
+          />
+        </div>
+
+        <div className="rounded-lg border p-3 space-y-3">
+          <div className="space-y-1">
+            <div className="text-sm font-medium">
+              {t("settingsPage.compactThresholds.title")}
+            </div>
+            <div className="text-muted-foreground text-xs">
+              {t("settingsPage.compactThresholds.description")}
+            </div>
+          </div>
+          <CompactThresholdsCard
+            embedded
+            contextManagementEnabled={useResponsesApiContextManagement}
+            mode={compactThresholdsMode}
+            json={compactThresholdsJson}
+            jsonIssue={compactThresholdsJsonIssue}
+            items={compactThresholdsItems}
+            models={models}
+            onToggleMode={onCompactThresholdsToggleMode}
+            onJsonChange={onCompactThresholdsJsonChange}
+            onAddItem={onCompactThresholdsAddItem}
+            onRemoveItem={onCompactThresholdsRemoveItem}
+            onUpdateItem={onCompactThresholdsUpdateItem}
+          />
+        </div>
+
+        <hr className="border-t" />
+        <div className="grid gap-2 rounded-lg border border-dashed p-3">
+          <div className="space-y-1">
+            <Label className="text-muted-foreground text-xs">
+              {t(
+                "settingsPage.responsesApi.responsesApiContextManagementModelsLabel",
+              )}
+            </Label>
+            <div className="text-muted-foreground text-xs">
+              {t(
+                "settingsPage.responsesApi.responsesApiContextManagementModelsDeprecatedHint",
+              )}
+            </div>
+            {!useResponsesApiContextManagement ? (
+              <div className="text-muted-foreground text-xs">
+                {t("settingsPage.responsesApi.contextManagementInactiveHint")}
+              </div>
+            ) : null}
+          </div>
+          <Textarea
+            autoComplete="off"
+            placeholder={t(
+              "settingsPage.responsesApi.responsesApiContextManagementModelsPlaceholder",
+            )}
+            value={responsesApiContextManagementModelsValue}
+            onChange={(e) =>
+              onResponsesApiContextManagementModelsChange(e.target.value)
+            }
+            className="min-h-[96px] font-mono text-xs"
+          />
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 type DeveloperModeCardProps = {
   devMode: DevModeState
   saving: boolean
@@ -2293,9 +2492,6 @@ type AdvancedSettingsCardProps = {
   compactUseSmallModel: boolean
   messageStartInputTokensFallback: boolean
   useMessagesApi: boolean
-  useResponsesApiWebSocket: boolean
-  useResponsesApiWebSearch: boolean
-  responsesApiContextManagementModelsValue: string
   onToggleAccountAffinity: (value: boolean) => void
   onModelRefreshIntervalChange: (value: string) => void
   onSessionAffinityRetentionChange: (value: string) => void
@@ -2304,9 +2500,6 @@ type AdvancedSettingsCardProps = {
   onToggleCompactUseSmallModel: (value: boolean) => void
   onToggleMessageStartInputTokensFallback: (value: boolean) => void
   onToggleUseMessagesApi: (value: boolean) => void
-  onToggleUseResponsesApiWebSocket: (value: boolean) => void
-  onToggleUseResponsesApiWebSearch: (value: boolean) => void
-  onResponsesApiContextManagementModelsChange: (value: string) => void
 }
 
 export function AdvancedSettingsCard({
@@ -2320,9 +2513,6 @@ export function AdvancedSettingsCard({
   compactUseSmallModel,
   messageStartInputTokensFallback,
   useMessagesApi,
-  useResponsesApiWebSocket,
-  useResponsesApiWebSearch,
-  responsesApiContextManagementModelsValue,
   onToggleAccountAffinity,
   onModelRefreshIntervalChange,
   onSessionAffinityRetentionChange,
@@ -2331,9 +2521,6 @@ export function AdvancedSettingsCard({
   onToggleCompactUseSmallModel,
   onToggleMessageStartInputTokensFallback,
   onToggleUseMessagesApi,
-  onToggleUseResponsesApiWebSocket,
-  onToggleUseResponsesApiWebSearch,
-  onResponsesApiContextManagementModelsChange,
 }: AdvancedSettingsCardProps): React.JSX.Element {
   const { t } = useTranslation()
 
@@ -2409,56 +2596,6 @@ export function AdvancedSettingsCard({
             </div>
           </div>
           <Switch checked={useMessagesApi} onCheckedChange={onToggleUseMessagesApi} />
-        </div>
-
-        <div className="flex items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="text-sm font-medium">
-              {t("settingsPage.advanced.useResponsesApiWebSocketLabel")}
-            </div>
-            <div className="text-muted-foreground text-xs">
-              {t("settingsPage.advanced.useResponsesApiWebSocketHint")}
-            </div>
-          </div>
-          <Switch
-            checked={useResponsesApiWebSocket}
-            onCheckedChange={onToggleUseResponsesApiWebSocket}
-          />
-        </div>
-
-        <div className="flex items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="text-sm font-medium">
-              {t("settingsPage.advanced.useResponsesApiWebSearchLabel")}
-            </div>
-            <div className="text-muted-foreground text-xs">
-              {t("settingsPage.advanced.useResponsesApiWebSearchHint")}
-            </div>
-          </div>
-          <Switch
-            checked={useResponsesApiWebSearch}
-            onCheckedChange={onToggleUseResponsesApiWebSearch}
-          />
-        </div>
-
-        <div className="grid gap-2">
-          <Label className="text-muted-foreground text-xs">
-            {t("settingsPage.advanced.responsesApiContextManagementModelsLabel")}
-          </Label>
-          <Textarea
-            autoComplete="off"
-            placeholder={t(
-              "settingsPage.advanced.responsesApiContextManagementModelsPlaceholder",
-            )}
-            value={responsesApiContextManagementModelsValue}
-            onChange={(e) =>
-              onResponsesApiContextManagementModelsChange(e.target.value)
-            }
-            className="min-h-[96px] font-mono text-xs"
-          />
-          <div className="text-muted-foreground text-xs">
-            {t("settingsPage.advanced.responsesApiContextManagementModelsHint")}
-          </div>
         </div>
 
         {/* — Model & Tokens — */}
@@ -2971,10 +3108,12 @@ type SettingsPageViewProps = {
   useMessagesApi: boolean
   useResponsesApiWebSocket: boolean
   useResponsesApiWebSearch: boolean
+  useResponsesApiContextManagement: boolean
   responsesApiContextManagementModelsValue: string
   onUseMessagesApiToggle: (value: boolean) => void
   onUseResponsesApiWebSocketToggle: (value: boolean) => void
   onUseResponsesApiWebSearchToggle: (value: boolean) => void
+  onUseResponsesApiContextManagementToggle: (value: boolean) => void
   onResponsesApiContextManagementModelsChange: (value: string) => void
   providersItems: Array<ProviderItem>
   providersIssue: string | null
@@ -3361,6 +3500,13 @@ function useSettingsPageState(): SettingsPageViewProps {
     [setDraft],
   )
 
+  const handleUseResponsesApiContextManagementToggle = useCallback(
+    (value: boolean) => {
+      setDraft((prev) => ({ ...prev, useResponsesApiContextManagement: value }))
+    },
+    [setDraft],
+  )
+
   const handleResponsesApiContextManagementModelsChange = useCallback(
     (value: string) => {
       setResponsesApiContextManagementModelsValue(value)
@@ -3467,6 +3613,8 @@ function useSettingsPageState(): SettingsPageViewProps {
   const useMessagesApi = draft.useMessagesApi ?? true
   const useResponsesApiWebSocket = draft.useResponsesApiWebSocket ?? true
   const useResponsesApiWebSearch = draft.useResponsesApiWebSearch ?? true
+  const useResponsesApiContextManagement =
+    draft.useResponsesApiContextManagement ?? true
 
   return {
     loading,
@@ -3544,10 +3692,12 @@ function useSettingsPageState(): SettingsPageViewProps {
     useMessagesApi,
     useResponsesApiWebSocket,
     useResponsesApiWebSearch,
+    useResponsesApiContextManagement,
     responsesApiContextManagementModelsValue,
     onUseMessagesApiToggle: handleUseMessagesApiToggle,
     onUseResponsesApiWebSocketToggle: handleUseResponsesApiWebSocketToggle,
     onUseResponsesApiWebSearchToggle: handleUseResponsesApiWebSearchToggle,
+    onUseResponsesApiContextManagementToggle: handleUseResponsesApiContextManagementToggle,
     onResponsesApiContextManagementModelsChange:
       handleResponsesApiContextManagementModelsChange,
     providersItems,
@@ -3643,10 +3793,12 @@ function SettingsPageView({
   useMessagesApi,
   useResponsesApiWebSocket,
   useResponsesApiWebSearch,
+  useResponsesApiContextManagement,
   responsesApiContextManagementModelsValue,
   onUseMessagesApiToggle,
   onUseResponsesApiWebSocketToggle,
   onUseResponsesApiWebSearchToggle,
+  onUseResponsesApiContextManagementToggle,
   onResponsesApiContextManagementModelsChange,
   providersItems,
   providersIssue,
@@ -3667,10 +3819,7 @@ function SettingsPageView({
     return [
       { id: "general", label: t("settingsPage.sections.general") },
       { id: "reasoning", label: t("settingsPage.sections.reasoning") },
-      {
-        id: "compactThresholds",
-        label: t("settingsPage.sections.compactThresholds"),
-      },
+      { id: "responsesApi", label: t("settingsPage.sections.responsesApi") },
       { id: "aliases", label: t("settingsPage.sections.aliases") },
       { id: "prompts", label: t("settingsPage.sections.prompts") },
       { id: "advanced", label: t("settingsPage.sections.advanced") },
@@ -3824,24 +3973,38 @@ function SettingsPageView({
             />
           </SettingsSectionCard>
 
-          {/* Compact Thresholds */}
+          {/* Responses API */}
           <SettingsSectionCard
-            id="compactThresholds"
-            isActive={activeSection === "compactThresholds"}
-            ref={(el) => registerSection("compactThresholds", el)}
+            id="responsesApi"
+            isActive={activeSection === "responsesApi"}
+            ref={(el) => registerSection("responsesApi", el)}
             style={{ animationDelay: "90ms" }}
           >
-            <CompactThresholdsCard
-              mode={compactThresholdsMode}
-              json={compactThresholdsJson}
-              jsonIssue={compactThresholdsJsonIssue}
-              items={compactThresholdsItems}
+            <ResponsesApiSettingsCard
+              useResponsesApiWebSocket={useResponsesApiWebSocket}
+              useResponsesApiWebSearch={useResponsesApiWebSearch}
+              useResponsesApiContextManagement={useResponsesApiContextManagement}
+              responsesApiContextManagementModelsValue={
+                responsesApiContextManagementModelsValue
+              }
+              compactThresholdsMode={compactThresholdsMode}
+              compactThresholdsJson={compactThresholdsJson}
+              compactThresholdsJsonIssue={compactThresholdsJsonIssue}
+              compactThresholdsItems={compactThresholdsItems}
               models={models}
-              onToggleMode={onCompactThresholdsToggleMode}
-              onJsonChange={onCompactThresholdsJsonChange}
-              onAddItem={onCompactThresholdsAddItem}
-              onRemoveItem={onCompactThresholdsRemoveItem}
-              onUpdateItem={onCompactThresholdsUpdateItem}
+              onToggleUseResponsesApiWebSocket={onUseResponsesApiWebSocketToggle}
+              onToggleUseResponsesApiWebSearch={onUseResponsesApiWebSearchToggle}
+              onToggleUseResponsesApiContextManagement={
+                onUseResponsesApiContextManagementToggle
+              }
+              onResponsesApiContextManagementModelsChange={
+                onResponsesApiContextManagementModelsChange
+              }
+              onCompactThresholdsToggleMode={onCompactThresholdsToggleMode}
+              onCompactThresholdsJsonChange={onCompactThresholdsJsonChange}
+              onCompactThresholdsAddItem={onCompactThresholdsAddItem}
+              onCompactThresholdsRemoveItem={onCompactThresholdsRemoveItem}
+              onCompactThresholdsUpdateItem={onCompactThresholdsUpdateItem}
             />
           </SettingsSectionCard>
 
@@ -3908,11 +4071,6 @@ function SettingsPageView({
               compactUseSmallModel={compactUseSmallModel}
               messageStartInputTokensFallback={messageStartInputTokensFallback}
               useMessagesApi={useMessagesApi}
-              useResponsesApiWebSocket={useResponsesApiWebSocket}
-              useResponsesApiWebSearch={useResponsesApiWebSearch}
-              responsesApiContextManagementModelsValue={
-                responsesApiContextManagementModelsValue
-              }
               onToggleAccountAffinity={onAccountAffinityToggle}
               onModelRefreshIntervalChange={onModelRefreshIntervalChange}
               onSessionAffinityRetentionChange={
@@ -3927,15 +4085,6 @@ function SettingsPageView({
                 onMessageStartInputTokensFallbackToggle
               }
               onToggleUseMessagesApi={onUseMessagesApiToggle}
-              onToggleUseResponsesApiWebSocket={
-                onUseResponsesApiWebSocketToggle
-              }
-              onToggleUseResponsesApiWebSearch={
-                onUseResponsesApiWebSearchToggle
-              }
-              onResponsesApiContextManagementModelsChange={
-                onResponsesApiContextManagementModelsChange
-              }
             />
           </SettingsSectionCard>
 

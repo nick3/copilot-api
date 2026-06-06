@@ -159,6 +159,7 @@ export type AdminConfig = {
   /** @deprecated */
   apiKey?: string
   anthropicApiKey?: string
+  /** @deprecated use useResponsesApiContextManagement */
   responsesApiContextManagementModels?: Array<string>
   modelReasoningEfforts?: Record<string, ReasoningEffort>
   modelResponsesApiCompactThresholds?: Record<string, number>
@@ -172,6 +173,7 @@ export type AdminConfig = {
   useMessagesApi?: boolean
   useResponsesApiWebSocket?: boolean
   useResponsesApiWebSearch?: boolean
+  useResponsesApiContextManagement?: boolean
 }
 
 export type AdminConfigResponse = AdminConfig & {
@@ -443,6 +445,7 @@ const ADMIN_CONFIG_KEYS = new Set<keyof AdminConfig>([
   "useMessagesApi",
   "useResponsesApiWebSocket",
   "useResponsesApiWebSearch",
+  "useResponsesApiContextManagement",
 ])
 
 export async function updateAdminConfig(
