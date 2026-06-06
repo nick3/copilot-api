@@ -41,6 +41,7 @@ export interface AppConfig {
   /** @deprecated use useResponsesApiContextManagement */
   responsesApiContextManagementModels?: Array<string>
   useResponsesApiContextManagement?: boolean
+  modelResponsesApiCompactThresholds?: Record<string, number>
   modelReasoningEfforts?: Record<
     string,
     "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
@@ -139,6 +140,11 @@ You interact with the user through a terminal. You have 2 ways of communicating 
 - As you are thinking, you very frequently provide updates even if not taking any actions, informing the user of your progress. You interrupt your thinking and send multiple updates in a row if thinking for more than 100 words.
 - Tone of your updates MUST match your personality.`
 
+const modelResponsesApiCompactThresholds = {
+  "gpt-5.4": 272_000 * 0.8,
+  "gpt-5.5": 272_000 * 0.8,
+}
+
 const defaultConfig: AppConfig = {
   auth: {
     apiKeys: [],
@@ -154,6 +160,7 @@ const defaultConfig: AppConfig = {
   smallModel: "gpt-5-mini",
   accountAffinity: true,
   useResponsesApiContextManagement: true,
+  modelResponsesApiCompactThresholds,
   modelReasoningEfforts: {
     "gpt-5-mini": "low",
     "gpt-5.3-codex": "xhigh",
@@ -313,6 +320,10 @@ function mergeDefaultConfig(config: AppConfig): {
 } {
   const extraPrompts = config.extraPrompts ?? {}
   const defaultExtraPrompts = defaultConfig.extraPrompts ?? {}
+  const responsesApiCompactThresholds =
+    config.modelResponsesApiCompactThresholds ?? {}
+  const defaultResponsesApiCompactThresholds =
+    defaultConfig.modelResponsesApiCompactThresholds ?? {}
   const modelReasoningEfforts = config.modelReasoningEfforts ?? {}
   const defaultModelReasoningEfforts = defaultConfig.modelReasoningEfforts ?? {}
   const hasForceAgent = typeof config.forceAgent === "boolean"
@@ -325,15 +336,21 @@ function mergeDefaultConfig(config: AppConfig): {
   const missingReasoningEffortModels = Object.keys(
     defaultModelReasoningEfforts,
   ).filter((model) => !Object.hasOwn(modelReasoningEfforts, model))
+  const missingResponsesApiCompactThresholdModels = Object.keys(
+    defaultResponsesApiCompactThresholds,
+  ).filter((model) => !Object.hasOwn(responsesApiCompactThresholds, model))
 
   const hasExtraPromptChanges = missingExtraPromptModels.length > 0
   const hasReasoningEffortChanges = missingReasoningEffortModels.length > 0
   const hasForceAgentChanges = !hasForceAgent
+  const hasResponsesApiCompactThresholdChanges =
+    missingResponsesApiCompactThresholdModels.length > 0
 
   if (
     !hasExtraPromptChanges
     && !hasReasoningEffortChanges
     && !hasForceAgentChanges
+    && !hasResponsesApiCompactThresholdChanges
   ) {
     return { mergedConfig: config, changed: false }
   }
@@ -344,6 +361,10 @@ function mergeDefaultConfig(config: AppConfig): {
       extraPrompts: {
         ...defaultExtraPrompts,
         ...extraPrompts,
+      },
+      modelResponsesApiCompactThresholds: {
+        ...defaultResponsesApiCompactThresholds,
+        ...responsesApiCompactThresholds,
       },
       modelReasoningEfforts: {
         ...defaultModelReasoningEfforts,
@@ -552,11 +573,7 @@ export function mergeConfigWithDefaults(): AppConfig {
 
   if (changed) {
     try {
-      fs.writeFileSync(
-        PATHS.CONFIG_PATH,
-        `${JSON.stringify(mergedConfig, null, 2)}\n`,
-        "utf8",
-      )
+      writeConfigToDisk(mergedConfig)
     } catch (writeError) {
       consola.warn("Failed to write merged config defaults", writeError)
     }
@@ -872,6 +889,23 @@ export function shouldCompactUseSmallModel(): boolean {
 export function isResponsesApiContextManagementEnabled(): boolean {
   const config = getConfig()
   return config.useResponsesApiContextManagement ?? true
+}
+
+export function getModelResponsesApiCompactThreshold(
+  model: string,
+): number | undefined {
+  const config = getConfig()
+  const threshold = config.modelResponsesApiCompactThresholds?.[model]
+
+  if (
+    typeof threshold !== "number"
+    || !Number.isFinite(threshold)
+    || threshold <= 0
+  ) {
+    return undefined
+  }
+
+  return threshold
 }
 
 export function getReasoningEffortForModel(

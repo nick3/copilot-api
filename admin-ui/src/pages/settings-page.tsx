@@ -57,6 +57,7 @@ import {
 const SETTINGS_SECTION_IDS = [
   "general",
   "reasoning",
+  "compactThresholds",
   "aliases",
   "prompts",
   "advanced",
@@ -83,6 +84,13 @@ type ReasoningItem = {
   id: string
   model: string
   effort: ReasoningEffort
+}
+
+type CompactThresholdItem = {
+  id: string
+  model: string
+  /** Raw input value preserved for editing UX. The numeric record is derived from this. */
+  threshold: string
 }
 
 type ModelAliasItem = {
@@ -290,6 +298,17 @@ function reasoningItemsFromRecord(
   }))
 }
 
+function compactThresholdItemsFromRecord(
+  record: Record<string, number> | undefined,
+): Array<CompactThresholdItem> {
+  if (!record) return []
+  return Object.entries(record).map(([model, threshold]) => ({
+    id: createItemId(),
+    model,
+    threshold: Number.isFinite(threshold) ? String(threshold) : "",
+  }))
+}
+
 function aliasItemsFromRecord(
   record: ModelAliasRecordInput | undefined
 ): Array<ModelAliasItem> {
@@ -332,6 +351,22 @@ function reasoningRecordFromItems(
     const key = item.model.trim()
     if (!key) continue
     record[key] = item.effort
+  }
+  return record
+}
+
+function compactThresholdRecordFromItems(
+  items: Array<CompactThresholdItem>,
+): Record<string, number> {
+  const record: Record<string, number> = {}
+  for (const item of items) {
+    const key = item.model.trim()
+    if (!key) continue
+    const trimmed = item.threshold.trim()
+    if (!trimmed) continue
+    const value = Number(trimmed)
+    if (!Number.isFinite(value) || value <= 0) continue
+    record[key] = value
   }
   return record
 }
@@ -735,6 +770,40 @@ function parseReasoningJson(
   }
 }
 
+function parseCompactThresholdsJson(
+  value: string,
+): ParseResult<Record<string, number>> {
+  if (!value.trim()) return { record: {} }
+
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (!isPlainObject(parsed)) {
+      return {
+        error: "modelResponsesApiCompactThresholds JSON must be an object.",
+      }
+    }
+
+    const record: Record<string, number> = {}
+    for (const [key, threshold] of Object.entries(parsed)) {
+      if (typeof threshold !== "number") {
+        return {
+          error: `modelResponsesApiCompactThresholds.${key} must be a number.`,
+        }
+      }
+      if (!Number.isFinite(threshold) || threshold <= 0) {
+        return {
+          error: `modelResponsesApiCompactThresholds.${key} must be a positive finite number.`,
+        }
+      }
+      record[key] = threshold
+    }
+
+    return { record }
+  } catch {
+    return { error: "modelResponsesApiCompactThresholds JSON is not valid." }
+  }
+}
+
 function parseModelAliasesJson(
   value: string,
 ): ParseResult<ModelAliasRecord> {
@@ -830,6 +899,19 @@ type ReasoningEditor = {
   onRemoveItem: (id: string) => void
   onUpdateItem: (id: string, patch: Partial<ReasoningItem>) => void
   setFromRecord: (record?: Record<string, ReasoningEffort>) => void
+}
+
+type CompactThresholdEditor = {
+  mode: JsonMode
+  items: Array<CompactThresholdItem>
+  json: string
+  jsonIssue: string | null
+  onToggleMode: (next: boolean) => void
+  onJsonChange: (value: string) => void
+  onAddItem: () => void
+  onRemoveItem: (id: string) => void
+  onUpdateItem: (id: string, patch: Partial<CompactThresholdItem>) => void
+  setFromRecord: (record?: Record<string, number>) => void
 }
 
 type ModelAliasEditor = {
@@ -998,6 +1080,101 @@ function useReasoningEditor(
   const onUpdateItem = useCallback(
     (id: string, patch: Partial<ReasoningItem>) => {
       const next = items.map((item) => (item.id === id ? { ...item, ...patch } : item))
+      updateItems(next)
+    },
+    [items, updateItems],
+  )
+
+  return {
+    mode,
+    items,
+    json,
+    jsonIssue,
+    onToggleMode,
+    onJsonChange,
+    onAddItem,
+    onRemoveItem,
+    onUpdateItem,
+    setFromRecord,
+  }
+}
+
+function useCompactThresholdEditor(
+  onRecordChange: (record: Record<string, number>) => void,
+): CompactThresholdEditor {
+  const [mode, setMode] = useState<JsonMode>("form")
+  const [items, setItems] = useState<Array<CompactThresholdItem>>([])
+  const [json, setJson] = useState("")
+  const [jsonError, setJsonError] = useState<string | null>(null)
+
+  const jsonIssue = useMemo(
+    () =>
+      jsonError ? `modelResponsesApiCompactThresholds: ${jsonError}` : null,
+    [jsonError],
+  )
+
+  const setFromRecord = useCallback(
+    (record?: Record<string, number>) => {
+      setItems(compactThresholdItemsFromRecord(record))
+      setJson(JSON.stringify(record ?? {}, null, 2))
+      setJsonError(null)
+    },
+    [],
+  )
+
+  const updateItems = useCallback(
+    (nextItems: Array<CompactThresholdItem>) => {
+      setItems(nextItems)
+      onRecordChange(compactThresholdRecordFromItems(nextItems))
+    },
+    [onRecordChange],
+  )
+
+  const onJsonChange = useCallback(
+    (value: string) => {
+      updateJsonRecord({
+        value,
+        parse: parseCompactThresholdsJson,
+        setJson,
+        setError: setJsonError,
+        onRecord: (record) =>
+          updateItems(compactThresholdItemsFromRecord(record)),
+      })
+    },
+    [updateItems],
+  )
+
+  const onToggleMode = useCallback(
+    (next: boolean) => {
+      toggleJsonMode({
+        next,
+        record: compactThresholdRecordFromItems(items),
+        setJson,
+        setError: setJsonError,
+        setMode,
+      })
+    },
+    [items],
+  )
+
+  const onAddItem = useCallback(() => {
+    updateItems(
+      items.concat({ id: createItemId(), model: "", threshold: "" }),
+    )
+  }, [items, updateItems])
+
+  const onRemoveItem = useCallback(
+    (id: string) => {
+      updateItems(items.filter((item) => item.id !== id))
+    },
+    [items, updateItems],
+  )
+
+  const onUpdateItem = useCallback(
+    (id: string, patch: Partial<CompactThresholdItem>) => {
+      const next = items.map((item) =>
+        item.id === id ? { ...item, ...patch } : item,
+      )
       updateItems(next)
     },
     [items, updateItems],
@@ -1393,6 +1570,185 @@ function ReasoningEffortsCard({
 
             <Button type="button" variant="outline" size="sm" onClick={onAddItem}>
               {t("settingsPage.reasoning.addButton")}
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+type CompactThresholdsCardProps = {
+  mode: JsonMode
+  json: string
+  jsonIssue: string | null
+  items: Array<CompactThresholdItem>
+  models: Array<string>
+  onToggleMode: (next: boolean) => void
+  onJsonChange: (value: string) => void
+  onAddItem: () => void
+  onRemoveItem: (id: string) => void
+  onUpdateItem: (id: string, patch: Partial<CompactThresholdItem>) => void
+}
+
+function CompactThresholdsCard({
+  mode,
+  json,
+  jsonIssue,
+  items,
+  models,
+  onToggleMode,
+  onJsonChange,
+  onAddItem,
+  onRemoveItem,
+  onUpdateItem,
+}: CompactThresholdsCardProps): React.JSX.Element {
+  const defaultModelValue = "__default__"
+  const hasModels = models.length > 0
+  const { t } = useTranslation()
+
+  return (
+    <Card className="gap-4 py-4">
+      <CardHeader className="px-4">
+        <CardTitle>{t("settingsPage.compactThresholds.title")}</CardTitle>
+        <CardDescription className="hidden sm:block">
+          {t("settingsPage.compactThresholds.description")}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3 px-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-muted-foreground text-xs">
+            {t("settingsPage.compactThresholds.hint")}
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch checked={mode === "json"} onCheckedChange={onToggleMode} />
+            <Label className="text-muted-foreground text-xs">
+              {t("settingsPage.common.jsonMode")}
+            </Label>
+          </div>
+        </div>
+
+        {mode === "json" ? (
+          <div className="space-y-2">
+            <Textarea
+              value={json}
+              onChange={(e) => onJsonChange(e.target.value)}
+              className="min-h-[160px] lg:min-h-[120px] max-h-[36vh] overflow-auto font-mono text-xs"
+              placeholder={t("settingsPage.compactThresholds.jsonPlaceholder")}
+            />
+            {jsonIssue ? (
+              <InlineAlert
+                variant="warning"
+                title={t("settingsPage.common.invalidJsonTitle")}
+                description={jsonIssue}
+              />
+            ) : null}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {items.length === 0 ? (
+              <div className="text-muted-foreground text-sm">
+                {t("settingsPage.compactThresholds.emptyState")}
+              </div>
+            ) : (
+              items.map((item) => {
+                const modelValue = item.model || defaultModelValue
+                const showCustomModel =
+                  modelValue !== defaultModelValue
+                  && !models.includes(modelValue)
+                const disableModelSelect = !hasModels && !showCustomModel
+                const trimmed = item.threshold.trim()
+                const numericValue = trimmed === "" ? NaN : Number(trimmed)
+                const itemInvalid =
+                  trimmed !== ""
+                  && (!Number.isFinite(numericValue) || numericValue <= 0)
+
+                return (
+                  <div
+                    key={item.id}
+                    className="grid gap-2 rounded-lg border p-3"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Select
+                        value={modelValue}
+                        onValueChange={(value) =>
+                          onUpdateItem(item.id, {
+                            model: value === defaultModelValue ? "" : value,
+                          })
+                        }
+                        disabled={disableModelSelect}
+                      >
+                        <SelectTrigger className="min-w-[220px]">
+                          <SelectValue
+                            placeholder={
+                              hasModels
+                                ? t("settingsPage.common.selectModelPlaceholder")
+                                : t("settingsPage.common.noModelsAvailable")
+                            }
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={defaultModelValue}>
+                            {t("settingsPage.common.defaultOption")}
+                          </SelectItem>
+                          {showCustomModel ? (
+                            <SelectItem value={modelValue}>
+                              {t("settingsPage.common.customModel", {
+                                value: modelValue,
+                              })}
+                            </SelectItem>
+                          ) : null}
+                          {models.map((model) => (
+                            <SelectItem key={model} value={model}>
+                              {model}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        step={1}
+                        className="w-40"
+                        value={item.threshold}
+                        placeholder={t(
+                          "settingsPage.compactThresholds.thresholdPlaceholder",
+                        )}
+                        onChange={(e) =>
+                          onUpdateItem(item.id, { threshold: e.target.value })
+                        }
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onRemoveItem(item.id)}
+                      >
+                        {t("settingsPage.common.remove")}
+                      </Button>
+                    </div>
+                    {itemInvalid ? (
+                      <div className="text-destructive text-xs">
+                        {t("settingsPage.compactThresholds.itemInvalid")}
+                      </div>
+                    ) : (
+                      <div className="text-muted-foreground text-xs">
+                        {t("settingsPage.compactThresholds.itemHint")}
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+            )}
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onAddItem}
+            >
+              {t("settingsPage.compactThresholds.addButton")}
             </Button>
           </div>
         )}
@@ -2578,6 +2934,18 @@ type SettingsPageViewProps = {
   onReasoningAddItem: () => void
   onReasoningRemoveItem: (id: string) => void
   onReasoningUpdateItem: (id: string, value: Partial<ReasoningItem>) => void
+  compactThresholdsMode: JsonMode
+  compactThresholdsJson: string
+  compactThresholdsJsonIssue: string | null
+  compactThresholdsItems: Array<CompactThresholdItem>
+  onCompactThresholdsToggleMode: (next: boolean) => void
+  onCompactThresholdsJsonChange: (value: string) => void
+  onCompactThresholdsAddItem: () => void
+  onCompactThresholdsRemoveItem: (id: string) => void
+  onCompactThresholdsUpdateItem: (
+    id: string,
+    value: Partial<CompactThresholdItem>,
+  ) => void
   extraMode: JsonMode
   extraJson: string
   extraJsonIssue: string | null
@@ -2663,6 +3031,12 @@ function useSettingsPageState(): SettingsPageViewProps {
   const reasoningEditor = useReasoningEditor((record) =>
     setDraft((prev) => ({ ...prev, modelReasoningEfforts: record })),
   )
+  const compactThresholdsEditor = useCompactThresholdEditor((record) =>
+    setDraft((prev) => ({
+      ...prev,
+      modelResponsesApiCompactThresholds: record,
+    })),
+  )
 
   const aliasEditor = useModelAliasEditor((record) =>
     setDraft((prev) => ({ ...prev, modelAliases: record })),
@@ -2697,6 +3071,19 @@ function useSettingsPageState(): SettingsPageViewProps {
     onUpdateItem: onReasoningUpdateItem,
     setFromRecord: setReasoningFromRecord,
   } = reasoningEditor
+
+  const {
+    mode: compactThresholdsMode,
+    items: compactThresholdsItems,
+    json: compactThresholdsJson,
+    jsonIssue: compactThresholdsJsonIssue,
+    onToggleMode: onCompactThresholdsToggleMode,
+    onJsonChange: onCompactThresholdsJsonChange,
+    onAddItem: onCompactThresholdsAddItem,
+    onRemoveItem: onCompactThresholdsRemoveItem,
+    onUpdateItem: onCompactThresholdsUpdateItem,
+    setFromRecord: setCompactThresholdsFromRecord,
+  } = compactThresholdsEditor
 
   const {
     mode: aliasMode,
@@ -2740,6 +3127,9 @@ function useSettingsPageState(): SettingsPageViewProps {
       setInitialDraftJson(toComparableDraftJson(normalizedDraft))
       setExtraFromRecord(configData.extraPrompts)
       setReasoningFromRecord(configData.modelReasoningEfforts)
+      setCompactThresholdsFromRecord(
+        configData.modelResponsesApiCompactThresholds,
+      )
       setAliasFromRecord(normalizedAliases)
       setProvidersFromRecord(configData.providers)
       setModelRefreshIntervalInput(
@@ -2757,6 +3147,7 @@ function useSettingsPageState(): SettingsPageViewProps {
     [
       setExtraFromRecord,
       setReasoningFromRecord,
+      setCompactThresholdsFromRecord,
       setAliasFromRecord,
       setProvidersFromRecord,
       setModelRefreshIntervalInput,
@@ -2989,6 +3380,9 @@ function useSettingsPageState(): SettingsPageViewProps {
     && !loading
     && !(extraMode === "json" && extraJsonIssue)
     && !(reasoningMode === "json" && reasoningJsonIssue)
+    && !(
+      compactThresholdsMode === "json" && compactThresholdsJsonIssue
+    )
     && !(aliasMode === "json" && aliasJsonIssue)
     && !modelRefreshIntervalIssue
     && !sessionAffinityRetentionIssue
@@ -3117,6 +3511,15 @@ function useSettingsPageState(): SettingsPageViewProps {
     onReasoningAddItem,
     onReasoningRemoveItem,
     onReasoningUpdateItem,
+    compactThresholdsMode,
+    compactThresholdsJson,
+    compactThresholdsJsonIssue,
+    compactThresholdsItems,
+    onCompactThresholdsToggleMode,
+    onCompactThresholdsJsonChange,
+    onCompactThresholdsAddItem,
+    onCompactThresholdsRemoveItem,
+    onCompactThresholdsUpdateItem,
     extraMode,
     extraJson,
     extraJsonIssue,
@@ -3206,6 +3609,15 @@ function SettingsPageView({
   onReasoningAddItem,
   onReasoningRemoveItem,
   onReasoningUpdateItem,
+  compactThresholdsMode,
+  compactThresholdsJson,
+  compactThresholdsJsonIssue,
+  compactThresholdsItems,
+  onCompactThresholdsToggleMode,
+  onCompactThresholdsJsonChange,
+  onCompactThresholdsAddItem,
+  onCompactThresholdsRemoveItem,
+  onCompactThresholdsUpdateItem,
   extraMode,
   extraJson,
   extraJsonIssue,
@@ -3255,6 +3667,10 @@ function SettingsPageView({
     return [
       { id: "general", label: t("settingsPage.sections.general") },
       { id: "reasoning", label: t("settingsPage.sections.reasoning") },
+      {
+        id: "compactThresholds",
+        label: t("settingsPage.sections.compactThresholds"),
+      },
       { id: "aliases", label: t("settingsPage.sections.aliases") },
       { id: "prompts", label: t("settingsPage.sections.prompts") },
       { id: "advanced", label: t("settingsPage.sections.advanced") },
@@ -3405,6 +3821,27 @@ function SettingsPageView({
               onAddItem={onReasoningAddItem}
               onRemoveItem={onReasoningRemoveItem}
               onUpdateItem={onReasoningUpdateItem}
+            />
+          </SettingsSectionCard>
+
+          {/* Compact Thresholds */}
+          <SettingsSectionCard
+            id="compactThresholds"
+            isActive={activeSection === "compactThresholds"}
+            ref={(el) => registerSection("compactThresholds", el)}
+            style={{ animationDelay: "90ms" }}
+          >
+            <CompactThresholdsCard
+              mode={compactThresholdsMode}
+              json={compactThresholdsJson}
+              jsonIssue={compactThresholdsJsonIssue}
+              items={compactThresholdsItems}
+              models={models}
+              onToggleMode={onCompactThresholdsToggleMode}
+              onJsonChange={onCompactThresholdsJsonChange}
+              onAddItem={onCompactThresholdsAddItem}
+              onRemoveItem={onCompactThresholdsRemoveItem}
+              onUpdateItem={onCompactThresholdsUpdateItem}
             />
           </SettingsSectionCard>
 

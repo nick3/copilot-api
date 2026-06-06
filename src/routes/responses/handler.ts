@@ -62,6 +62,7 @@ import {
   removeWebSearchTool,
   sanitizeOversizedInputImages,
 } from "./utils"
+import consola from "consola"
 
 const logger = createHandlerLogger("responses-handler")
 
@@ -75,7 +76,7 @@ export const handleResponses = async (c: Context) => {
   const requestedModel = payload.model
   payload.model = resolveMappedModel(payload.model)
   if (payload.model !== requestedModel) {
-    logger.debug(
+    consola.debug(
       `Resolved model mapping: ${requestedModel} -> ${payload.model}`,
     )
   }

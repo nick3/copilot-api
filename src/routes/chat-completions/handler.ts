@@ -4,7 +4,11 @@ import { streamSSE, type SSEMessage } from "hono/streaming"
 
 import { accountsManager } from "~/lib/accounts-manager"
 import { awaitApproval } from "~/lib/approval"
-import { getAliasTargetSet, resolveModelAlias } from "~/lib/config"
+import {
+  getAliasTargetSet,
+  resolveModelAlias,
+  resolveMappedModel,
+} from "~/lib/config"
 import {
   computeDiff,
   extractErrorObservability,
@@ -13,6 +17,7 @@ import {
   toAccountContext,
 } from "~/lib/handler-utils"
 import { createHandlerLogger, debugJson, debugJsonTail } from "~/lib/logger"
+import { parseProviderModelAlias } from "~/lib/provider-model"
 import { checkRateLimit } from "~/lib/rate-limit"
 import {
   getRequestHistoryStore,
@@ -28,6 +33,7 @@ import {
   parseUserIdMetadata,
   resolveAffinityKey,
 } from "~/lib/utils"
+import { handleProviderChatCompletionsForProvider } from "~/routes/provider/chat-completions/handler"
 import {
   createChatCompletions,
   getChatInitiator,
@@ -100,10 +106,21 @@ function maybeRejectChatCompletionsClientModel(
 }
 
 export async function handleCompletion(c: Context) {
+  const payload = await c.req.json<ChatCompletionsPayload>()
+  payload.model = resolveMappedModel(payload.model)
+
+  const providerModelAlias = parseProviderModelAlias(payload.model)
+  if (providerModelAlias) {
+    payload.model = providerModelAlias.model
+    return await handleProviderChatCompletionsForProvider(c, {
+      payload,
+      provider: providerModelAlias.provider,
+    })
+  }
+
   await checkRateLimit(state)
   const store = getRequestHistoryStore()
   const request = buildRequestContext(c)
-  const payload = await c.req.json<ChatCompletionsPayload>()
   const clientModel = payload.model
   const streamRequested = Boolean(payload.stream)
   const initiator = getChatInitiator(payload.messages)

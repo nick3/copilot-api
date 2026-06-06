@@ -477,6 +477,7 @@
       "general": "通用",
       "accountAffinity": "账号亲和性",
       "reasoning": "推理",
+      "compactThresholds": "压缩阈值",
       "aliases": "别名",
       "prompts": "提示词",
       "advanced": "高级",
@@ -542,6 +543,17 @@
       "jsonPlaceholder": "{ \\\"gpt-5-mini\\\": \\\"low\\\" }",
       "emptyState": "没有推理覆盖。请在下方添加模型。",
       "itemHint": "覆盖该模型的推理强度。",
+      "addButton": "添加模型覆盖"
+    },
+    "compactThresholds": {
+      "title": "Responses API 压缩阈值",
+      "description": "为 /v1/responses 上下文管理（context_management）按模型设置 compact_threshold。",
+      "hint": "上游开始压缩时的 token 数。优先级高于通用的 max_prompt 兜底阈值。",
+      "jsonPlaceholder": "{ \\\"gpt-5.4\\\": 217600 }",
+      "emptyState": "未配置压缩阈值。请在下方添加模型。",
+      "itemHint": "作为该模型的 compact_threshold 发送给上游。",
+      "itemInvalid": "阈值必须为正整数。",
+      "thresholdPlaceholder": "Tokens",
       "addButton": "添加模型覆盖"
     },
     "prompts": {

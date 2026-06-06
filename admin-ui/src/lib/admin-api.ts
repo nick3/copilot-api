@@ -161,6 +161,7 @@ export type AdminConfig = {
   anthropicApiKey?: string
   responsesApiContextManagementModels?: Array<string>
   modelReasoningEfforts?: Record<string, ReasoningEffort>
+  modelResponsesApiCompactThresholds?: Record<string, number>
   modelAliases?: Record<string, ModelAliasSpec | string>
   allowOriginalModelNamesForAliases?: boolean
   forceAgent?: boolean

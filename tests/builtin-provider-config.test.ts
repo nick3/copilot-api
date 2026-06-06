@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url"
 
 interface ConfigFileShape {
   builtinProviders?: Record<string, unknown>
+  modelResponsesApiCompactThresholds?: Record<string, number>
   useResponsesApiContextManagement?: boolean
   providers?: Record<
     string,
@@ -109,6 +110,47 @@ describe("builtin provider config", () => {
     )
 
     expect(JSON.parse(output)).toEqual({ enabled: false })
+  })
+
+  test("adds model Responses API compact thresholds by default", () => {
+    const tempDir = createTempConfigDir()
+    const configPath = path.join(tempDir, "config.json")
+
+    const output = runScript(
+      tempDir,
+      'const { getModelResponsesApiCompactThreshold } = await import("./src/lib/config"); console.log(JSON.stringify({ gpt54: getModelResponsesApiCompactThreshold("gpt-5.4"), gpt55: getModelResponsesApiCompactThreshold("gpt-5.5"), unknown: getModelResponsesApiCompactThreshold("gpt-test") ?? null }));',
+    )
+
+    expect(JSON.parse(output)).toEqual({
+      gpt54: 217600,
+      gpt55: 217600,
+      unknown: null,
+    })
+    expect(
+      readConfigFile(configPath).modelResponsesApiCompactThresholds,
+    ).toEqual({
+      "gpt-5.4": 217600,
+      "gpt-5.5": 217600,
+    })
+  })
+
+  test("allows overriding model Responses API compact thresholds", () => {
+    const tempDir = createTempConfigDir()
+    writeConfigFile(tempDir, {
+      modelResponsesApiCompactThresholds: {
+        "gpt-5.4": 123456,
+      },
+    })
+
+    const output = runScript(
+      tempDir,
+      'const { getModelResponsesApiCompactThreshold } = await import("./src/lib/config"); console.log(JSON.stringify({ gpt54: getModelResponsesApiCompactThreshold("gpt-5.4"), gpt55: getModelResponsesApiCompactThreshold("gpt-5.5") }));',
+    )
+
+    expect(JSON.parse(output)).toEqual({
+      gpt54: 123456,
+      gpt55: 217600,
+    })
   })
 
   test("allows codex to be configured in config.providers", () => {

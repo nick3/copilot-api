@@ -477,6 +477,7 @@
       "general": "General",
       "accountAffinity": "Account Affinity",
       "reasoning": "Reasoning",
+      "compactThresholds": "Compact Thresholds",
       "aliases": "Aliases",
       "prompts": "Prompts",
       "advanced": "Advanced",
@@ -542,6 +543,17 @@
       "jsonPlaceholder": "{ \"gpt-5-mini\": \"low\" }",
       "emptyState": "No reasoning overrides. Add a model below.",
       "itemHint": "Overrides reasoning effort for this model.",
+      "addButton": "Add model override"
+    },
+    "compactThresholds": {
+      "title": "Responses API compact thresholds",
+      "description": "Per-model compact_threshold overrides for /v1/responses context_management.",
+      "hint": "Tokens at which the upstream begins compaction. Takes precedence over the max-prompt fallback.",
+      "jsonPlaceholder": "{ \"gpt-5.4\": 217600 }",
+      "emptyState": "No compact threshold overrides. Add a model below.",
+      "itemHint": "Sent as compact_threshold for this model.",
+      "itemInvalid": "Threshold must be a positive integer.",
+      "thresholdPlaceholder": "Tokens",
       "addButton": "Add model override"
     },
     "prompts": {
