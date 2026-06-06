@@ -1192,8 +1192,10 @@ const consumeResponsesWebSocketStream = async (
       // from the Responses API (e.g. 429 for rate-limit). Wrap it as an
       // HTTPError so the existing observability chain (account-failure marking,
       // rate-limit logging) handles it identically to the HTTP path.
-      const status = event.code !== null ? parseInt(event.code, 10) : NaN
-      const httpStatus = Number.isFinite(status) && status >= 100 ? status : 500
+      const status =
+        typeof event.code === "string" ? parseInt(event.code, 10) : NaN
+      const httpStatus =
+        Number.isFinite(status) && status >= 100 && status < 600 ? status : 500
       throw new HTTPError(
         event.message,
         new Response(JSON.stringify({ error: { message: event.message } }), {
