@@ -422,12 +422,38 @@ export async function getAdminConfig(): Promise<AdminConfigResponse> {
   return fetchAdminJson<AdminConfigResponse>("/api/admin/config")
 }
 
+const ADMIN_CONFIG_KEYS = new Set<keyof AdminConfig>([
+  "auth",
+  "providers",
+  "extraPrompts",
+  "smallModel",
+  "accountAffinity",
+  "apiKey",
+  "anthropicApiKey",
+  "responsesApiContextManagementModels",
+  "modelReasoningEfforts",
+  "modelResponsesApiCompactThresholds",
+  "modelAliases",
+  "allowOriginalModelNamesForAliases",
+  "forceAgent",
+  "compactUseSmallModel",
+  "messageStartInputTokensFallback",
+  "modelRefreshIntervalHours",
+  "sessionAffinityRetentionDays",
+  "useMessagesApi",
+  "useResponsesApiWebSocket",
+  "useResponsesApiWebSearch",
+])
+
 export async function updateAdminConfig(
   patch: Partial<AdminConfig>
 ): Promise<AdminConfigResponse> {
+  const filtered = Object.fromEntries(
+    Object.entries(patch).filter(([k]) => ADMIN_CONFIG_KEYS.has(k as keyof AdminConfig))
+  )
   return fetchAdminJson<AdminConfigResponse>("/api/admin/config", {
     method: "POST",
-    body: JSON.stringify(patch),
+    body: JSON.stringify(filtered),
   })
 }
 

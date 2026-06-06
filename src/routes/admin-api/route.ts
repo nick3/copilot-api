@@ -1171,7 +1171,7 @@ function applyConfigPatch(
   for (const [rawKey, value] of Object.entries(input)) {
     const key = rawKey as keyof AppConfig
     if (!CONFIG_KEYS.has(key)) {
-      continue
+      return { error: `Unknown config key: ${rawKey}` }
     }
 
     const handler = CONFIG_PATCH_HANDLERS[rawKey]

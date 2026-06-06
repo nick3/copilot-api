@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from "bun:test"
 import { Hono } from "hono"
 
 import type { ResolvedProviderConfig } from "../src/lib/config"
@@ -11,7 +19,7 @@ let providerConfig: ResolvedProviderConfig | null = null
 let modelMappings: Record<string, string> = {}
 
 const checkRateLimit = mock(() => {
-  throw new Error("Copilot rate limit should not run for provider aliases")
+  // intentionally a no-op: tests assert it was not called via checkRateLimit.mock.calls
 })
 const noopTokenUsageRecorder = () => {}
 
@@ -238,4 +246,10 @@ describe("provider/model aliases on top-level chat completions route", () => {
       },
     })
   })
+})
+
+afterAll(async () => {
+  await mock.module("~/lib/rate-limit", () => actualRateLimitModule)
+  await mock.module("~/lib/config", () => actualConfigModule)
+  await mock.module("~/lib/token-usage", () => actualTokenUsageModule)
 })
