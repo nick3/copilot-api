@@ -1188,7 +1188,18 @@ const consumeResponsesWebSocketStream = async (
 
     const event = JSON.parse(chunk.data) as ResponseStreamEvent
     if (event.type === "error") {
-      throw new Error(event.message)
+      // The transport is WebSocket, but `event.code` carries the HTTP status
+      // from the Responses API (e.g. 429 for rate-limit). Wrap it as an
+      // HTTPError so the existing observability chain (account-failure marking,
+      // rate-limit logging) handles it identically to the HTTP path.
+      const status = event.code !== null ? parseInt(event.code, 10) : NaN
+      const httpStatus = Number.isFinite(status) && status >= 100 ? status : 500
+      throw new HTTPError(
+        event.message,
+        new Response(JSON.stringify({ error: { message: event.message } }), {
+          status: httpStatus,
+        }),
+      )
     }
 
     if (
