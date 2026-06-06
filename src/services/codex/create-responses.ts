@@ -440,6 +440,14 @@ const createCodexResponsesWebSocketStreamChunk = (
     const parsed = JSON.parse(data) as {
       id?: unknown
       type?: unknown
+      error?: {
+        message: string
+      }
+      message?: string
+    }
+
+    if (parsed.type === "error" && parsed.error) {
+      parsed.message = parsed.error.message
     }
 
     return {

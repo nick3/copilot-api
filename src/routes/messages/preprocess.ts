@@ -789,6 +789,80 @@ export const stripCacheControl = (payload: AnthropicMessagesPayload): void => {
   }
 }
 
+const normalizeCacheControl = (
+  cacheControl: unknown,
+): { type: "ephemeral" } | undefined => {
+  if (
+    !cacheControl
+    || typeof cacheControl !== "object"
+    || Array.isArray(cacheControl)
+  ) {
+    return undefined
+  }
+
+  const type = (cacheControl as { type?: unknown }).type
+  return type === "ephemeral" ? { type } : undefined
+}
+
+// Port top-level cache_control onto the last cacheable block, then drop the
+// top-level field. Only supported cache_control fields are forwarded.
+const applyTopLevelCacheControl = (payload: AnthropicMessagesPayload): void => {
+  const topLevel = normalizeCacheControl(payload.cache_control)
+  if (!topLevel) {
+    if (payload.cache_control !== undefined) {
+      delete payload.cache_control
+    }
+    return
+  }
+
+  delete payload.cache_control
+
+  for (let m = payload.messages.length - 1; m >= 0; m--) {
+    const message = payload.messages[m]
+
+    if (typeof message.content === "string") {
+      message.content = [
+        {
+          type: "text",
+          text: message.content,
+          cache_control: { ...topLevel },
+        },
+      ]
+      return
+    }
+
+    if (!Array.isArray(message.content)) continue
+
+    for (let b = message.content.length - 1; b >= 0; b--) {
+      const block = message.content[b]
+      if (
+        block.type !== "text"
+        && block.type !== "image"
+        && block.type !== "tool_use"
+        && block.type !== "tool_result"
+      ) {
+        continue
+      }
+      block.cache_control ??= { ...topLevel }
+      return
+    }
+  }
+}
+
+// Strip per-tool eager_input_streaming.
+const stripToolEagerInputStreaming = (
+  payload: AnthropicMessagesPayload,
+): void => {
+  if (!payload.tools || payload.tools.length === 0) return
+
+  for (const tool of payload.tools) {
+    const extended = tool as typeof tool & { eager_input_streaming?: unknown }
+    if ("eager_input_streaming" in extended) {
+      delete extended.eager_input_streaming
+    }
+  }
+}
+
 // Pre-request processing: filter thinking blocks for Claude models so only
 // valid thinking blocks are sent to the Copilot Messages API.
 const filterAssistantThinkingBlocks = (
@@ -814,6 +888,8 @@ export const prepareMessagesApiPayload = (
   selectedModel?: Model,
 ): void => {
   stripCacheControl(payload)
+  applyTopLevelCacheControl(payload)
+  stripToolEagerInputStreaming(payload)
   filterAssistantThinkingBlocks(payload)
 
   const hasThinking = Boolean(payload.thinking)

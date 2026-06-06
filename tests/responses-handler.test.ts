@@ -288,6 +288,46 @@ describe("responses handler provider alias routing", () => {
   })
 })
 
+describe("responses handler context management", () => {
+  test("uses configured model compact threshold before max token fallback", async () => {
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("/responses", "gpt-5.4"))
+
+    let forwardedPayload: ResponsesPayload | undefined
+    const fetchMock = mock((_url: string, options?: FetchOptions) => {
+      forwardedPayload = JSON.parse(options?.body as string) as ResponsesPayload
+      return Promise.resolve(
+        new Response(JSON.stringify(buildResponsesResult("gpt-5.4", "ok")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-5.4",
+          input: "hello",
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(forwardedPayload?.context_management).toEqual([
+      {
+        type: "compaction",
+        compact_threshold: 217600,
+      },
+    ])
+  })
+})
+
 describe("responses handler Codex subagent detection", () => {
   test("forces agent initiator and reuses incoming session when Codex headers present", async () => {
     let selectionRequestId: string | undefined

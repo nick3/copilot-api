@@ -493,11 +493,13 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
     - `contextCache`：可选，OpenAI 兼容 provider 默认 `true`，用于启用阿里云百炼/DashScope 的显式缓存（explicit context cache），会按其 Context Cache 格式在最多 4 个 content block 上注入 `cache_control: { "type": "ephemeral" }`。缓存断点策略与 opencode 主链路保持一致：前 2 条 system 消息 + 最后 2 条非 system 消息。标记字符串 content 时会把 `system` / `user` / `assistant` / `tool` 消息转换为 text content part 数组；已有数组 content 则标记最后一个 part。如果模型本身已经支持隐式缓存，或上游不支持该显式缓存扩展字段，可在模型配置中设为 `false`。
     - `supportPdf`：可选，控制该模型是否支持 PDF/document content。默认 `false`，不支持时会把 PDF 转成提示文本；设为 `true` 时会把 PDF/document 转成 OpenAI Chat Completions 的 file part。
     - `toolContentSupportType`：可选，配置该模型的 tool result content 支持能力，值为 `array`、`image`、`pdf` 的数组。provider 侧未配置时默认只发送 string tool content。若 `supportPdf` 为 `true` 但这里不包含 `pdf`，tool result 里的 file part 会被转成 user role 消息。Copilot 主链路不使用这个 provider 默认，仍按 array + image 且不支持 PDF 的能力处理。
-- **responsesApiContextManagementModels：** 需要启用 Responses API `context_management` 压缩指令的 GPT 模型 ID 列表。默认是 `[]`，需要你显式开启。一个不错的起点是 `["gpt-5-mini", "gpt-5.3-codex", "gpt-5.4-mini", "gpt-5.4"]`。启用后，请求体会带上 `context_management`，并在后续轮次中仅保留最新的压缩承载内容。实际压缩由服务端完成，看起来会在 usage 接近模型 `maxPromptTokens` 的约 90% 时开始，因此特别适合长任务场景，同时不会额外消耗 premium requests。
+- **responsesApiContextManagementModels：** 已弃用的旧配置，用于列出需要启用 Responses API `context_management` 压缩指令的 GPT 模型 ID。请优先使用 `useResponsesApiContextManagement`，该配置现在默认开启。
+- **useResponsesApiContextManagement：** 当为 `true`（默认）时，代理会为 Responses API 附加 `context_management` 压缩指令。如需全局关闭，可设为 `false`。启用后，请求体会带上 `context_management`，并在后续轮次中仅保留最新的压缩承载内容，因此特别适合长任务场景。
 - **modelResponsesApiCompactThresholds：** 按模型覆盖 Responses API 的 `compact_threshold`，仅在代理自动附加 `context_management` 时使用。它的优先级高于 `resolveResponsesCompactThreshold` 基于 `max_prompt_tokens * ratio` 的兜底阈值。默认将 `gpt-5.4` 和 `gpt-5.5` 设为 `217600`（`272000 * 0.8`）。未列出的模型继续使用原有兜底逻辑。
 - **smallModel：** 用于无工具预热消息、compact/background 请求以及其他短小维护型轮次（例如 Claude Code 或 OpenCode 发出的 housekeeping 请求）的回退模型，用来避免消耗 premium requests；默认是 `gpt-5-mini`。如果原始模型名被屏蔽，而这里指向的是某个别名目标模型，则会解析为首选别名。
 - **accountAffinity：** 是否根据 session 标识启用粘性账号路由。开启后，同一 session 针对同一模型的请求会优先路由到上次成功处理它的账号。该策略同时适用于免费模型和付费模型。默认值为 `true`。设为 `false` 则所有模型都改为顺序路由。
-- **apiKey（已弃用）：** 兼容迁移的旧单 key 字段。优先使用 `auth.apiKeys`。当 `auth.apiKeys` 为空时，服务端会回退到 `COPILOT_API_KEY`，再回退到 `apiKey`。- **modelReasoningEfforts：** 按模型配置发送到 Copilot Responses API 的 `reasoning.effort`。可选值包括 `none`、`minimal`、`low`、`medium`、`high` 和 `xhigh`。若某模型未配置，则默认使用 `high`。
+- **apiKey（已弃用）：** 兼容迁移的旧单 key 字段。优先使用 `auth.apiKeys`。当 `auth.apiKeys` 为空时，服务端会回退到 `COPILOT_API_KEY`，再回退到 `apiKey`。
+- **modelReasoningEfforts：** 按模型配置发送到 Copilot Responses API 的 `reasoning.effort`。可选值包括 `none`、`minimal`、`low`、`medium`、`high` 和 `xhigh`。若某模型未配置，则默认使用 `high`。
 - **modelAliases：** `alias -> { target, allowOriginal? }` 的映射（也仍然接受旧的字符串写法）。别名 key 会先做标准化（trim + lowercase），且不能为空；别名不能映射回自己（大小写不敏感），冲突的标准化别名会被拒绝。`allowOriginal` 可为单个别名覆盖全局默认值。如果多个别名映射到同一个 target，只要其中任意一个设置了 `allowOriginal: true`，原始模型名就会被允许（allow-wins）。Admin UI/API 会拒绝被屏蔽的键（`__proto__`、`constructor`、`prototype`）。下游请求可以直接使用这些别名，target 也可以是 `provider/model` 形式，用于顶层 `/v1/messages` 与 `/v1/messages/count_tokens` 路由。
 - **allowOriginalModelNamesForAliases：** 对未显式设置 `allowOriginal` 的别名所采用的全局默认值。当其为 `false`（默认）时，target 原名默认被屏蔽，除非某个别名显式允许；当其为 `true` 时，target 原名默认可用，除非所有别名都显式阻止。
 - **forceAgent：** 当为 `true` 时，只要 `POST /v1/responses` 的任一 input item 带有 `role: "assistant"`，就会把请求视为由 agent 发起；当为 `false`（默认）时，只检查最后一个 input item。
@@ -508,8 +510,9 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
 - **useMessagesApi：** 当为 `true`（默认）时，支持 Copilot 原生 `/v1/messages` 端点的 Claude 系模型会走 Messages API 路径。设为 `false` 时，将跳过 Messages API 候选，回退到 `/responses`（如支持）或 `/chat/completions`。
 - **useResponsesApiWebSocket：** 当为 `true`（默认）时，发往上游 Copilot Responses API 的请求会对声明了 `ws:/responses` 的模型使用 Copilot WebSocket transport；仅声明 `/responses` 的模型仍走 HTTP。设为 `false` 可禁用上游 WebSocket 路由。该配置不会禁用 `/v1/responses` 上面向 Codex 的入站 WebSocket listener。
 - **useResponsesApiWebSearch：** 当为 `true`（默认）时，`/v1/responses` 会保留 `type: "web_search"` 的工具并转发到上游。设为 `false` 则会在发送 Copilot 请求之前将其剥离。
+- **claudeTokenMultiplier：** 用于 Claude `/v1/messages/count_tokens` 请求在本地走 GPT tokenizer 估算时的乘数。默认值为 `1.15`。如果你的客户端仍然过晚触发上下文压缩，可以适当调大。这个配置只会在代理本地估算 Claude token 时生效；如果已经配置 `anthropicApiKey` 且 Anthropic token counting 调用成功，则会直接返回 Anthropic 的精确计数，不会使用这个乘数。
 - **logLevel：** 控制 `logs/*.log` 下 handler 文件日志的详细级别。可选值：`error`、`warn`、`info`、`debug`。默认值为 `info`。如果你需要把 payload 级或 stream 级的调试内容写入文件日志，请显式设置为 `debug`。
-- **anthropicApiKey：** 可选的 Anthropic API key，用于精确的 Claude token 计数（见下文 [精确的 Claude Token 计数](#accurate-claude-token-counting)）。也可通过环境变量 `ANTHROPIC_API_KEY` 设置。未配置时会回退到 GPT tokenizer 估算。
+- **anthropicApiKey：** 可选的 Anthropic API key，用于精确的 Claude token 计数（见下文 [精确的 Claude Token 计数](#accurate-claude-token-counting)）。也可通过环境变量 `ANTHROPIC_API_KEY` 设置。若未配置，或上游调用失败，则回退到由 `claudeTokenMultiplier` 控制的本地 GPT tokenizer 估算。
 
 `--verbose` 不再隐式开启 debug 级别文件日志。如果你需要 `logs/*.log` 下更详细的 handler 日志，请在 `config.json` 中显式设置 `"logLevel": "debug"`。
 
