@@ -954,17 +954,21 @@ function parseModelResponsesApiCompactThresholds(
 
   const record = Object.create(null) as Record<string, number>
   for (const [rawModel, threshold] of Object.entries(value)) {
-    if (BLOCKED_KEYS.has(rawModel)) {
-      return {
-        error: `modelResponsesApiCompactThresholds.${rawModel} is not allowed`,
-      }
-    }
-
     const model = rawModel.trim()
     if (!model) {
       return {
         error:
           "modelResponsesApiCompactThresholds keys must be non-empty strings",
+      }
+    }
+    if (BLOCKED_KEYS.has(model)) {
+      return {
+        error: `modelResponsesApiCompactThresholds.${model} is not allowed`,
+      }
+    }
+    if (Object.hasOwn(record, model)) {
+      return {
+        error: `modelResponsesApiCompactThresholds.${rawModel} conflicts with normalized key "${model}"`,
       }
     }
     if (typeof threshold !== "number") {
