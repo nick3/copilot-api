@@ -355,7 +355,11 @@ function reasoningRecordFromItems(
   return record
 }
 
-function compactThresholdRecordFromItems(
+function isPositiveInteger(value: number): boolean {
+  return Number.isFinite(value) && Number.isInteger(value) && value > 0
+}
+
+export function compactThresholdRecordFromItems(
   items: Array<CompactThresholdItem>,
 ): Record<string, number> {
   const record: Record<string, number> = {}
@@ -365,7 +369,7 @@ function compactThresholdRecordFromItems(
     const trimmed = item.threshold.trim()
     if (!trimmed) continue
     const value = Number(trimmed)
-    if (!Number.isFinite(value) || value <= 0) continue
+    if (!isPositiveInteger(value)) continue
     record[key] = value
   }
   return record
@@ -770,7 +774,7 @@ function parseReasoningJson(
   }
 }
 
-function parseCompactThresholdsJson(
+export function parseCompactThresholdsJson(
   value: string,
 ): ParseResult<Record<string, number>> {
   if (!value.trim()) return { record: {} }
@@ -790,9 +794,9 @@ function parseCompactThresholdsJson(
           error: `modelResponsesApiCompactThresholds.${key} must be a number.`,
         }
       }
-      if (!Number.isFinite(threshold) || threshold <= 0) {
+      if (!isPositiveInteger(threshold)) {
         return {
-          error: `modelResponsesApiCompactThresholds.${key} must be a positive finite number.`,
+          error: `modelResponsesApiCompactThresholds.${key} must be a positive integer.`,
         }
       }
       record[key] = threshold
@@ -1626,9 +1630,7 @@ function CompactThresholdsCard({
           const disableModelSelect = !hasModels && !showCustomModel
           const trimmed = item.threshold.trim()
           const numericValue = trimmed === "" ? NaN : Number(trimmed)
-          const itemInvalid =
-            trimmed !== ""
-            && (!Number.isFinite(numericValue) || numericValue <= 0)
+          const itemInvalid = trimmed !== "" && !isPositiveInteger(numericValue)
 
           return (
             <div

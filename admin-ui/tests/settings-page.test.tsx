@@ -1,7 +1,11 @@
 import { expect, test } from "bun:test"
 import { renderToStaticMarkup } from "react-dom/server"
 
-import { ResponsesApiSettingsCard } from "../src/pages/settings-page"
+import {
+  ResponsesApiSettingsCard,
+  compactThresholdRecordFromItems,
+  parseCompactThresholdsJson,
+} from "../src/pages/settings-page"
 
 test("Responses API settings exposes transport toggles and context management", () => {
   const html = renderToStaticMarkup(
@@ -62,4 +66,54 @@ test("Responses API settings marks dependent fields inactive when context manage
   expect(html).toContain("Context management is disabled")
   expect(html).toContain("Compact threshold overrides are saved")
   expect(html).toContain("gpt-5.4")
+})
+
+test("compact threshold form validation rejects decimals", () => {
+  const html = renderToStaticMarkup(
+    <ResponsesApiSettingsCard
+      useResponsesApiContextManagement
+      useResponsesApiWebSearch
+      useResponsesApiWebSocket
+      responsesApiContextManagementModelsValue=""
+      compactThresholdsMode="form"
+      compactThresholdsJson="{}"
+      compactThresholdsJsonIssue={null}
+      compactThresholdsItems={[
+        {
+          id: "threshold-1",
+          model: "gpt-5.4",
+          threshold: "1.5",
+        },
+      ]}
+      models={["gpt-5.4"]}
+      onCompactThresholdsAddItem={() => {}}
+      onCompactThresholdsJsonChange={() => {}}
+      onCompactThresholdsRemoveItem={() => {}}
+      onCompactThresholdsToggleMode={() => {}}
+      onCompactThresholdsUpdateItem={() => {}}
+      onResponsesApiContextManagementModelsChange={() => {}}
+      onToggleUseResponsesApiContextManagement={() => {}}
+      onToggleUseResponsesApiWebSearch={() => {}}
+      onToggleUseResponsesApiWebSocket={() => {}}
+    />,
+  )
+
+  expect(html).toContain("Threshold must be a positive integer.")
+})
+
+test("compact threshold JSON validation rejects decimals", () => {
+  const result = parseCompactThresholdsJson('{ "gpt-5.4": 1.5 }')
+
+  expect(result).toEqual({
+    error: "modelResponsesApiCompactThresholds.gpt-5.4 must be a positive integer.",
+  })
+})
+
+test("compact threshold form record skips decimals", () => {
+  const record = compactThresholdRecordFromItems([
+    { id: "threshold-1", model: "gpt-5.4", threshold: "1.5" },
+    { id: "threshold-2", model: "gpt-5.5", threshold: "2" },
+  ])
+
+  expect(record).toEqual({ "gpt-5.5": 2 })
 })
