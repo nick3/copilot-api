@@ -189,6 +189,7 @@ const CONFIG_KEYS = new Set<keyof AppConfig>([
   "providers",
   "responsesApiContextManagementModels",
   "modelReasoningEfforts",
+  "modelResponsesApiCompactThresholds",
   "modelAliases",
   "allowOriginalModelNamesForAliases",
   "forceAgent",
@@ -943,6 +944,50 @@ function applyExtraPrompts(
   return undefined
 }
 
+function parseModelResponsesApiCompactThresholds(
+  value: unknown,
+): ParseFieldResult<Record<string, number>> {
+  if (value === null || value === undefined) return { clear: true }
+  if (!isPlainObject(value)) {
+    return { error: "modelResponsesApiCompactThresholds must be an object" }
+  }
+
+  const record = Object.create(null) as Record<string, number>
+  for (const [rawModel, threshold] of Object.entries(value)) {
+    const model = rawModel.trim()
+    if (!model) {
+      return {
+        error:
+          "modelResponsesApiCompactThresholds keys must be non-empty strings",
+      }
+    }
+    if (BLOCKED_KEYS.has(model)) {
+      return {
+        error: `modelResponsesApiCompactThresholds.${model} is not allowed`,
+      }
+    }
+    if (Object.hasOwn(record, model)) {
+      return {
+        error: `modelResponsesApiCompactThresholds.${rawModel} conflicts with normalized key "${model}"`,
+      }
+    }
+    if (typeof threshold !== "number") {
+      return {
+        error: `modelResponsesApiCompactThresholds.${rawModel} must be a number`,
+      }
+    }
+    if (!Number.isFinite(threshold) || threshold <= 0) {
+      return {
+        error: `modelResponsesApiCompactThresholds.${rawModel} must be a positive finite number`,
+      }
+    }
+
+    record[model] = threshold
+  }
+
+  return { value: record }
+}
+
 function applyReasoningEfforts(
   next: AppConfig,
   value: unknown,
@@ -954,6 +999,20 @@ function applyReasoningEfforts(
     return undefined
   }
   next.modelReasoningEfforts = parsed.value
+  return undefined
+}
+
+function applyModelResponsesApiCompactThresholds(
+  next: AppConfig,
+  value: unknown,
+): string | undefined {
+  const parsed = parseModelResponsesApiCompactThresholds(value)
+  if ("error" in parsed) return parsed.error
+  if ("clear" in parsed) {
+    delete next.modelResponsesApiCompactThresholds
+    return undefined
+  }
+  next.modelResponsesApiCompactThresholds = parsed.value
   return undefined
 }
 
@@ -1142,6 +1201,7 @@ const CONFIG_PATCH_HANDLERS: Partial<Record<string, ConfigPatchHandler>> = {
   providers: applyProvidersConfig,
   responsesApiContextManagementModels: applyResponsesApiContextManagementModels,
   modelReasoningEfforts: applyReasoningEfforts,
+  modelResponsesApiCompactThresholds: applyModelResponsesApiCompactThresholds,
   modelAliases: applyModelAliases,
   allowOriginalModelNamesForAliases: (next, value) =>
     applyOptionalBoolean(next, "allowOriginalModelNamesForAliases", value),

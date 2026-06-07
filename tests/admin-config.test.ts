@@ -310,6 +310,152 @@ test("POST /api/admin/config rejects invalid responsesApiContextManagementModels
   })
 })
 
+test("POST /api/admin/config updates modelResponsesApiCompactThresholds", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          modelResponsesApiCompactThresholds: {
+            "gpt-5.4": 123456,
+            "gpt-5.5": 217600,
+          },
+        }),
+      }),
+    )
+
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as {
+      modelResponsesApiCompactThresholds?: Record<string, number>
+    }
+    expect(body.modelResponsesApiCompactThresholds).toEqual({
+      "gpt-5.4": 123456,
+      "gpt-5.5": 217600,
+    })
+  })
+})
+
+test("POST /api/admin/config clears modelResponsesApiCompactThresholds", async () => {
+  await withConfig(
+    {
+      modelResponsesApiCompactThresholds: {
+        "gpt-5.4": 123456,
+      },
+    },
+    async () => {
+      const { server } = await import("../src/server")
+
+      const res = await server.fetch(
+        new Request("http://localhost/api/admin/config", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ modelResponsesApiCompactThresholds: null }),
+        }),
+      )
+
+      expect(res.status).toBe(200)
+
+      const body = (await res.json()) as {
+        modelResponsesApiCompactThresholds?: Record<string, number>
+      }
+      expect(body.modelResponsesApiCompactThresholds).toEqual({
+        "gpt-5.4": 217600,
+        "gpt-5.5": 217600,
+      })
+    },
+  )
+})
+
+test("POST /api/admin/config rejects invalid modelResponsesApiCompactThresholds entries", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          modelResponsesApiCompactThresholds: {
+            "gpt-5.4": -1,
+          },
+        }),
+      }),
+    )
+
+    expect(res.status).toBe(400)
+
+    const body = (await res.json()) as { error?: { message?: string } }
+    expect(body.error?.message).toBe(
+      "modelResponsesApiCompactThresholds.gpt-5.4 must be a positive finite number",
+    )
+  })
+})
+
+test("POST /api/admin/config rejects blocked normalized modelResponsesApiCompactThresholds keys", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          modelResponsesApiCompactThresholds: {
+            " __proto__ ": 123456,
+          },
+        }),
+      }),
+    )
+
+    expect(res.status).toBe(400)
+
+    const body = (await res.json()) as { error?: { message?: string } }
+    expect(body.error?.message).toBe(
+      "modelResponsesApiCompactThresholds.__proto__ is not allowed",
+    )
+  })
+})
+
+test("POST /api/admin/config rejects conflicting normalized modelResponsesApiCompactThresholds entries", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          modelResponsesApiCompactThresholds: {
+            "gpt-5.4": 123456,
+            " gpt-5.4 ": 217600,
+          },
+        }),
+      }),
+    )
+
+    expect(res.status).toBe(400)
+
+    const body = (await res.json()) as { error?: { message?: string } }
+    expect(body.error?.message).toContain(
+      'conflicts with normalized key "gpt-5.4"',
+    )
+  })
+})
+
 test("POST /api/admin/config updates providers", async () => {
   await withConfig({}, async () => {
     const { server } = await import("../src/server")
