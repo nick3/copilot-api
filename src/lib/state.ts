@@ -28,6 +28,7 @@ export interface State {
   verbose: boolean
 
   copilotApiUrl?: string
+  tokenBasedBilling?: boolean
 }
 
 export const state: State = {

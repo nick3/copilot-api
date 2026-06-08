@@ -13,6 +13,7 @@ const REDIRECT_URI = `http://localhost:${CALLBACK_PORT}${CALLBACK_PATH}`
 const SCOPE = "openid profile email offline_access"
 const JWT_CLAIM_PATH = "https://api.openai.com/auth"
 const REFRESH_BUFFER_MS = 60_000
+const CALLBACK_TIMEOUT_MS = 45_000
 
 interface TokenSuccessResult {
   accessToken: string
@@ -380,7 +381,10 @@ async function waitForAuthorizationCode(state: string): Promise<string | null> {
   }
 
   try {
-    return await waitForCode
+    const timeout = new Promise<null>((resolve) => {
+      setTimeout(() => resolve(null), CALLBACK_TIMEOUT_MS)
+    })
+    return await Promise.race([waitForCode, timeout])
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((error) => {

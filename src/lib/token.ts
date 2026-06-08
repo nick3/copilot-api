@@ -330,4 +330,5 @@ export async function logUser() {
 
   const copilotUser = await getCopilotUsage()
   state.copilotApiUrl = copilotUser.endpoints.api
+  state.tokenBasedBilling = copilotUser.token_based_billing
 }

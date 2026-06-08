@@ -110,11 +110,9 @@ import {
   applyLastMessageCacheControl,
   getCompactType,
   getLastMessageContentCacheControl,
-  mergeToolResultForClaude,
   normalizeSystemMessages,
   prepareMessagesApiPayload,
   sanitizeIdeTools,
-  stripToolReferenceTurnBoundary,
 } from "./preprocess"
 import { translateChunkToAnthropicEvents } from "./stream-translation"
 import { inspectSubagentMarkerFromFirstUser } from "./subagent-marker"
@@ -409,16 +407,6 @@ export async function handleCompletion(c: Context) {
 
   if (compactType === COMPACT_REQUEST && shouldCompactUseSmallModel()) {
     anthropicPayload.model = getSmallModel()
-  }
-
-  if (compactType === 0) {
-    stripToolReferenceTurnBoundary(anthropicPayload)
-
-    // Merge tool_result and text blocks into tool_result to avoid consuming premium requests
-    // (caused by skill invocations, edit hooks, plan or to do reminders)
-    // e.g. {"role":"user","content":[{"type":"tool_result","content":"Launching skill: xxx"},{"type":"text","text":"xxx"}]}
-    // not only for claude, but also for opencode
-    mergeToolResultForClaude(anthropicPayload)
   }
 
   applyLastMessageCacheControl(anthropicPayload, lastMessageCacheControl)
