@@ -379,6 +379,7 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
     "useMessagesApi": true,
     "useResponsesApiWebSocket": true,
     "useResponsesApiWebSearch": true,
+    "messageApiWebSearchModel": "gpt-5-mini",
     "logLevel": "info"
   }
   ```
@@ -463,7 +464,8 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
     },
     "useMessagesApi": true,
     "useResponsesApiWebSocket": true,
-    "useResponsesApiWebSearch": true
+    "useResponsesApiWebSearch": true,
+    "messageApiWebSearchModel": "gpt-5-mini"
   }
   ```
 - **auth.apiKeys:** API keys used for request authentication on non-admin routes. Supports multiple keys for rotation. Requests can authenticate with either `x-api-key: <key>` or `Authorization: Bearer <key>`. If empty or omitted, authentication for non-admin routes is disabled.
@@ -501,6 +503,7 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
 - **useMessagesApi:** When `true` (default), Claude-family models that support Copilot’s native `/v1/messages` endpoint may use the Messages API path. Set to `false` to skip the Messages API candidate and fall back to `/responses` (if supported) or `/chat/completions`.
 - **useResponsesApiWebSocket:** When `true` (default), outbound Copilot Responses API requests use Copilot’s WebSocket transport for models that advertise `ws:/responses`; models that only advertise `/responses` continue to use HTTP. Set to `false` to disable upstream WebSocket routing. This does not disable the inbound Codex-compatible WebSocket listener on `/v1/responses`.
 - **useResponsesApiWebSearch:** When `true` (default), `/v1/responses` keeps tools with `type: "web_search"` and forwards them upstream. Set to `false` to strip them before the Copilot request is sent.
+- **messageApiWebSearchModel:** Global fallback model used when a top-level Copilot `/v1/messages` request contains only Anthropic's server-side `web_search` tool. Defaults to `gpt-5-mini`. If the value is a `provider/model` alias, the request is routed to that provider's Messages API path with the provider prefix stripped. For Copilot GPT models, web search runs through `/responses`. Mixed `web_search` plus custom tools are not supported; the server-side `web_search` tool is stripped and the request continues normally.
 - **claudeTokenMultiplier:** Multiplier applied to the fallback GPT-tokenizer estimate for Claude `/v1/messages/count_tokens` requests. Defaults to `1.15`. Increase it if your client is still compacting too late. This setting is only used when the proxy is estimating Claude tokens locally; if `anthropicApiKey` is configured and Anthropic token counting succeeds, the exact Anthropic count is returned instead.
 - **logLevel:** Controls handler file-log verbosity under `logs/*.log`. Allowed values: `error`, `warn`, `info`, `debug`. Defaults to `info`. Set it to `debug` when you need payload- or stream-level diagnostics written into file logs.
 - **anthropicApiKey:** Optional Anthropic API key used for accurate Claude token counting (see [Accurate Claude Token Counting](#accurate-claude-token-counting) below). Can also be set via the `ANTHROPIC_API_KEY` environment variable. If not set, or if the upstream call fails, token counting falls back to local GPT tokenizer estimation controlled by `claudeTokenMultiplier`.
@@ -819,7 +822,7 @@ Here is an example `.claude/settings.json` file:
 - Replace `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, and `ANTHROPIC_DEFAULT_HAIKU_MODEL` according to your needs. After configuration, please install the claude code plugin [Plugin Integrations](#plugin-integrations).  
 - Setting CLAUDE_CODE_ATTRIBUTION_HEADER to 0 can prevent Claude code from adding billing and version information in system prompts, thereby avoiding prompt cache invalidation.
 - Turning off CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION and CLAUDE_CODE_ENABLE_AWAY_SUMMARY can prevent quota from being consumed unnecessarily.
-- Permissions deny WebSearch because the GitHub Copilot API does not support natie websearch (some gpt models support websearch, but the current project has not adapted websearch); it is recommended to install the mcp mcp_server_fetch tool or other search tools as alternatives..
+- Claude Code WebSearch is supported for pure search requests. For Copilot, keep `messageApiWebSearchModel` pointed at a Responses-capable GPT model or a `provider/model` alias. For provider routes, use a native Anthropic provider or an `openai-responses` provider. Add `WebSearch` to `permissions.deny` only if you want to forbid this traffic.
 - If using a non-Claude model, do not enable ENABLE_TOOL_SEARCH. If using the Claude model, can enable ENABLE_TOOL_SEARCH. The current Claude Code uses the client tool search mode. In this mode, loading defer tools requires an additional request each time.
 
 You can find more options here: [Claude Code settings](https://docs.anthropic.com/en/docs/claude-code/settings#environment-variables)

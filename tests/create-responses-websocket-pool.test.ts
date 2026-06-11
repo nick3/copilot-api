@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test"
 
 import type { AccountContext } from "../src/lib/types/account"
+import type { HTTPError } from "../src/lib/error"
 import type { ResponsesResult } from "../src/services/copilot/create-responses"
 
 import {
@@ -26,6 +27,7 @@ class MockWebSocket {
   static readonly CLOSED = 3
   static autoComplete = true
   static closeAfterComplete = false
+  static errorResponse: Record<string, unknown> | null = null
   static failOpen = false
   static failOpenEvent: ListenerEvent | null = null
   static instances: Array<MockWebSocket> = []
@@ -93,6 +95,13 @@ class MockWebSocket {
     const latestSent = this.sent.at(-1)
     if (!latestSent) {
       throw new Error("No websocket request to complete")
+    }
+
+    if (MockWebSocket.errorResponse) {
+      this.emit("message", {
+        data: JSON.stringify(MockWebSocket.errorResponse),
+      })
+      return
     }
 
     const parsed = JSON.parse(latestSent) as { model: string }
@@ -207,6 +216,7 @@ const trackResponsesBridge = (bridgeId: string, closer: () => void): void => {
 beforeEach(() => {
   MockWebSocket.autoComplete = true
   MockWebSocket.closeAfterComplete = false
+  MockWebSocket.errorResponse = null
   MockWebSocket.failOpen = false
   MockWebSocket.failOpenEvent = null
   MockWebSocket.instances = []
@@ -220,6 +230,7 @@ beforeEach(() => {
 afterEach(() => {
   MockWebSocket.autoComplete = true
   MockWebSocket.closeAfterComplete = false
+  MockWebSocket.errorResponse = null
   MockWebSocket.failOpen = false
   MockWebSocket.failOpenEvent = null
   for (const websocket of MockWebSocket.instances) {
@@ -269,6 +280,57 @@ test("Responses websocket open failure includes the underlying reason", async ()
   expect((thrown as Error).message).toBe(
     "Failed to create responses websocket: tls handshake failed",
   )
+})
+
+test("Responses websocket preserves rich upstream error details", async () => {
+  MockWebSocket.errorResponse = {
+    code: "rate_limit_exceeded",
+    error: {
+      code: "rate_limit_exceeded",
+      message: "slow down",
+      type: "rate_limit_error",
+    },
+    headers: {
+      "retry-after": "3",
+      "x-ratelimit-remaining": "0",
+    },
+    message: "slow down",
+    param: null,
+    sequence_number: 1,
+    status_code: 429,
+    type: "error",
+  }
+
+  let thrown: unknown = null
+  try {
+    await createResponses(
+      {
+        input: "hello",
+        model: "gpt-test",
+      },
+      {
+        initiator: "user",
+        requestId: "request-error",
+        transport: "websocket",
+        vision: false,
+      },
+      account,
+    )
+  } catch (error) {
+    thrown = error
+  }
+
+  const httpError = thrown as HTTPError
+  expect(httpError.response.status).toBe(429)
+  expect(httpError.response.headers.get("retry-after")).toBe("3")
+  expect(httpError.response.headers.get("x-ratelimit-remaining")).toBe("0")
+  expect(await httpError.response.json()).toEqual({
+    error: {
+      code: "rate_limit_exceeded",
+      message: "slow down",
+      type: "rate_limit_error",
+    },
+  })
 })
 
 test("Responses websocket pool separates different request IDs", async () => {

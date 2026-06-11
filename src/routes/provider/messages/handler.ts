@@ -22,12 +22,15 @@ import {
   type ModelConfig,
   type ResolvedProviderConfig,
 } from "~/lib/config"
+import { logCodexRateLimitsEvent } from "~/lib/codex-rate-limit"
 import { HTTPError } from "~/lib/error"
 import {
   extractErrorObservability,
   getUserVisibleErrorMessage,
 } from "~/lib/handler-utils"
 import { createHandlerLogger, debugJson, debugLazy } from "~/lib/logger"
+import { resolveBridgeToolSearchName } from "~/lib/tool-search"
+import { normalizeResponsesUsage } from "~/lib/token-usage"
 import {
   translateToAnthropic,
   translateToOpenAI,
@@ -37,8 +40,40 @@ import {
   translateChunkToAnthropicEvents,
 } from "~/routes/messages/stream-translation"
 import {
+  buildErrorEvent,
+  createResponsesStreamState,
+  translateResponsesStreamEvent,
+} from "~/routes/messages/responses-stream-translation"
+import {
+  translateAnthropicMessagesToResponsesPayload,
+  translateResponsesResultToAnthropic,
+} from "~/routes/messages/responses-translation"
+import { normalizeSystemMessages } from "~/routes/messages/preprocess"
+import {
+  assertWebSearchResponsesResultSucceeded,
+  collectWebSearchResponsesStreamResult,
+  hasWebSearchServerTool,
+  isWebSearchOnlyRequest,
+  prepareWebSearchResponsesPayload,
+  reconstructWebSearchResponse,
+  stripWebSearchServerTool,
+  writeSyntheticWebSearchResponseStream,
+} from "~/routes/messages/web-search/fulfill"
+import {
+  applyResponsesApiContextManagement,
+  compactInputByLatestCompaction,
+} from "~/routes/responses/utils"
+import { forwardCodexResponses } from "~/services/codex/create-responses"
+import { getModels as getCodexModels } from "~/services/codex/get-models"
+import type {
+  ResponsesResult,
+  ResponseStreamEvent,
+  ResponsesStream,
+} from "~/services/copilot/create-responses"
+import {
   forwardProviderChatCompletions,
   forwardProviderMessages,
+  forwardProviderResponses,
 } from "~/services/providers/provider-proxy"
 
 const logger = createHandlerLogger("provider-messages-handler")
@@ -150,11 +185,37 @@ export async function handleProviderMessagesForProvider(
 
   try {
     const modelConfig = providerConfig.models?.[payload.model]
-    applyModelDefaults(payload, modelConfig)
-
     debugJson(logger, "provider.messages.request", { payload, provider })
 
+    normalizeSystemMessages(payload)
+    applyModelDefaults(payload, modelConfig)
+
+    if (providerConfig.type === "openai-responses") {
+      if (hasWebSearchServerTool(payload)) {
+        if (isWebSearchOnlyRequest(payload)) {
+          return await handleOpenAIResponsesProviderWebSearchMessages(c, {
+            instrumentation,
+            payload,
+            provider,
+            providerConfig,
+          })
+        }
+
+        stripWebSearchServerTool(payload)
+      }
+
+      return await handleOpenAIResponsesProviderMessages(c, {
+        instrumentation,
+        modelConfig,
+        payload,
+        provider,
+        providerConfig,
+      })
+    }
+
     if (providerConfig.type === "openai-compatible") {
+      stripWebSearchServerTool(payload)
+
       return await handleOpenAICompatibleProviderMessages(c, {
         instrumentation,
         modelConfig,
@@ -210,6 +271,194 @@ export async function handleProviderMessagesForProvider(
     })
     throw error
   }
+}
+
+const handleOpenAIResponsesProviderWebSearchMessages = async (
+  c: Context,
+  options: {
+    instrumentation?: ProviderMessagesInstrumentation
+    payload: AnthropicMessagesPayload
+    provider: string
+    providerConfig: ResolvedProviderConfig
+  },
+): Promise<Response> => {
+  const { instrumentation, payload, provider, providerConfig } = options
+  const selectedModel =
+    providerConfig.name === "codex" ?
+      getCodexModels().data.find((model) => model.id === payload.model)
+    : undefined
+  const responsesPayload = prepareWebSearchResponsesPayload(payload)
+  responsesPayload.stream = true
+
+  applyResponsesApiContextManagement(
+    responsesPayload,
+    selectedModel?.capabilities.limits.max_prompt_tokens,
+  )
+  compactInputByLatestCompaction(responsesPayload)
+
+  debugJson(logger, "provider.messages.responses.web_search.request", {
+    payload: responsesPayload,
+    provider,
+  })
+
+  if (providerConfig.name === "codex") {
+    const upstreamResponse = await forwardCodexResponses(
+      responsesPayload,
+      c.req.raw.headers,
+      providerConfig.baseUrl,
+    )
+
+    if (isResponsesStream(upstreamResponse)) {
+      const body = await collectWebSearchResponsesStreamResult({
+        errorMessagePrefix: `${provider} web search responses stream`,
+        parseEvent: (data) =>
+          parseResponsesProviderStreamChunk(data, providerConfig),
+        upstreamResponse,
+        logger,
+      })
+      return respondWebSearchProviderMessagesJson(c, {
+        body,
+        instrumentation,
+        payload,
+        provider,
+      })
+    }
+
+    return respondWebSearchProviderMessagesJson(c, {
+      body: upstreamResponse,
+      instrumentation,
+      payload,
+      provider,
+    })
+  }
+
+  const upstreamResponse = await forwardProviderResponses(
+    providerConfig,
+    responsesPayload,
+    c.req.raw.headers,
+  )
+
+  if (!upstreamResponse.ok) {
+    logger.error("Failed to create provider web search responses", {
+      provider,
+      upstreamResponse,
+    })
+    throw new HTTPError(
+      "Failed to create provider web search responses",
+      upstreamResponse,
+    )
+  }
+
+  const contentType = upstreamResponse.headers.get("content-type") ?? ""
+  if (contentType.includes("text/event-stream")) {
+    const body = await collectWebSearchResponsesStreamResult({
+      errorMessagePrefix: `${provider} web search responses stream`,
+      parseEvent: (data) =>
+        parseResponsesProviderStreamChunk(data, providerConfig),
+      upstreamResponse: events(upstreamResponse),
+      logger,
+    })
+    return respondWebSearchProviderMessagesJson(c, {
+      body,
+      instrumentation,
+      payload,
+      provider,
+    })
+  }
+
+  const jsonBody = (await upstreamResponse.json()) as ResponsesResult
+  return respondWebSearchProviderMessagesJson(c, {
+    body: jsonBody,
+    instrumentation,
+    payload,
+    provider,
+  })
+}
+
+const handleOpenAIResponsesProviderMessages = async (
+  c: Context,
+  options: {
+    instrumentation?: ProviderMessagesInstrumentation
+    modelConfig: ModelConfig | undefined
+    payload: AnthropicMessagesPayload
+    provider: string
+    providerConfig: ResolvedProviderConfig
+  },
+): Promise<Response> => {
+  const { instrumentation, payload, provider, providerConfig } = options
+  const selectedModel =
+    providerConfig.name === "codex" ?
+      getCodexModels().data.find((model) => model.id === payload.model)
+    : undefined
+  const responsesPayload = translateAnthropicMessagesToResponsesPayload(payload)
+
+  applyResponsesApiContextManagement(
+    responsesPayload,
+    selectedModel?.capabilities.limits.max_prompt_tokens,
+  )
+  compactInputByLatestCompaction(responsesPayload)
+
+  debugJson(logger, "provider.messages.responses.request", {
+    payload: responsesPayload,
+    provider,
+  })
+
+  if (providerConfig.name === "codex") {
+    const upstreamResponse = await forwardCodexResponses(
+      responsesPayload,
+      c.req.raw.headers,
+      providerConfig.baseUrl,
+    )
+
+    if (responsesPayload.stream && isResponsesStream(upstreamResponse)) {
+      return streamResponsesProviderMessages({
+        c,
+        instrumentation,
+        payload,
+        provider,
+        providerConfig,
+        upstreamResponse,
+      })
+    }
+
+    return respondResponsesProviderMessagesJson(c, {
+      body: upstreamResponse as ResponsesResult,
+      instrumentation,
+      payload,
+      provider,
+      providerConfig,
+    })
+  }
+
+  const upstreamResponse = await forwardProviderResponses(
+    providerConfig,
+    responsesPayload,
+    c.req.raw.headers,
+  )
+
+  if (!upstreamResponse.ok) {
+    logger.error("Failed to create provider responses", upstreamResponse)
+    throw new HTTPError("Failed to create provider responses", upstreamResponse)
+  }
+
+  if (responsesPayload.stream) {
+    return streamResponsesProviderMessages({
+      c,
+      payload,
+      provider,
+      providerConfig,
+      upstreamResponse: events(upstreamResponse),
+    })
+  }
+
+  const jsonBody = (await upstreamResponse.json()) as ResponsesResult
+  return respondResponsesProviderMessagesJson(c, {
+    body: jsonBody,
+    instrumentation,
+    payload,
+    provider,
+    providerConfig,
+  })
 }
 
 const applyModelDefaults = (
@@ -652,6 +901,117 @@ const streamOpenAICompatibleProviderMessages = ({
   })
 }
 
+const streamResponsesProviderMessages = ({
+  c,
+  instrumentation,
+  payload,
+  provider,
+  providerConfig,
+  upstreamResponse,
+}: {
+  c: Context
+  instrumentation?: ProviderMessagesInstrumentation
+  payload: AnthropicMessagesPayload
+  provider: string
+  providerConfig: ResolvedProviderConfig
+  upstreamResponse: ResponsesStream
+}): Response => {
+  logger.debug("provider.messages.responses.streaming", { provider })
+  return streamSSE(c, async (stream) => {
+    let usage: UsageTokens = {}
+    const streamState = createResponsesStreamState({
+      toolSearchName: resolveBridgeToolSearchName(payload.tools),
+    })
+
+    try {
+      for await (const chunk of upstreamResponse) {
+        logger.debug(
+          "provider.messages.responses.raw_stream_event:",
+          chunk.data,
+        )
+        if (chunk.event === "ping") {
+          await stream.writeSSE({ event: "ping", data: '{"type":"ping"}' })
+          continue
+        }
+
+        if (!chunk.data || chunk.data === "[DONE]") {
+          if (chunk.data === "[DONE]") break
+          continue
+        }
+
+        const parsed = parseResponsesProviderStreamChunk(
+          chunk.data,
+          providerConfig,
+        )
+        if (!parsed) continue
+
+        if (
+          parsed.type === "response.completed"
+          || parsed.type === "response.failed"
+          || parsed.type === "response.incomplete"
+        ) {
+          usage = normalizeResponsesUsage(parsed.response.usage)
+        }
+
+        const events = translateResponsesStreamEvent(parsed, streamState)
+        for (const event of events) {
+          const eventData = JSON.stringify(event)
+          debugLazy(logger, () => [
+            "provider.messages.responses.translated_event:",
+            eventData,
+          ])
+          await stream.writeSSE({ event: event.type, data: eventData })
+        }
+      }
+
+      if (!streamState.messageCompleted) {
+        const errorEvent = buildErrorEvent(
+          `${provider} stream ended without a completion event`,
+        )
+        await stream.writeSSE({
+          event: errorEvent.type,
+          data: JSON.stringify(errorEvent),
+        })
+      }
+
+      instrumentation?.onComplete?.(usage)
+    } catch (error) {
+      const details = await extractErrorObservability(error)
+      logger.warn("provider.messages.responses.streaming.error", error)
+      instrumentation?.onError?.(details)
+      await writeProviderStreamError(
+        stream,
+        getUserVisibleErrorMessage(details),
+      )
+    }
+  })
+}
+
+const isResponsesStream = (value: unknown): value is ResponsesStream =>
+  Boolean(value)
+  && typeof (value as ResponsesStream)[Symbol.asyncIterator] === "function"
+
+const parseResponsesProviderStreamChunk = (
+  data: string,
+  providerConfig: ResolvedProviderConfig,
+): ResponseStreamEvent | null => {
+  try {
+    const parsed = JSON.parse(data) as ResponseStreamEvent
+    if (providerConfig.name === "codex") {
+      logCodexRateLimitsEvent(parsed)
+    }
+
+    return parsed
+  } catch (error) {
+    logger.error("provider.messages.responses.parse_chunk_error", {
+      provider: providerConfig.name,
+      data,
+      error,
+    })
+    return null
+  }
+}
+
 const parseOpenAICompatibleStreamChunk = (
   data: string,
 ): ChatCompletionChunk => {
@@ -836,6 +1196,68 @@ type AnthropicMessageUsage = {
   output_tokens?: number
   cache_read_input_tokens?: number
   cache_creation_input_tokens?: number
+}
+
+const respondResponsesProviderMessagesJson = (
+  c: Context,
+  options: {
+    body: ResponsesResult
+    instrumentation?: ProviderMessagesInstrumentation
+    payload: AnthropicMessagesPayload
+    provider: string
+    providerConfig: ResolvedProviderConfig
+  },
+): Response => {
+  const { body, instrumentation, payload, providerConfig } = options
+  const usage = normalizeResponsesUsage(body.usage)
+  instrumentation?.onComplete?.(usage)
+
+  const anthropicResponse = translateResponsesResultToAnthropic(body, {
+    toolSearchName: resolveBridgeToolSearchName(payload.tools),
+  })
+  debugJson(
+    logger,
+    "provider.messages.responses.no_stream result:",
+    anthropicResponse,
+  )
+
+  if (providerConfig.name === "codex") {
+    logger.debug("provider.messages.codex.no_stream.result")
+  }
+  return c.json(anthropicResponse)
+}
+
+const respondWebSearchProviderMessagesJson = (
+  c: Context,
+  options: {
+    body: ResponsesResult
+    instrumentation?: ProviderMessagesInstrumentation
+    payload: AnthropicMessagesPayload
+    provider: string
+  },
+): Response => {
+  const { body, instrumentation, payload, provider } = options
+  assertWebSearchResponsesResultSucceeded(
+    body,
+    `${provider} web search responses`,
+  )
+  const usage = normalizeResponsesUsage(body.usage)
+  instrumentation?.onComplete?.(usage)
+
+  const { extract, response } = reconstructWebSearchResponse(payload, body, {
+    requestId: body.id || `${provider}:${payload.model}`,
+  })
+  logger.debug(
+    `provider.messages.responses.web_search: ${extract.queries.length} quer(y/ies), ${extract.sources.length} source(s)`,
+  )
+
+  if (!payload.stream) {
+    return c.json(response)
+  }
+
+  return streamSSE(c, (stream) =>
+    writeSyntheticWebSearchResponseStream(stream, response),
+  )
 }
 
 const adjustInputTokens = (

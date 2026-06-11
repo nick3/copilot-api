@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 
+const actualRateLimitModule = await import("../src/lib/rate-limit")
+
+await mock.module("~/lib/rate-limit", () => ({
+  ...actualRateLimitModule,
+  checkRateLimit: () => {},
+}))
+
 import { state } from "../src/lib/state"
 import { completionRoutes } from "../src/routes/chat-completions/route"
 

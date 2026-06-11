@@ -15,10 +15,13 @@ import {
 import { awaitApproval } from "~/lib/approval"
 import { COMPACT_REQUEST, type CompactType } from "~/lib/compact"
 import {
+  getMessageApiWebSearchModel,
   getProviderConfig,
   getSmallModel,
   isMessageStartInputTokensFallbackEnabled,
   isMessagesApiEnabled,
+  isResponsesApiWebSearchEnabled,
+  resolveMappedModel,
   resolveModelAlias,
   shouldCompactUseSmallModel,
 } from "~/lib/config"
@@ -93,6 +96,7 @@ import {
 import {
   createResponses,
   type ResponsesResult,
+  type ResponsesStream,
   type ResponseStreamEvent,
 } from "~/services/copilot/create-responses"
 
@@ -110,9 +114,11 @@ import {
   applyLastMessageCacheControl,
   getCompactType,
   getLastMessageContentCacheControl,
+  mergeToolResultForClaude,
   normalizeSystemMessages,
   prepareMessagesApiPayload,
   sanitizeIdeTools,
+  stripToolReferenceTurnBoundary,
 } from "./preprocess"
 import { translateChunkToAnthropicEvents } from "./stream-translation"
 import { inspectSubagentMarkerFromFirstUser } from "./subagent-marker"
@@ -122,6 +128,14 @@ import {
   isWarmupProbeRequest,
   maybeBlockOriginalModelName,
 } from "./utils"
+import {
+  collectWebSearchResponsesStreamResult,
+  prepareWebSearchResponsesPayload,
+  reconstructWebSearchResponse,
+  resolveWebSearchRoute,
+  stripWebSearchServerTool,
+  writeSyntheticWebSearchResponseStream,
+} from "./web-search/fulfill"
 
 const logger = createHandlerLogger("messages-handler")
 
@@ -333,6 +347,18 @@ async function handleProviderAliasCompletion(
 export async function handleCompletion(c: Context) {
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
   const providerConfigResolver = getProviderConfigResolver(c)
+
+  const requestedModel = anthropicPayload.model
+  anthropicPayload.model = resolveMappedModel(anthropicPayload.model)
+  if (anthropicPayload.model !== requestedModel) {
+    logger.debug(
+      `Resolved model mapping: ${requestedModel} -> ${anthropicPayload.model}`,
+    )
+  }
+
+  normalizeSystemMessages(anthropicPayload)
+  sanitizeIdeTools(anthropicPayload)
+
   const providerModelAlias = resolveExistingProviderModelAlias(
     anthropicPayload.model,
     providerConfigResolver,
@@ -351,6 +377,25 @@ export async function handleCompletion(c: Context) {
     })
   }
 
+  const webSearchRoute = resolveWebSearchRoute(anthropicPayload, {
+    webSearchModel: getMessageApiWebSearchModel(),
+    responsesWebSearchEnabled: isResponsesApiWebSearchEnabled(),
+    isProviderAvailable: (provider) =>
+      providerConfigResolver(provider) !== null,
+  })
+
+  if (webSearchRoute.kind === "provider") {
+    return await handleProviderAliasCompletion(c, {
+      payload: anthropicPayload,
+      provider: webSearchRoute.alias.provider,
+      providerModel: webSearchRoute.alias.model,
+    })
+  }
+
+  if (webSearchRoute.kind === "strip") {
+    stripWebSearchServerTool(anthropicPayload)
+  }
+
   await checkRateLimit(state)
   const store = getRequestHistoryStore()
   const requestId = randomUUID()
@@ -359,8 +404,6 @@ export async function handleCompletion(c: Context) {
   const path = new URL(c.req.url, "http://local").pathname
   const { ip: clientIp, source: clientIpSource } = getClientIpInfo(c)
   const userAgent = c.req.header("user-agent") ?? undefined
-  normalizeSystemMessages(anthropicPayload)
-  sanitizeIdeTools(anthropicPayload)
   debugJson(logger, "Anthropic request payload:", anthropicPayload)
 
   const markerInspection = inspectSubagentMarkerFromFirstUser(anthropicPayload)
@@ -409,6 +452,11 @@ export async function handleCompletion(c: Context) {
     anthropicPayload.model = getSmallModel()
   }
 
+  if (!isCompact) {
+    stripToolReferenceTurnBoundary(anthropicPayload)
+    mergeToolResultForClaude(anthropicPayload)
+  }
+
   applyLastMessageCacheControl(anthropicPayload, lastMessageCacheControl)
 
   const upstreamRequestId = generateRequestIdFromPayload(
@@ -419,6 +467,9 @@ export async function handleCompletion(c: Context) {
 
   const clientModel = anthropicPayload.model
   anthropicPayload.model = resolveModelAlias(anthropicPayload.model)
+  if (webSearchRoute.kind === "responses") {
+    anthropicPayload.model = webSearchRoute.model
+  }
   const routingModel = anthropicPayload.model
   const streamRequested = Boolean(anthropicPayload.stream)
   const rawUserId = anthropicPayload.metadata?.user_id
@@ -427,7 +478,11 @@ export async function handleCompletion(c: Context) {
     parseUserIdMetadata(userId)
   const normalizedSafetyIdentifier = safetyIdentifier ?? undefined
   const normalizedPromptCacheKey = promptCacheKey ?? undefined
-  const openAIPayload = translateToOpenAI(anthropicPayload)
+  const openAITranslationPayload = { ...anthropicPayload }
+  if (webSearchRoute.kind === "responses") {
+    stripWebSearchServerTool(openAITranslationPayload)
+  }
+  const openAIPayload = translateToOpenAI(openAITranslationPayload)
   const fallbackInitiator = resolveEffectiveInitiator(
     getChatInitiator(openAIPayload.messages),
     {
@@ -466,22 +521,29 @@ export async function handleCompletion(c: Context) {
   const useMessagesApi = isMessagesApiEnabled()
 
   const candidates: Array<{ modelId: string; endpoint: string }> = []
-  if (useMessagesApi) {
+  if (webSearchRoute.kind === "responses") {
     candidates.push({
       modelId: resolvedClientModel,
-      endpoint: MESSAGES_ENDPOINT,
-    })
-  }
-  candidates.push(
-    {
-      modelId: resolvedClientModel,
       endpoint: RESPONSES_ENDPOINT,
-    },
-    {
-      modelId: endpointModel?.id ?? openAIPayload.model,
-      endpoint: CHAT_COMPLETIONS_ENDPOINT,
-    },
-  )
+    })
+  } else {
+    if (useMessagesApi) {
+      candidates.push({
+        modelId: resolvedClientModel,
+        endpoint: MESSAGES_ENDPOINT,
+      })
+    }
+    candidates.push(
+      {
+        modelId: resolvedClientModel,
+        endpoint: RESPONSES_ENDPOINT,
+      },
+      {
+        modelId: endpointModel?.id ?? openAIPayload.model,
+        endpoint: CHAT_COMPLETIONS_ENDPOINT,
+      },
+    )
+  }
 
   const headerSessionId = c.req.header("x-session-id") ?? null
   const affinityKey = resolveAffinityKey({
@@ -564,6 +626,17 @@ export async function handleCompletion(c: Context) {
     affinityKeySource: affinityKey.affinityKeySource,
     selectionReason,
     responsesItemOwnerLookupKeys: responsesItemOwnershipKeys,
+  }
+  if (webSearchRoute.kind === "responses") {
+    return await handleWithWebSearchResponsesApi({
+      c,
+      anthropicPayload,
+      subagentMarker,
+      sessionId,
+      selectedModel,
+      instr,
+      compactType,
+    })
   }
   if (endpoint === MESSAGES_ENDPOINT) {
     return await handleWithMessagesApi({
@@ -687,6 +760,103 @@ const handleWithChatCompletions = async (params: {
       historicalUsage: historicalUsage ?? undefined,
     }),
   )
+}
+
+const handleWithWebSearchResponsesApi = async (params: {
+  c: Context
+  anthropicPayload: AnthropicMessagesPayload
+  subagentMarker?: SubagentMarker | null
+  sessionId?: string
+  selectedModel: Model
+  instr: InstrumentationContext
+  compactType?: CompactType
+}): Promise<Response> => {
+  const {
+    c,
+    anthropicPayload,
+    subagentMarker,
+    sessionId,
+    selectedModel,
+    instr,
+    compactType,
+  } = params
+  const responsesPayload = prepareWebSearchResponsesPayload(anthropicPayload, {
+    model: selectedModel.id,
+    subagentAgentId: subagentMarker?.agent_id,
+  })
+
+  const { vision, initiator } = getResponsesRequestOptions(responsesPayload)
+  const transport =
+    getResponsesTransportForModel(selectedModel, { compactType }) ?? "http"
+  const isCompact = compactType !== 0
+  const effectiveInitiator = resolveEffectiveInitiator(initiator, {
+    isCompact,
+    isSubagent: Boolean(subagentMarker),
+  })
+  const ctx = toAccountContext(instr.account)
+
+  instr.initiator = effectiveInitiator
+
+  debugJson(
+    logger,
+    "Translated web search Responses payload:",
+    responsesPayload,
+  )
+
+  let response: Awaited<ReturnType<typeof createResponses>>
+
+  try {
+    response = await createResponses(
+      responsesPayload,
+      {
+        vision,
+        initiator: effectiveInitiator,
+        upstreamRequestId: instr.upstreamRequestId,
+        subagentMarker,
+        sessionId,
+        compactType,
+        requestId: instr.requestId,
+        transport,
+      },
+      ctx,
+    )
+    instr.confirmAffinity?.()
+    instr.confirmOwnership?.()
+  } catch (error) {
+    return await handleResponsesCreateError({
+      error,
+      instr,
+      stream: Boolean(responsesPayload.stream),
+    })
+  }
+
+  if (isAsyncIterable(response)) {
+    if (anthropicPayload.stream) {
+      logger.debug("Streaming web search response from Copilot (Responses API)")
+      return streamSSE(c, (stream) =>
+        streamWebSearchResponsesAndLog({
+          stream,
+          response,
+          originalPayload: anthropicPayload,
+          instr,
+        }),
+      )
+    }
+
+    return await handleWebSearchResponsesStreamToJson({
+      c,
+      response,
+      originalPayload: anthropicPayload,
+      instr,
+    })
+  }
+
+  return await handleWebSearchResponsesNonStreaming({
+    c,
+    result: response,
+    originalPayload: anthropicPayload,
+    instr,
+  })
 }
 
 const handleWithResponsesApi = async (params: {
@@ -1173,6 +1343,191 @@ async function handleResponsesCreateError(params: {
   })
 
   throw error
+}
+
+async function handleWebSearchResponsesStreamToJson(params: {
+  c: Context
+  response: AsyncIterable<unknown>
+  originalPayload: AnthropicMessagesPayload
+  instr: InstrumentationContext
+}): Promise<Response> {
+  const { c, response, originalPayload, instr } = params
+
+  try {
+    const result = await collectWebSearchResponsesStreamResult({
+      upstreamResponse: response as ResponsesStream,
+      logger,
+    })
+    return await handleWebSearchResponsesNonStreaming({
+      c,
+      result,
+      originalPayload,
+      instr,
+    })
+  } catch (error) {
+    return await handleResponsesCreateError({
+      error,
+      instr,
+      stream: false,
+    })
+  }
+}
+
+async function streamWebSearchResponsesAndLog(params: {
+  stream: StreamSseStream
+  response: AsyncIterable<unknown>
+  originalPayload: AnthropicMessagesPayload
+  instr: InstrumentationContext
+}): Promise<void> {
+  const { stream, response, originalPayload, instr } = params
+
+  let ttfbMs: number | undefined
+  let lastUsage: NormalizedUsage = {}
+
+  let errorName: string | undefined
+  let errorStatus: number | undefined
+  let errorMessage: string | undefined
+  let upstreamErrorMessageRaw: string | undefined
+
+  try {
+    const result = await collectWebSearchResponsesStreamResult({
+      upstreamResponse: response as ResponsesStream,
+      logger,
+    })
+    ttfbMs = Date.now() - instr.startedAtMs
+    lastUsage = extractResponsesUsageFromResult(result)
+
+    const responsePayload = {
+      ...originalPayload,
+      model: instr.clientModel,
+    }
+    const { extract, response: anthropicResponse } =
+      reconstructWebSearchResponse(responsePayload, result, {
+        requestId: instr.requestId,
+      })
+
+    debugJson(
+      logger,
+      `Web search via responses: ${extract.queries.length} quer(y/ies), ${extract.sources.length} source(s)`,
+      result,
+    )
+
+    await writeSyntheticWebSearchResponseStream(stream, anthropicResponse)
+  } catch (error) {
+    const details = await extractErrorObservability(error)
+
+    errorName = details.errorName
+    errorStatus = details.errorStatus
+    errorMessage = details.errorMessage
+    upstreamErrorMessageRaw = details.upstreamErrorMessageRaw
+
+    logger.warn("Streaming web search error:", error)
+    invalidateAffinityOnOwnershipMismatch(details.ownershipMismatch, instr)
+
+    if (shouldMarkAccountFailed(details)) {
+      accountsManager.markAccountFailed(instr.account.id, "Unauthorized (401)")
+    }
+
+    await writeAnthropicStreamError(stream, getUserVisibleErrorMessage(details))
+  } finally {
+    const finishedAtMs = Date.now()
+    const {
+      premiumRemainingAfter,
+      premiumUnlimitedAfter,
+      premiumRemainingDiff,
+    } = await finalizeQuotaAndGetPremiumSnapshot(instr)
+
+    insertRequestLog(instr, {
+      finishedAtMs,
+      durationMs: finishedAtMs - instr.startedAtMs,
+      ttfbMs,
+      stream: true,
+      ...lastUsage,
+      premiumRemainingAfter,
+      premiumUnlimitedAfter,
+      premiumRemainingDiff,
+      httpStatus: errorStatus ?? (errorName ? 500 : 200),
+      errorName,
+      errorStatus,
+      errorMessage,
+      upstreamErrorMessageRaw,
+    })
+  }
+}
+
+async function handleWebSearchResponsesNonStreaming(params: {
+  c: Context
+  result: ResponsesResult
+  originalPayload: AnthropicMessagesPayload
+  instr: InstrumentationContext
+}): Promise<Response> {
+  const { c, result, originalPayload, instr } = params
+
+  let httpStatus = 200
+  let usage: NormalizedUsage = {}
+
+  let errorName: string | undefined
+  let errorStatus: number | undefined
+  let errorMessage: string | undefined
+  let upstreamErrorMessageRaw: string | undefined
+
+  const finishedAtMs = Date.now()
+
+  try {
+    usage = extractResponsesUsageFromResult(result)
+    const responsePayload = {
+      ...originalPayload,
+      model: instr.clientModel,
+    }
+    const { extract, response } = reconstructWebSearchResponse(
+      responsePayload,
+      result,
+      { requestId: instr.requestId },
+    )
+
+    debugJson(
+      logger,
+      `Web search via responses: ${extract.queries.length} quer(y/ies), ${extract.sources.length} source(s)`,
+      result,
+    )
+
+    return c.json(response)
+  } catch (error) {
+    const details = await extractErrorObservability(error)
+
+    httpStatus = details.httpStatus
+    errorName = details.errorName
+    errorStatus = details.errorStatus
+    errorMessage = details.errorMessage
+    upstreamErrorMessageRaw = details.upstreamErrorMessageRaw
+
+    if (shouldMarkAccountFailed(details)) {
+      accountsManager.markAccountFailed(instr.account.id, "Unauthorized (401)")
+    }
+
+    throw error
+  } finally {
+    const {
+      premiumRemainingAfter,
+      premiumUnlimitedAfter,
+      premiumRemainingDiff,
+    } = await finalizeQuotaAndGetPremiumSnapshot(instr)
+
+    insertRequestLog(instr, {
+      finishedAtMs,
+      durationMs: finishedAtMs - instr.startedAtMs,
+      stream: false,
+      ...usage,
+      premiumRemainingAfter,
+      premiumUnlimitedAfter,
+      premiumRemainingDiff,
+      httpStatus,
+      errorName,
+      errorStatus,
+      errorMessage,
+      upstreamErrorMessageRaw,
+    })
+  }
 }
 
 async function handleResponsesNonStreaming(params: {

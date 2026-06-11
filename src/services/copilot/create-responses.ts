@@ -360,6 +360,13 @@ export interface ResponseErrorEvent {
   param: string | null
   sequence_number: number
   type: "error"
+  error?: {
+    type?: string | null
+    code: string | null
+    message: string
+  }
+  status_code?: number
+  headers?: Record<string, string>
 }
 
 export interface ResponseFunctionCallArgumentsDeltaEvent {
@@ -453,6 +460,7 @@ interface ResponsesRequestOptions {
 }
 
 const RESPONSES_WEBSOCKET_IDLE_TIMEOUT_MS = 60_000
+const RESPONSES_WEBSOCKET_TEXT_DECODER = new TextDecoder()
 
 export const createResponses = async (
   payload: ResponsesPayload,
@@ -1081,12 +1089,12 @@ const normalizeWebSocketMessageData = async (
   }
 
   if (data instanceof ArrayBuffer) {
-    return new TextDecoder().decode(data)
+    return RESPONSES_WEBSOCKET_TEXT_DECODER.decode(data)
   }
 
   if (ArrayBuffer.isView(data)) {
     const view = data
-    return new TextDecoder().decode(
+    return RESPONSES_WEBSOCKET_TEXT_DECODER.decode(
       new Uint8Array(
         view.buffer as ArrayBuffer,
         view.byteOffset,
@@ -1188,20 +1196,7 @@ const consumeResponsesWebSocketStream = async (
 
     const event = JSON.parse(chunk.data) as ResponseStreamEvent
     if (event.type === "error") {
-      // The transport is WebSocket, but `event.code` carries the HTTP status
-      // from the Responses API (e.g. 429 for rate-limit). Wrap it as an
-      // HTTPError so the existing observability chain (account-failure marking,
-      // rate-limit logging) handles it identically to the HTTP path.
-      const status =
-        typeof event.code === "string" ? parseInt(event.code, 10) : NaN
-      const httpStatus =
-        Number.isFinite(status) && status >= 100 && status < 600 ? status : 500
-      throw new HTTPError(
-        event.message,
-        new Response(JSON.stringify({ error: { message: event.message } }), {
-          status: httpStatus,
-        }),
-      )
+      throw createResponsesWebSocketHttpError(event)
     }
 
     if (
@@ -1214,6 +1209,33 @@ const consumeResponsesWebSocketStream = async (
   }
 
   throw new Error("Responses websocket ended without a terminal response")
+}
+
+const createResponsesWebSocketHttpError = (
+  event: ResponseErrorEvent,
+): HTTPError => {
+  const status = getResponsesWebSocketErrorStatus(event)
+  const body = {
+    error: event.error ?? { message: event.message },
+  }
+  return new HTTPError(
+    event.message,
+    new Response(JSON.stringify(body), {
+      headers: event.headers,
+      status,
+    }),
+  )
+}
+
+const getResponsesWebSocketErrorStatus = (
+  event: ResponseErrorEvent,
+): number => {
+  const status =
+    typeof event.status_code === "number" ? event.status_code
+    : typeof event.code === "string" ? parseInt(event.code, 10)
+    : NaN
+
+  return Number.isFinite(status) && status >= 100 && status < 600 ? status : 500
 }
 
 const closeResponsesWebSocket = (

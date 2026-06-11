@@ -27,6 +27,7 @@ import {
   createProviderProxyResponse,
   forwardProviderResponses,
 } from "~/services/providers/provider-proxy"
+import type { ContentfulStatusCode } from "hono/utils/http-status"
 
 const logger = createHandlerLogger("provider-responses-handler")
 
@@ -132,7 +133,7 @@ const createProviderResponsesUsageRecorder = (
   return (_usage: NormalizedUsage) => {}
 }
 
-const streamProviderResponses = (
+const streamProviderResponses = async (
   c: Context,
   upstreamResponse: ResponsesStream,
   options: {
@@ -140,41 +141,80 @@ const streamProviderResponses = (
     provider: string
     recordUsage: (usage: NormalizedUsage) => void
   },
-): Response => {
+): Promise<Response> => {
+  const iterator = upstreamResponse[Symbol.asyncIterator]()
+  const firstResult = await iterator.next()
+  if (firstResult.done) {
+    throw new HTTPError(
+      `Empty stream from ${options.provider} responses`,
+      new Response("", { status: 502 }),
+    )
+  }
+
+  const firstChunk = firstResult.value
+  if (firstChunk.data && firstChunk.data !== "[DONE]") {
+    const event = parseProviderResponsesStreamEvent(firstChunk.data, {
+      normalizeCodex: options.normalizeCodex,
+      provider: options.provider,
+    })
+    if (event?.type === "error") {
+      const errorEvent = event
+      const statusCode = errorEvent.status_code ?? 500
+      return c.json(
+        {
+          error: {
+            message: errorEvent.message,
+            ...errorEvent.error,
+          },
+        },
+        statusCode as ContentfulStatusCode,
+        errorEvent.headers ?? undefined,
+      )
+    }
+  }
+
   return streamSSE(c, async (stream) => {
     let usage: NormalizedUsage = {}
 
-    try {
-      for await (const chunk of upstreamResponse) {
-        debugJson(logger, "Responses stream chunk:", chunk)
-        let responseChunk = chunk
-        let event: ResponseStreamEvent | null = null
+    const writeChunk = async (chunk: typeof firstChunk) => {
+      debugJson(logger, "Responses stream chunk:", chunk)
+      let responseChunk = chunk
+      let event: ResponseStreamEvent | null = null
 
-        if (chunk.data && chunk.data !== "[DONE]") {
-          event = parseProviderResponsesStreamEvent(chunk.data, {
-            normalizeCodex: options.normalizeCodex,
-            provider: options.provider,
-          })
-          if (event && options.normalizeCodex) {
-            responseChunk = {
-              ...chunk,
-              data: JSON.stringify(event),
-              event: event.type,
-            }
-          }
-        }
-
-        if (event) {
-          const nextUsage = getResponsesStreamEventUsage(event)
-          if (nextUsage) {
-            usage = nextUsage
-          }
-        }
-
-        await stream.writeSSE({
-          data: responseChunk.data ?? "",
-          event: responseChunk.event,
+      if (chunk.data && chunk.data !== "[DONE]") {
+        event = parseProviderResponsesStreamEvent(chunk.data, {
+          normalizeCodex: options.normalizeCodex,
+          provider: options.provider,
         })
+        if (event && options.normalizeCodex) {
+          responseChunk = {
+            ...chunk,
+            data: JSON.stringify(event),
+            event: event.type,
+          }
+        }
+      }
+
+      if (event) {
+        const nextUsage = getResponsesStreamEventUsage(event)
+        if (nextUsage) {
+          usage = nextUsage
+        }
+      }
+
+      await stream.writeSSE({
+        data: responseChunk.data ?? "",
+        event: responseChunk.event,
+      })
+    }
+
+    try {
+      await writeChunk(firstChunk)
+
+      for await (const chunk of {
+        [Symbol.asyncIterator]: () => iterator,
+      }) {
+        await writeChunk(chunk)
       }
     } finally {
       options.recordUsage(usage)

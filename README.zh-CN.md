@@ -388,6 +388,7 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
     "useMessagesApi": true,
     "useResponsesApiWebSocket": true,
     "useResponsesApiWebSearch": true,
+    "messageApiWebSearchModel": "gpt-5-mini",
     "logLevel": "info"
   }
   ```
@@ -472,7 +473,8 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
     },
     "useMessagesApi": true,
     "useResponsesApiWebSocket": true,
-    "useResponsesApiWebSearch": true
+    "useResponsesApiWebSearch": true,
+    "messageApiWebSearchModel": "gpt-5-mini"
   }
   ```
 - **auth.apiKeys：** 用于普通非 admin 路由的 API key。支持多个 key 轮换使用。请求可通过 `x-api-key: <key>` 或 `Authorization: Bearer <key>` 进行认证。若为空或省略，则普通路由的认证会被禁用。
@@ -510,6 +512,7 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
 - **useMessagesApi：** 当为 `true`（默认）时，支持 Copilot 原生 `/v1/messages` 端点的 Claude 系模型会走 Messages API 路径。设为 `false` 时，将跳过 Messages API 候选，回退到 `/responses`（如支持）或 `/chat/completions`。
 - **useResponsesApiWebSocket：** 当为 `true`（默认）时，发往上游 Copilot Responses API 的请求会对声明了 `ws:/responses` 的模型使用 Copilot WebSocket transport；仅声明 `/responses` 的模型仍走 HTTP。设为 `false` 可禁用上游 WebSocket 路由。该配置不会禁用 `/v1/responses` 上面向 Codex 的入站 WebSocket listener。
 - **useResponsesApiWebSearch：** 当为 `true`（默认）时，`/v1/responses` 会保留 `type: "web_search"` 的工具并转发到上游。设为 `false` 则会在发送 Copilot 请求之前将其剥离。
+- **messageApiWebSearchModel：** 顶层 Copilot `/v1/messages` 请求只包含 Anthropic 服务端 `web_search` 工具时使用的全局回退模型，默认值为 `gpt-5-mini`。如果该值是 `provider/model` 别名，请求会进入对应 provider 的 Messages API 路径，并在转发前移除 provider 前缀。对于 Copilot GPT 模型，web search 会通过 `/responses` 执行。混合 `web_search` 与自定义工具的场景暂不支持，服务端会移除 server-side `web_search` 并让请求继续走普通链路。
 - **claudeTokenMultiplier：** 用于 Claude `/v1/messages/count_tokens` 请求在本地走 GPT tokenizer 估算时的乘数。默认值为 `1.15`。如果你的客户端仍然过晚触发上下文压缩，可以适当调大。这个配置只会在代理本地估算 Claude token 时生效；如果已经配置 `anthropicApiKey` 且 Anthropic token counting 调用成功，则会直接返回 Anthropic 的精确计数，不会使用这个乘数。
 - **logLevel：** 控制 `logs/*.log` 下 handler 文件日志的详细级别。可选值：`error`、`warn`、`info`、`debug`。默认值为 `info`。如果你需要把 payload 级或 stream 级的调试内容写入文件日志，请显式设置为 `debug`。
 - **anthropicApiKey：** 可选的 Anthropic API key，用于精确的 Claude token 计数（见下文 [精确的 Claude Token 计数](#accurate-claude-token-counting)）。也可通过环境变量 `ANTHROPIC_API_KEY` 设置。若未配置，或上游调用失败，则回退到由 `claudeTokenMultiplier` 控制的本地 GPT tokenizer 估算。
@@ -831,7 +834,7 @@ bunx --bun @nick3/copilot-api@latest start --claude-code
 - 请根据需要替换 `ANTHROPIC_MODEL`、`ANTHROPIC_DEFAULT_OPUS_MODEL`、`ANTHROPIC_DEFAULT_SONNET_MODEL` 和 `ANTHROPIC_DEFAULT_HAIKU_MODEL`。配置完成后，请安装 claude code 插件，见 [插件集成](#plugin-integrations)。
 - 将 `CLAUDE_CODE_ATTRIBUTION_HEADER` 设为 `0` 可以阻止 Claude Code 在 system prompt 中附加计费和版本信息，从而避免 prompt cache 失效。
 - 关闭 `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` 和 `CLAUDE_CODE_ENABLE_AWAY_SUMMARY` 可以避免不必要地消耗额度。
-- `permissions` 中禁止 `WebSearch`，因为 GitHub Copilot API 不支持原生 web search（部分 gpt 模型支持 websearch，但本项目目前尚未适配）；建议安装 mcp 的 `mcp_server_fetch` 工具或其他搜索工具作为替代。
+- Claude Code WebSearch 已支持纯搜索请求。Copilot 路径请保持 `messageApiWebSearchModel` 指向 Responses-capable GPT 模型或 `provider/model` 别名；provider 路由请使用原生 Anthropic provider 或 `openai-responses` provider。只有在你明确想禁止这类流量时，才需要把 `WebSearch` 加到 `permissions.deny`。
 - 如果使用的不是 Claude 模型，请不要启用 `ENABLE_TOOL_SEARCH`。如果使用的是 Claude 模型，则可以启用 `ENABLE_TOOL_SEARCH`。当前 Claude Code 使用的是客户端 tool search 模式，在该模式下每次加载 defer tools 都需要额外请求一次。
 
 更多选项见：[Claude Code settings](https://docs.anthropic.com/en/docs/claude-code/settings#environment-variables)
