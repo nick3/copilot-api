@@ -11,7 +11,10 @@ import { PATHS } from "~/lib/paths"
 
 type TestConfig = Record<string, unknown>
 
-const withConfig = async (config: TestConfig, run: () => Promise<void>) => {
+const withConfig = async (
+  config: TestConfig,
+  run: () => Promise<void> | void,
+) => {
   const original = await fs
     .readFile(PATHS.CONFIG_PATH, "utf8")
     .catch(() => null)
@@ -245,6 +248,15 @@ test("POST /api/admin/config clears messageApiWebSearchModel without fallback", 
       }
       expect(body.messageApiWebSearchModel).toBeUndefined()
       expect(getMessageApiWebSearchModel()).toBeUndefined()
+    },
+  )
+})
+
+test("getMessageApiWebSearchModel trims configured model names", async () => {
+  await withConfig(
+    { messageApiWebSearchModel: "  search/gpt-search  " },
+    () => {
+      expect(getMessageApiWebSearchModel()).toBe("search/gpt-search")
     },
   )
 })
