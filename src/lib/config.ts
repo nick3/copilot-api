@@ -1126,8 +1126,8 @@ export function isResponsesApiWebSearchEnabled(): boolean {
 
 export function getMessageApiWebSearchModel(): string | undefined {
   const config = getConfig()
-  const model = config.messageApiWebSearchModel ?? "gpt-5-mini"
-  return model && model.trim().length > 0 ? model : undefined
+  const model = config.messageApiWebSearchModel?.trim()
+  return model && model.length > 0 ? model : undefined
 }
 
 export function getClaudeTokenMultiplier(): number {

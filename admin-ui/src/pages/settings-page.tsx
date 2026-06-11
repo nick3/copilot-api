@@ -2214,6 +2214,7 @@ function ModelAliasesCard({
 type ResponsesApiSettingsCardProps = {
   useResponsesApiWebSocket: boolean
   useResponsesApiWebSearch: boolean
+  messageApiWebSearchModelValue: string
   useResponsesApiContextManagement: boolean
   responsesApiContextManagementModelsValue: string
   compactThresholdsMode: JsonMode
@@ -2223,6 +2224,7 @@ type ResponsesApiSettingsCardProps = {
   models: Array<string>
   onToggleUseResponsesApiWebSocket: (value: boolean) => void
   onToggleUseResponsesApiWebSearch: (value: boolean) => void
+  onMessageApiWebSearchModelChange: (value: string) => void
   onToggleUseResponsesApiContextManagement: (value: boolean) => void
   onResponsesApiContextManagementModelsChange: (value: string) => void
   onCompactThresholdsToggleMode: (next: boolean) => void
@@ -2238,6 +2240,7 @@ type ResponsesApiSettingsCardProps = {
 export function ResponsesApiSettingsCard({
   useResponsesApiWebSocket,
   useResponsesApiWebSearch,
+  messageApiWebSearchModelValue,
   useResponsesApiContextManagement,
   responsesApiContextManagementModelsValue,
   compactThresholdsMode,
@@ -2247,6 +2250,7 @@ export function ResponsesApiSettingsCard({
   models,
   onToggleUseResponsesApiWebSocket,
   onToggleUseResponsesApiWebSearch,
+  onMessageApiWebSearchModelChange,
   onToggleUseResponsesApiContextManagement,
   onResponsesApiContextManagementModelsChange,
   onCompactThresholdsToggleMode,
@@ -2297,6 +2301,26 @@ export function ResponsesApiSettingsCard({
           <Switch
             checked={useResponsesApiWebSearch}
             onCheckedChange={onToggleUseResponsesApiWebSearch}
+          />
+        </div>
+
+        <div className="grid gap-2 rounded-lg border p-3">
+          <div className="space-y-1">
+            <Label className="text-muted-foreground text-xs">
+              {t("settingsPage.responsesApi.messageApiWebSearchModelLabel")}
+            </Label>
+            <div className="text-muted-foreground text-xs">
+              {t("settingsPage.responsesApi.messageApiWebSearchModelHint")}
+            </div>
+          </div>
+          <Input
+            autoComplete="off"
+            placeholder={t(
+              "settingsPage.responsesApi.messageApiWebSearchModelPlaceholder",
+            )}
+            value={messageApiWebSearchModelValue}
+            onChange={(e) => onMessageApiWebSearchModelChange(e.target.value)}
+            className="font-mono text-xs"
           />
         </div>
 
@@ -3110,11 +3134,13 @@ type SettingsPageViewProps = {
   useMessagesApi: boolean
   useResponsesApiWebSocket: boolean
   useResponsesApiWebSearch: boolean
+  messageApiWebSearchModelValue: string
   useResponsesApiContextManagement: boolean
   responsesApiContextManagementModelsValue: string
   onUseMessagesApiToggle: (value: boolean) => void
   onUseResponsesApiWebSocketToggle: (value: boolean) => void
   onUseResponsesApiWebSearchToggle: (value: boolean) => void
+  onMessageApiWebSearchModelChange: (value: string) => void
   onUseResponsesApiContextManagementToggle: (value: boolean) => void
   onResponsesApiContextManagementModelsChange: (value: string) => void
   providersItems: Array<ProviderItem>
@@ -3502,6 +3528,13 @@ function useSettingsPageState(): SettingsPageViewProps {
     [setDraft],
   )
 
+  const handleMessageApiWebSearchModelChange = useCallback(
+    (value: string) => {
+      setDraft((prev) => ({ ...prev, messageApiWebSearchModel: value }))
+    },
+    [setDraft],
+  )
+
   const handleUseResponsesApiContextManagementToggle = useCallback(
     (value: boolean) => {
       setDraft((prev) => ({ ...prev, useResponsesApiContextManagement: value }))
@@ -3615,6 +3648,7 @@ function useSettingsPageState(): SettingsPageViewProps {
   const useMessagesApi = draft.useMessagesApi ?? true
   const useResponsesApiWebSocket = draft.useResponsesApiWebSocket ?? true
   const useResponsesApiWebSearch = draft.useResponsesApiWebSearch ?? true
+  const messageApiWebSearchModelValue = draft.messageApiWebSearchModel ?? ""
   const useResponsesApiContextManagement =
     draft.useResponsesApiContextManagement ?? true
 
@@ -3694,11 +3728,13 @@ function useSettingsPageState(): SettingsPageViewProps {
     useMessagesApi,
     useResponsesApiWebSocket,
     useResponsesApiWebSearch,
+    messageApiWebSearchModelValue,
     useResponsesApiContextManagement,
     responsesApiContextManagementModelsValue,
     onUseMessagesApiToggle: handleUseMessagesApiToggle,
     onUseResponsesApiWebSocketToggle: handleUseResponsesApiWebSocketToggle,
     onUseResponsesApiWebSearchToggle: handleUseResponsesApiWebSearchToggle,
+    onMessageApiWebSearchModelChange: handleMessageApiWebSearchModelChange,
     onUseResponsesApiContextManagementToggle: handleUseResponsesApiContextManagementToggle,
     onResponsesApiContextManagementModelsChange:
       handleResponsesApiContextManagementModelsChange,
@@ -3795,11 +3831,13 @@ function SettingsPageView({
   useMessagesApi,
   useResponsesApiWebSocket,
   useResponsesApiWebSearch,
+  messageApiWebSearchModelValue,
   useResponsesApiContextManagement,
   responsesApiContextManagementModelsValue,
   onUseMessagesApiToggle,
   onUseResponsesApiWebSocketToggle,
   onUseResponsesApiWebSearchToggle,
+  onMessageApiWebSearchModelChange,
   onUseResponsesApiContextManagementToggle,
   onResponsesApiContextManagementModelsChange,
   providersItems,
@@ -3985,6 +4023,7 @@ function SettingsPageView({
             <ResponsesApiSettingsCard
               useResponsesApiWebSocket={useResponsesApiWebSocket}
               useResponsesApiWebSearch={useResponsesApiWebSearch}
+              messageApiWebSearchModelValue={messageApiWebSearchModelValue}
               useResponsesApiContextManagement={useResponsesApiContextManagement}
               responsesApiContextManagementModelsValue={
                 responsesApiContextManagementModelsValue
@@ -3996,6 +4035,7 @@ function SettingsPageView({
               models={models}
               onToggleUseResponsesApiWebSocket={onUseResponsesApiWebSocketToggle}
               onToggleUseResponsesApiWebSearch={onUseResponsesApiWebSearchToggle}
+              onMessageApiWebSearchModelChange={onMessageApiWebSearchModelChange}
               onToggleUseResponsesApiContextManagement={
                 onUseResponsesApiContextManagementToggle
               }

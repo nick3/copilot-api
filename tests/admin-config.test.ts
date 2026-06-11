@@ -2,12 +2,19 @@ import { expect, test } from "bun:test"
 import fs from "node:fs/promises"
 import path from "node:path"
 
-import { getLogLevel, mergeConfigWithDefaults } from "~/lib/config"
+import {
+  getLogLevel,
+  getMessageApiWebSearchModel,
+  mergeConfigWithDefaults,
+} from "~/lib/config"
 import { PATHS } from "~/lib/paths"
 
 type TestConfig = Record<string, unknown>
 
-const withConfig = async (config: TestConfig, run: () => Promise<void>) => {
+const withConfig = async (
+  config: TestConfig,
+  run: () => Promise<void> | void,
+) => {
   const original = await fs
     .readFile(PATHS.CONFIG_PATH, "utf8")
     .catch(() => null)
@@ -193,6 +200,65 @@ test("POST /api/admin/config updates useResponsesApiWebSearch", async () => {
     }
     expect(body.useResponsesApiWebSearch).toBe(false)
   })
+})
+
+test("POST /api/admin/config updates messageApiWebSearchModel", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ messageApiWebSearchModel: "search/gpt-search" }),
+      }),
+    )
+
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as {
+      messageApiWebSearchModel?: string
+    }
+    expect(body.messageApiWebSearchModel).toBe("search/gpt-search")
+  })
+})
+
+test("POST /api/admin/config clears messageApiWebSearchModel without fallback", async () => {
+  await withConfig(
+    { messageApiWebSearchModel: "search/gpt-search" },
+    async () => {
+      const { server } = await import("../src/server")
+
+      const res = await server.fetch(
+        new Request("http://localhost/api/admin/config", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ messageApiWebSearchModel: "" }),
+        }),
+      )
+
+      expect(res.status).toBe(200)
+
+      const body = (await res.json()) as {
+        messageApiWebSearchModel?: string
+      }
+      expect(body.messageApiWebSearchModel).toBeUndefined()
+      expect(getMessageApiWebSearchModel()).toBeUndefined()
+    },
+  )
+})
+
+test("getMessageApiWebSearchModel trims configured model names", async () => {
+  await withConfig(
+    { messageApiWebSearchModel: "  search/gpt-search  " },
+    () => {
+      expect(getMessageApiWebSearchModel()).toBe("search/gpt-search")
+    },
+  )
 })
 
 test("POST /api/admin/config updates useResponsesApiWebSocket", async () => {

@@ -13,6 +13,7 @@ test("Responses API settings exposes transport toggles and context management", 
       useResponsesApiContextManagement
       useResponsesApiWebSearch
       useResponsesApiWebSocket={false}
+      messageApiWebSearchModelValue="search/gpt-search"
       responsesApiContextManagementModelsValue=""
       compactThresholdsMode="form"
       compactThresholdsJson="{}"
@@ -24,6 +25,7 @@ test("Responses API settings exposes transport toggles and context management", 
       onCompactThresholdsRemoveItem={() => {}}
       onCompactThresholdsToggleMode={() => {}}
       onCompactThresholdsUpdateItem={() => {}}
+      onMessageApiWebSearchModelChange={() => {}}
       onResponsesApiContextManagementModelsChange={() => {}}
       onToggleUseResponsesApiContextManagement={() => {}}
       onToggleUseResponsesApiWebSearch={() => {}}
@@ -33,6 +35,8 @@ test("Responses API settings exposes transport toggles and context management", 
 
   expect(html).toContain("Enable Responses API WebSocket")
   expect(html).toContain("ws:/responses")
+  expect(html).toContain("Messages web search model")
+  expect(html).toContain("search/gpt-search")
   expect(html).toContain("Enable Responses API context management")
   expect(html).toContain("Default: enabled")
   expect(html).toContain("Legacy context management models")
@@ -45,6 +49,7 @@ test("Responses API settings marks dependent fields inactive when context manage
       useResponsesApiContextManagement={false}
       useResponsesApiWebSearch
       useResponsesApiWebSocket
+      messageApiWebSearchModelValue="gpt-5-mini"
       responsesApiContextManagementModelsValue="gpt-5.4"
       compactThresholdsMode="form"
       compactThresholdsJson="{}"
@@ -56,6 +61,7 @@ test("Responses API settings marks dependent fields inactive when context manage
       onCompactThresholdsRemoveItem={() => {}}
       onCompactThresholdsToggleMode={() => {}}
       onCompactThresholdsUpdateItem={() => {}}
+      onMessageApiWebSearchModelChange={() => {}}
       onResponsesApiContextManagementModelsChange={() => {}}
       onToggleUseResponsesApiContextManagement={() => {}}
       onToggleUseResponsesApiWebSearch={() => {}}
@@ -74,6 +80,7 @@ test("compact threshold form validation rejects decimals", () => {
       useResponsesApiContextManagement
       useResponsesApiWebSearch
       useResponsesApiWebSocket
+      messageApiWebSearchModelValue="gpt-5-mini"
       responsesApiContextManagementModelsValue=""
       compactThresholdsMode="form"
       compactThresholdsJson="{}"
@@ -91,6 +98,7 @@ test("compact threshold form validation rejects decimals", () => {
       onCompactThresholdsRemoveItem={() => {}}
       onCompactThresholdsToggleMode={() => {}}
       onCompactThresholdsUpdateItem={() => {}}
+      onMessageApiWebSearchModelChange={() => {}}
       onResponsesApiContextManagementModelsChange={() => {}}
       onToggleUseResponsesApiContextManagement={() => {}}
       onToggleUseResponsesApiWebSearch={() => {}}
@@ -99,6 +107,36 @@ test("compact threshold form validation rejects decimals", () => {
   )
 
   expect(html).toContain("Threshold must be a positive integer.")
+})
+
+test("Messages web search model input can stay empty", () => {
+  const html = renderToStaticMarkup(
+    <ResponsesApiSettingsCard
+      useResponsesApiContextManagement
+      useResponsesApiWebSearch
+      useResponsesApiWebSocket
+      messageApiWebSearchModelValue=""
+      responsesApiContextManagementModelsValue=""
+      compactThresholdsMode="form"
+      compactThresholdsJson="{}"
+      compactThresholdsJsonIssue={null}
+      compactThresholdsItems={[]}
+      models={[]}
+      onCompactThresholdsAddItem={() => {}}
+      onCompactThresholdsJsonChange={() => {}}
+      onCompactThresholdsRemoveItem={() => {}}
+      onCompactThresholdsToggleMode={() => {}}
+      onCompactThresholdsUpdateItem={() => {}}
+      onMessageApiWebSearchModelChange={() => {}}
+      onResponsesApiContextManagementModelsChange={() => {}}
+      onToggleUseResponsesApiContextManagement={() => {}}
+      onToggleUseResponsesApiWebSearch={() => {}}
+      onToggleUseResponsesApiWebSocket={() => {}}
+    />,
+  )
+
+  expect(html).toContain("Messages web search model")
+  expect(html).toContain('value=""')
 })
 
 test("compact threshold JSON validation rejects decimals", () => {

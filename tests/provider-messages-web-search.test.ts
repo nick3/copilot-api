@@ -84,7 +84,9 @@ const writeProviderConfig = (
   providers: Record<string, ResolvedProviderConfig> = {
     search: searchProviderConfig(),
   },
-  options: { messageApiWebSearchModel?: string } = {},
+  options: { messageApiWebSearchModel?: string } = {
+    messageApiWebSearchModel: "gpt-5-mini",
+  },
 ): void => {
   writeTestConfig({
     auth: { apiKeys: [] },

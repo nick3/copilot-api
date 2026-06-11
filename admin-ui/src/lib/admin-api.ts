@@ -173,6 +173,7 @@ export type AdminConfig = {
   useMessagesApi?: boolean
   useResponsesApiWebSocket?: boolean
   useResponsesApiWebSearch?: boolean
+  messageApiWebSearchModel?: string
   useResponsesApiContextManagement?: boolean
 }
 
@@ -445,6 +446,7 @@ const ADMIN_CONFIG_KEYS = new Set<keyof AdminConfig>([
   "useMessagesApi",
   "useResponsesApiWebSocket",
   "useResponsesApiWebSearch",
+  "messageApiWebSearchModel",
   "useResponsesApiContextManagement",
 ])
 
