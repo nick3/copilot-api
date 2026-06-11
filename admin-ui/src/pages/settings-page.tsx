@@ -3648,8 +3648,7 @@ function useSettingsPageState(): SettingsPageViewProps {
   const useMessagesApi = draft.useMessagesApi ?? true
   const useResponsesApiWebSocket = draft.useResponsesApiWebSocket ?? true
   const useResponsesApiWebSearch = draft.useResponsesApiWebSearch ?? true
-  const messageApiWebSearchModelValue =
-    draft.messageApiWebSearchModel ?? "gpt-5-mini"
+  const messageApiWebSearchModelValue = draft.messageApiWebSearchModel ?? ""
   const useResponsesApiContextManagement =
     draft.useResponsesApiContextManagement ?? true
 

@@ -109,6 +109,36 @@ test("compact threshold form validation rejects decimals", () => {
   expect(html).toContain("Threshold must be a positive integer.")
 })
 
+test("Messages web search model input can stay empty", () => {
+  const html = renderToStaticMarkup(
+    <ResponsesApiSettingsCard
+      useResponsesApiContextManagement
+      useResponsesApiWebSearch
+      useResponsesApiWebSocket
+      messageApiWebSearchModelValue=""
+      responsesApiContextManagementModelsValue=""
+      compactThresholdsMode="form"
+      compactThresholdsJson="{}"
+      compactThresholdsJsonIssue={null}
+      compactThresholdsItems={[]}
+      models={[]}
+      onCompactThresholdsAddItem={() => {}}
+      onCompactThresholdsJsonChange={() => {}}
+      onCompactThresholdsRemoveItem={() => {}}
+      onCompactThresholdsToggleMode={() => {}}
+      onCompactThresholdsUpdateItem={() => {}}
+      onMessageApiWebSearchModelChange={() => {}}
+      onResponsesApiContextManagementModelsChange={() => {}}
+      onToggleUseResponsesApiContextManagement={() => {}}
+      onToggleUseResponsesApiWebSearch={() => {}}
+      onToggleUseResponsesApiWebSocket={() => {}}
+    />,
+  )
+
+  expect(html).toContain("Messages web search model")
+  expect(html).toContain('value=""')
+})
+
 test("compact threshold JSON validation rejects decimals", () => {
   const result = parseCompactThresholdsJson('{ "gpt-5.4": 1.5 }')
 
