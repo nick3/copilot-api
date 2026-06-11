@@ -200,6 +200,7 @@ const CONFIG_KEYS = new Set<keyof AppConfig>([
   "useMessagesApi",
   "useResponsesApiWebSocket",
   "useResponsesApiWebSearch",
+  "messageApiWebSearchModel",
   "useResponsesApiContextManagement",
   "devMode",
   "quotaRefresh",
@@ -854,7 +855,7 @@ function parseModelAliases(
 
 function applyOptionalString(
   next: AppConfig,
-  key: "smallModel" | "apiKey" | "anthropicApiKey",
+  key: "smallModel" | "apiKey" | "anthropicApiKey" | "messageApiWebSearchModel",
   value: unknown,
 ): string | undefined {
   const parsed = parseOptionalString(value, key)
@@ -1220,6 +1221,8 @@ const CONFIG_PATCH_HANDLERS: Partial<Record<string, ConfigPatchHandler>> = {
     applyOptionalBoolean(next, "useResponsesApiWebSocket", value),
   useResponsesApiWebSearch: (next, value) =>
     applyOptionalBoolean(next, "useResponsesApiWebSearch", value),
+  messageApiWebSearchModel: (next, value) =>
+    applyOptionalString(next, "messageApiWebSearchModel", value),
   useResponsesApiContextManagement: (next, value) =>
     applyOptionalBoolean(next, "useResponsesApiContextManagement", value),
   devMode: applyDevModeConfig,
