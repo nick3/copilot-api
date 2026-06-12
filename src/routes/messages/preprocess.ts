@@ -38,6 +38,8 @@ const IDE_GET_DIAGNOSTICS_TOOL = "mcp__ide__getDiagnostics"
 const IDE_GET_DIAGNOSTICS_DESCRIPTION =
   "Get language diagnostics from VS Code. Returns errors, warnings, information, and hints for files in the workspace."
 const PDF_FILE_READ_PREFIX = "PDF file read:"
+const CLAUDE_CODE_BILLING_HEADER_PREFIX = "x-anthropic-billing-header:"
+const CLAUDE_CODE_CCH_SEGMENT_PATTERN = /(^|;\s*)cch=[^;]+;/u
 
 type AnthropicAttachmentBlock = AnthropicImageBlock | AnthropicDocumentBlock
 type AnthropicMessageContentBlock =
@@ -159,9 +161,43 @@ const prependSystemContentToUserMessage = (
   ]
 }
 
+const normalizeClaudeCodeBillingHeader = (text: string): string => {
+  if (!text.startsWith(CLAUDE_CODE_BILLING_HEADER_PREFIX)) {
+    return text
+  }
+
+  return text.replace(CLAUDE_CODE_CCH_SEGMENT_PATTERN, "$1cch=<stable>;")
+}
+
+export const normalizeClaudeCodeBillingHeaderInSystem = (
+  payload: AnthropicMessagesPayload,
+): void => {
+  const system = payload.system
+  if (!system) {
+    return
+  }
+
+  if (typeof system === "string") {
+    payload.system = normalizeClaudeCodeBillingHeader(system)
+    return
+  }
+
+  if (system.length === 0) {
+    return
+  }
+
+  payload.system = system.map((block, index) =>
+    index === 0 ?
+      { ...block, text: normalizeClaudeCodeBillingHeader(block.text) }
+    : block,
+  )
+}
+
 export const normalizeSystemMessages = (
   payload: AnthropicMessagesPayload,
 ): void => {
+  normalizeClaudeCodeBillingHeaderInSystem(payload)
+
   if (
     !Array.isArray(payload.messages)
     || !payload.messages.some((msg) => msg.role === "system")

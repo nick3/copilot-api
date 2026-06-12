@@ -6,10 +6,146 @@ import {
   applyLastMessageCacheControl,
   getLastMessageContentCacheControl,
   mergeToolResultForClaude,
+  normalizeSystemMessages,
   prepareMessagesApiPayload,
   sanitizeIdeTools,
   stripToolReferenceTurnBoundary,
 } from "../src/routes/messages/preprocess"
+
+describe("normalizeSystemMessages", () => {
+  test("stabilizes Claude Code billing header in string system prompt", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-opus-4.6",
+      max_tokens: 128,
+      system:
+        "x-anthropic-billing-header: cc_version=2.1.158.c0c; cc_entrypoint=cli; cch=6fb32;",
+      messages: [{ role: "user", content: "hello" }],
+    }
+
+    normalizeSystemMessages(payload)
+
+    expect(payload.system).toBe(
+      "x-anthropic-billing-header: cc_version=2.1.158.c0c; cc_entrypoint=cli; cch=<stable>;",
+    )
+  })
+
+  test("stabilizes Claude Code billing header in first system content block", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-opus-4.6",
+      max_tokens: 128,
+      system: [
+        {
+          type: "text",
+          text: "x-anthropic-billing-header: cc_version=2.1.158.c0c; cc_entrypoint=cli; cch=6fb32;",
+        },
+        {
+          type: "text",
+          text: "You are Claude Code, Anthropic's official CLI for Claude.",
+        },
+      ],
+      messages: [{ role: "user", content: "hello" }],
+    }
+
+    normalizeSystemMessages(payload)
+
+    expect(payload.system).toEqual([
+      {
+        type: "text",
+        text: "x-anthropic-billing-header: cc_version=2.1.158.c0c; cc_entrypoint=cli; cch=<stable>;",
+      },
+      {
+        type: "text",
+        text: "You are Claude Code, Anthropic's official CLI for Claude.",
+      },
+    ])
+  })
+
+  test("merges system string content into the previous user message", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-opus-4.6",
+      max_tokens: 128,
+      messages: [
+        {
+          role: "user",
+          content: "hello",
+        },
+        {
+          role: "system",
+          content: "follow the repo style",
+        },
+        {
+          role: "assistant",
+          content: "working on it",
+        },
+      ],
+    }
+
+    normalizeSystemMessages(payload)
+
+    expect(payload.system).toBeUndefined()
+    expect(payload.messages).toEqual([
+      {
+        role: "user",
+        content:
+          "<system-reminder>\nfollow the repo style\n</system-reminder>\n\nhello",
+      },
+      {
+        role: "assistant",
+        content: "working on it",
+      },
+    ])
+  })
+
+  test("inserts system text after tool_result blocks in user array content", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-opus-4.6",
+      max_tokens: 128,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool-1",
+              content: "tool output",
+            },
+            {
+              type: "text",
+              text: "hello",
+            },
+          ],
+        },
+        {
+          role: "system",
+          content: "follow the repo style",
+        },
+      ],
+    }
+
+    normalizeSystemMessages(payload)
+
+    expect(payload.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-1",
+            content: "tool output",
+          },
+          {
+            type: "text",
+            text: "<system-reminder>\nfollow the repo style\n</system-reminder>",
+          },
+          {
+            type: "text",
+            text: "hello",
+          },
+        ],
+      },
+    ])
+  })
+})
 
 describe("mergeToolResultForClaude turn boundaries", () => {
   test("removes tool reference turn boundaries before merging", () => {

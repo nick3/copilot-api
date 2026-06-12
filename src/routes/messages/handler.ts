@@ -452,10 +452,10 @@ export async function handleCompletion(c: Context) {
     anthropicPayload.model = getSmallModel()
   }
 
-  if (!isCompact) {
-    stripToolReferenceTurnBoundary(anthropicPayload)
-    mergeToolResultForClaude(anthropicPayload)
-  }
+  stripToolReferenceTurnBoundary(anthropicPayload)
+  mergeToolResultForClaude(anthropicPayload, {
+    skipLastMessage: compactType === COMPACT_REQUEST,
+  })
 
   applyLastMessageCacheControl(anthropicPayload, lastMessageCacheControl)
 

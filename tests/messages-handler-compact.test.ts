@@ -162,7 +162,7 @@ afterEach(() => {
 })
 
 describe("messages handler compact preprocessing", () => {
-  test("compact summary requests preserve prior tool_result continuations", async () => {
+  test("compact summary requests merge prior tool_result continuations", async () => {
     let upstreamBody: Record<string, unknown> | undefined
 
     const fetchMock = mock((_url: string, opts?: FetchOptions) => {
@@ -192,10 +192,22 @@ describe("messages handler compact preprocessing", () => {
     )
 
     expect(response.status).toBe(200)
-    expect(upstreamBody?.messages).toEqual(messages)
+    expect(upstreamBody?.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool_1",
+            content: "ok\n\ncontinue from tool",
+          },
+        ],
+      },
+      messages[1],
+    ])
   })
 
-  test("compact auto-continue requests preserve prior tool_result continuations", async () => {
+  test("compact auto-continue requests merge prior tool_result continuations", async () => {
     let upstreamBody: Record<string, unknown> | undefined
 
     const fetchMock = mock((_url: string, opts?: FetchOptions) => {
@@ -227,6 +239,18 @@ describe("messages handler compact preprocessing", () => {
     )
 
     expect(response.status).toBe(200)
-    expect(upstreamBody?.messages).toEqual(messages)
+    expect(upstreamBody?.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool_1",
+            content: "ok\n\ncontinue from tool",
+          },
+        ],
+      },
+      messages[1],
+    ])
   })
 })

@@ -6,6 +6,11 @@ import type { Model } from "~/services/copilot/get-models"
 
 import { accountsManager } from "~/lib/accounts-manager"
 import { getAdminDb } from "~/lib/admin-db"
+import {
+  compactMessageSections,
+  compactSummaryPromptStart,
+  compactTextOnlyGuard,
+} from "~/lib/compact"
 import { getSmallModel } from "~/lib/config"
 import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
@@ -417,6 +422,103 @@ describe("messages handler cache_control merge", () => {
             cache_control: {
               type: "ephemeral",
               scope: "user",
+            },
+          },
+        ],
+      },
+    ])
+  })
+
+  test("merges earlier tool_result content but skips the final compact message", async () => {
+    let upstreamBody: Record<string, unknown> | undefined
+
+    const selection = buildSelection("/v1/messages", "messages-model")
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    const fetchMock = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = parseFetchBody(opts?.body)
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildAnthropicResponse("messages-model", "messages")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const compactText = `${compactTextOnlyGuard}\n\n${compactSummaryPromptStart}\n\n${compactMessageSections[0]}\n- summarize`
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          createPayload({
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "tool_result",
+                    tool_use_id: "tool-1",
+                    content: "Launching skill: foo",
+                  },
+                  {
+                    type: "text",
+                    text: "Follow-up details",
+                  },
+                ],
+              },
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "tool_result",
+                    tool_use_id: "tool-compact",
+                    content: "Compact setup",
+                  },
+                  {
+                    type: "text",
+                    text: compactText,
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(upstreamBody?.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-1",
+            content: "Launching skill: foo\n\nFollow-up details",
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-compact",
+            content: "Compact setup",
+          },
+          {
+            type: "text",
+            text: compactText,
+            cache_control: {
+              type: "ephemeral",
             },
           },
         ],

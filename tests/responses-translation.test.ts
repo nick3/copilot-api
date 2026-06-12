@@ -206,6 +206,30 @@ describe("translateAnthropicMessagesToResponsesPayload", () => {
     expect(result.prompt_cache_key).toBe("opencode-session:agent:agent-123")
   })
 
+  it("keeps unrelated system prompt text unchanged", () => {
+    const payload = {
+      model: "gpt-5.4",
+      max_tokens: 1024,
+      system: [
+        {
+          type: "text",
+          text: "ordinary system prompt",
+        },
+      ],
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "hello gpt54" }],
+        },
+      ],
+    } as unknown as AnthropicMessagesPayload
+
+    const result = translateAnthropicMessagesToResponsesPayload(payload)
+
+    expect(result.instructions).toContain("ordinary system prompt")
+    expect(result.instructions).not.toContain("cch=<stable>;")
+  })
+
   it("ignores blank subagent agent_id", () => {
     const result = translateAnthropicMessagesToResponsesPayload(
       {

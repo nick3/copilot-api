@@ -2,7 +2,7 @@ import { Hono } from "hono"
 
 import { getAliasTargetSet, getModelAliases } from "~/lib/config"
 import { forwardError } from "~/lib/error"
-import { getAvailableModels } from "~/lib/models"
+import { getAvailableModels, toClientModelId } from "~/lib/models"
 
 export const modelRoutes = new Hono()
 
@@ -14,8 +14,9 @@ modelRoutes.get("/", async (c) => {
       .map((model) => {
         const is1m =
           model.capabilities.limits?.max_context_window_tokens === 1_000_000
+        const clientId = toClientModelId(model.id)
         return {
-          id: is1m ? `${model.id}[1m]` : model.id,
+          id: is1m ? `${clientId}[1m]` : clientId,
           object: "model",
           type: "model",
           created: 0,

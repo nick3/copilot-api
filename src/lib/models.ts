@@ -8,6 +8,19 @@ export const getAvailableModels = (): Array<Model> =>
       model.model_picker_enabled || model.capabilities.type === "embeddings",
   )
 
+/**
+ * Converts a Copilot upstream model ID to a client-friendly ID that Claude Code
+ * and Claude Desktop recognize (dots in version replaced with hyphens).
+ * e.g. "claude-sonnet-4.6" -> "claude-sonnet-4-6"
+ * Non-Claude models are returned unchanged.
+ */
+export const toClientModelId = (modelId: string): string => {
+  const normalized = normalizeSdkModelId(modelId)
+  if (!normalized) return modelId
+  const versionHyphenated = normalized.version.replace(/\./g, "-")
+  return `claude-${normalized.family}-${versionHyphenated}`
+}
+
 export interface NormalizedSdkModelId {
   family: string
   version: string

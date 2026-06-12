@@ -1,3 +1,4 @@
+import consola from "consola"
 import { WebSocket } from "undici"
 
 import { getProxyEnvDispatcher } from "~/lib/proxy"
@@ -110,6 +111,7 @@ const getPooledWebSocketRequestTarget = <TPayload, TChunk>(
 
   const existing = websocketPool.get(request.poolKey)
   if (existing && !existing.closed) {
+    consola.debug("websocket from pool")
     clearPooledWebSocketIdleTimer(existing)
     return {
       entry: existing,

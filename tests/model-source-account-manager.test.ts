@@ -82,6 +82,19 @@ describe("account-managed model sources", () => {
     )
   })
 
+  test("GET /v1/models returns hyphenated Claude client ids from account-managed models", async () => {
+    await withMockedModels([buildModel("claude-sonnet-4.5")], async () => {
+      const res = await modelRoutes.fetch(new Request("http://local/"))
+
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as {
+        data: Array<{ id: string }>
+      }
+
+      expect(body.data.map((model) => model.id)).toContain("claude-sonnet-4-5")
+    })
+  })
+
   test("getAvailableModels excludes hidden chat models while keeping embeddings", async () => {
     const visibleChat = buildModel("visible-chat")
     const hiddenChat = buildModel("hidden-chat", {

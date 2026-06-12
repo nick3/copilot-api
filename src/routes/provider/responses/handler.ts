@@ -154,7 +154,7 @@ const streamProviderResponses = async (
   const firstChunk = firstResult.value
   if (firstChunk.data && firstChunk.data !== "[DONE]") {
     const event = parseProviderResponsesStreamEvent(firstChunk.data, {
-      normalizeCodex: options.normalizeCodex,
+      normalizeCodex: false,
       provider: options.provider,
     })
     if (event?.type === "error") {
