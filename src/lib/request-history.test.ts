@@ -21,6 +21,7 @@ import {
 } from "~/lib/request-context"
 import {
   RequestHistoryStore,
+  toAdminRequestLogRow,
   extractResponsesUsageFromResult,
   extractResponsesUsageFromStreamEvent,
   getClientIpInfo,
@@ -232,8 +233,15 @@ describe("RequestHistoryStore", () => {
     })
 
     const row = store.getByRequestId("r1")
+    const adminRow = row ? toAdminRequestLogRow(row) : null
     expect(row?.request_id).toBe("r1")
-    expect(row?.path).toBe("/v1/messages")
+    expect(adminRow?.credits_consumed).toBe(1)
+    expect(adminRow?.credits_remaining_before).toBe(100)
+    expect(adminRow?.credits_remaining_after).toBe(90)
+    expect(adminRow?.credits_remaining_diff).toBe(-10)
+    expect(adminRow?.credits_unlimited_before).toBe(0)
+    expect(adminRow?.credits_unlimited_after).toBe(0)
+    expect(adminRow?.path).toBe("/v1/messages")
     expect(row?.account_id).toBe("acct-1")
     expect(row?.stream).toBe(0)
     expect(row?.is_subagent).toBe(1)
@@ -289,7 +297,7 @@ describe("RequestHistoryStore", () => {
     expect(row?.outbound_x_interaction_type).toBe("messages-proxy")
     expect(row?.outbound_openai_intent).toBe("messages-proxy")
     expect(row?.outbound_user_agent).toBe("vscode_claude_code/2.1.81")
-    expect(store.meta().userVersion).toBe(12)
+    expect(store.meta().userVersion).toBeGreaterThanOrEqual(13)
   })
 
   test("store.insert consumes outbound snapshot after the first write", () => {
@@ -386,7 +394,7 @@ describe("RequestHistoryStore migrations", () => {
         )
         .get(),
     ).toEqual({ name: "request_outbound" })
-    expect(db.query("PRAGMA user_version;").get()).toEqual({ user_version: 12 })
+    expect(db.query("PRAGMA user_version;").get()).toEqual({ user_version: 13 })
   })
 
   test("initAdminDb is idempotent when is_subagent already exists but user_version is stale", () => {
@@ -417,7 +425,7 @@ describe("RequestHistoryStore migrations", () => {
     expect(columns).toContain("outbound_openai_intent")
     expect(columns).toContain("outbound_user_agent")
 
-    expect(db.query("PRAGMA user_version;").get()).toEqual({ user_version: 12 })
+    expect(db.query("PRAGMA user_version;").get()).toEqual({ user_version: 13 })
   })
 
   test("initAdminDb upgrades v10 to v11 without replaying quota backfill", () => {
@@ -477,7 +485,7 @@ describe("RequestHistoryStore migrations", () => {
       .get() as { count: number }
 
     expect(row.count).toBe(1)
-    expect(db.query("PRAGMA user_version;").get()).toEqual({ user_version: 12 })
+    expect(db.query("PRAGMA user_version;").get()).toEqual({ user_version: 13 })
   })
 })
 

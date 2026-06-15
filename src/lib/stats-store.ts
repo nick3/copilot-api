@@ -6,6 +6,7 @@ export interface DailyStats {
   date: string
   request_count: number
   premium_consumed: number
+  credits_consumed: number
   tokens_total: number
   error_count: number
 }
@@ -380,10 +381,12 @@ export class StatsStore {
 
     const daily: Array<DailyStats> = [...allDates].sort().map((date) => {
       const m = metricsMap.get(date)
+      const creditsConsumed = dateConsumptionMap.get(date) ?? 0
       return {
         date,
         request_count: m?.request_count ?? 0,
-        premium_consumed: dateConsumptionMap.get(date) ?? 0,
+        premium_consumed: creditsConsumed,
+        credits_consumed: creditsConsumed,
         tokens_total: m?.tokens_total ?? 0,
         error_count: m?.error_count ?? 0,
       }
@@ -402,11 +405,13 @@ export class StatsStore {
       .map((key) => {
         const [date, account_id] = key.split("|")
         const m = byAccountMetricsMap.get(key)
+        const creditsConsumed = consumptionMap.get(key) ?? 0
         return {
           date,
           account_id,
           request_count: m?.request_count ?? 0,
-          premium_consumed: consumptionMap.get(key) ?? 0,
+          premium_consumed: creditsConsumed,
+          credits_consumed: creditsConsumed,
           tokens_total: m?.tokens_total ?? 0,
           error_count: m?.error_count ?? 0,
         }

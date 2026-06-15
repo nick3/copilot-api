@@ -1,6 +1,9 @@
-import type {
-  DailyAccountStatsItem,
-  DailyStatsItem,
+import {
+  getCreditsConsumed,
+  type DailyAccountStatsItem,
+  type DailyAccountStatsItemWire,
+  type DailyStatsItem,
+  type DailyStatsItemWire,
 } from "@/lib/admin-api"
 
 function getResolvedTimeZone(timeZone?: string): string | undefined {
@@ -27,8 +30,37 @@ function getLocalDayKey(utcIso: string, timeZone?: string): string {
   return `${year}-${month}-${day}`
 }
 
+function accumulateDailyStats(
+  target: DailyStatsItem,
+  item: DailyStatsItemWire,
+): void {
+  const creditsConsumed = getCreditsConsumed(item)
+
+  target.request_count += item.request_count
+  target.credits_consumed += creditsConsumed
+  target.premium_consumed = target.credits_consumed
+  target.tokens_total += item.tokens_total
+  target.error_count += item.error_count
+}
+
+function createDailyStats(
+  date: string,
+  item: DailyStatsItemWire,
+): DailyStatsItem {
+  const creditsConsumed = getCreditsConsumed(item)
+
+  return {
+    date,
+    request_count: item.request_count,
+    premium_consumed: creditsConsumed,
+    credits_consumed: creditsConsumed,
+    tokens_total: item.tokens_total,
+    error_count: item.error_count,
+  }
+}
+
 export function aggregateHourlyStatsToLocalDays(
-  items: readonly DailyStatsItem[],
+  items: readonly DailyStatsItemWire[],
   timeZone?: string,
 ): Array<DailyStatsItem> {
   const byDate = new Map<string, DailyStatsItem>()
@@ -37,27 +69,18 @@ export function aggregateHourlyStatsToLocalDays(
     const date = getLocalDayKey(item.date, timeZone)
     const existing = byDate.get(date)
     if (existing) {
-      existing.request_count += item.request_count
-      existing.premium_consumed += item.premium_consumed
-      existing.tokens_total += item.tokens_total
-      existing.error_count += item.error_count
+      accumulateDailyStats(existing, item)
       continue
     }
 
-    byDate.set(date, {
-      date,
-      request_count: item.request_count,
-      premium_consumed: item.premium_consumed,
-      tokens_total: item.tokens_total,
-      error_count: item.error_count,
-    })
+    byDate.set(date, createDailyStats(date, item))
   }
 
   return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
 }
 
 export function aggregateHourlyAccountStatsToLocalDays(
-  items: readonly DailyAccountStatsItem[],
+  items: readonly DailyAccountStatsItemWire[],
   timeZone?: string,
 ): Array<DailyAccountStatsItem> {
   const byDateAccount = new Map<string, DailyAccountStatsItem>()
@@ -67,20 +90,13 @@ export function aggregateHourlyAccountStatsToLocalDays(
     const key = `${date}|${item.account_id}`
     const existing = byDateAccount.get(key)
     if (existing) {
-      existing.request_count += item.request_count
-      existing.premium_consumed += item.premium_consumed
-      existing.tokens_total += item.tokens_total
-      existing.error_count += item.error_count
+      accumulateDailyStats(existing, item)
       continue
     }
 
     byDateAccount.set(key, {
-      date,
+      ...createDailyStats(date, item),
       account_id: item.account_id,
-      request_count: item.request_count,
-      premium_consumed: item.premium_consumed,
-      tokens_total: item.tokens_total,
-      error_count: item.error_count,
     })
   }
 

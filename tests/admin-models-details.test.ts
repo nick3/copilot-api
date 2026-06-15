@@ -109,7 +109,21 @@ test("GET /api/admin/models/details returns model details with aliases", async (
     },
     async () => {
       await withMockedModels(
-        [buildModel("gpt-5-mini"), buildModel("gpt-4")],
+        [
+          buildModel("gpt-5-mini", {
+            billing: {
+              multiplier: 2,
+              is_premium: true,
+              token_prices: {
+                batch_size: 1_000_000,
+                cache_price: 50_000_000_000,
+                input_price: 500_000_000_000,
+                output_price: 3_000_000_000_000,
+              },
+            },
+          }),
+          buildModel("gpt-4"),
+        ],
         async () => {
           const { server } = await import("../src/server")
           const res = await server.fetch(
@@ -124,7 +138,12 @@ test("GET /api/admin/models/details returns model details with aliases", async (
               name: string
               aliases: Array<string>
               supported_endpoints?: Array<string>
-              billing?: { multiplier?: number }
+              billing?: {
+                is_premium?: boolean
+                multiplier?: number
+                token_based?: boolean
+                token_prices?: Record<string, number>
+              }
               capabilities: {
                 limits: {
                   max_context_window_tokens?: number
@@ -146,7 +165,15 @@ test("GET /api/admin/models/details returns model details with aliases", async (
             "/responses",
             "/chat/completions",
           ])
-          expect(mini?.billing?.multiplier).toBe(1)
+          expect(mini?.billing?.multiplier).toBe(2)
+          expect(mini?.billing?.is_premium).toBe(true)
+          expect(mini?.billing?.token_based).toBe(true)
+          expect(mini?.billing?.token_prices).toEqual({
+            batch_size: 1_000_000,
+            cache_price: 50_000_000_000,
+            input_price: 500_000_000_000,
+            output_price: 3_000_000_000_000,
+          })
           expect(mini?.capabilities.limits.max_context_window_tokens).toBe(
             128_000,
           )
