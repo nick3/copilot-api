@@ -10,6 +10,8 @@ import {
   getAdminModelDetails,
   refreshAllModels,
 } from "@/lib/admin-api"
+import { fmtNum } from "@/lib/format"
+import { isBillableModel } from "@/lib/model-billing"
 import { i18n } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -130,6 +132,23 @@ function makeFeaturesSortKey(
   if (supports.parallel_tool_calls) out.push("parallel_tool_calls")
 
   return out.length > 0 ? out.join("|") : null
+}
+
+const AI_CREDITS_PRICE_SCALE = 1_000_000_000
+
+function toAiCreditsPrice(price?: number): number | undefined {
+  if (price == null || !Number.isFinite(price)) return undefined
+  return price / AI_CREDITS_PRICE_SCALE
+}
+
+function getInputCreditsPrice(model: AdminModelDetailsItem): number | undefined {
+  return toAiCreditsPrice(model.billing?.token_prices?.input_price)
+}
+
+function formatAiCreditsPrice(price?: number): string {
+  const credits = toAiCreditsPrice(price)
+  if (credits == null) return "—"
+  return fmtNum(credits)
 }
 
 function SortableTableHead({
@@ -369,12 +388,61 @@ function AliasesCell({
   )
 }
 
-function MultiplierCell({
+function BillingCell({
   billing,
 }: {
   billing: AdminModelDetailsItem["billing"]
 }): React.JSX.Element {
   const { t } = useTranslation()
+  const prices = billing?.token_prices
+
+  if (prices) {
+    const entries = [
+      {
+        key: "input",
+        label: t("modelsPage.billing.input"),
+        value: formatAiCreditsPrice(prices.input_price),
+      },
+      {
+        key: "cache",
+        label: t("modelsPage.billing.cache"),
+        value: formatAiCreditsPrice(prices.cache_price),
+      },
+      {
+        key: "output",
+        label: t("modelsPage.billing.output"),
+        value: formatAiCreditsPrice(prices.output_price),
+      },
+    ]
+
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="grid cursor-help grid-cols-[auto_auto] gap-x-2 gap-y-0.5 text-left text-xs tabular-nums focus-visible:outline-none"
+          >
+            {entries.map((entry) => (
+              <span key={`${entry.key}-label`} className="contents">
+                <span className="text-muted-foreground">{entry.label}</span>
+                <span>{entry.value}</span>
+              </span>
+            ))}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-72">
+          <p>{t("modelsPage.billing.tooltip")}</p>
+          {prices.batch_size ? (
+            <p className="text-muted-foreground mt-1">
+              {t("modelsPage.billing.batchSize", {
+                tokenCount: fmtNum(prices.batch_size),
+              })}
+            </p>
+          ) : null}
+        </TooltipContent>
+      </Tooltip>
+    )
+  }
 
   const mult = billing?.multiplier
   if (mult == null) {
@@ -384,9 +452,9 @@ function MultiplierCell({
   return (
     <div className="flex items-center gap-2 tabular-nums">
       <span>{mult}x</span>
-      {billing?.is_premium ? (
+      {billing?.tokenBasedBilling ? (
         <Badge variant="default" className="text-xs">
-          {t("modelsPage.badges.premium")}
+          {t("modelsPage.badges.billable")}
         </Badge>
       ) : null}
     </div>
@@ -435,13 +503,13 @@ export function ModelsPage(): React.JSX.Element {
   }, [])
 
   const stats = useMemo(() => {
-    let premium = 0
+    let billable = 0
     let preview = 0
-    for (const m of models) {
-      if (m.billing?.is_premium) premium++
-      if (m.preview) preview++
+    for (const model of models) {
+      if (isBillableModel(model)) billable++
+      if (model.preview) preview++
     }
-    return { total: models.length, premium, preview }
+    return { total: models.length, billable, preview }
   }, [models])
 
   const filteredModels = useMemo(() => {
@@ -458,7 +526,7 @@ export function ModelsPage(): React.JSX.Element {
     }
 
     if (activeFilters.has("premium")) {
-      result = result.filter((m) => m.billing?.is_premium)
+      result = result.filter(isBillableModel)
     }
     if (activeFilters.has("preview")) {
       result = result.filter((m) => m.preview)
@@ -509,7 +577,11 @@ export function ModelsPage(): React.JSX.Element {
           )
           break
         case "multiplier":
-          cmp = compareMaybeNumber(a.billing?.multiplier, b.billing?.multiplier, sortDir)
+          cmp = compareMaybeNumber(
+            getInputCreditsPrice(a) ?? a.billing?.multiplier,
+            getInputCreditsPrice(b) ?? b.billing?.multiplier,
+            sortDir,
+          )
           break
         default:
           cmp = 0
@@ -641,8 +713,8 @@ export function ModelsPage(): React.JSX.Element {
                 className="cursor-pointer select-none transition-colors"
                 onClick={() => toggleFilter("premium")}
               >
-                {t("modelsPage.badges.premium")}
-                {stats.premium > 0 ? ` (${stats.premium})` : ""}
+                {t("modelsPage.badges.billable")}
+                {stats.billable > 0 ? ` (${stats.billable})` : ""}
               </button>
             </Badge>
             <Badge
@@ -776,7 +848,7 @@ export function ModelsPage(): React.JSX.Element {
                         <FeatureBadges supports={model.capabilities.supports} />
                       </TableCell>
                       <TableCell>
-                        <MultiplierCell billing={model.billing} />
+                        <BillingCell billing={model.billing} />
                       </TableCell>
                     </motion.tr>
                   ))}

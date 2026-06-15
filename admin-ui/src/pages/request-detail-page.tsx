@@ -21,6 +21,7 @@ import {
 import { copyText as writeClipboardText } from "@/lib/clipboard"
 import { fmtDurationSeconds, fmtLocalDateTime, fmtNum } from "@/lib/format"
 import { i18n } from "@/lib/i18n"
+import { formatRequestCreditsRemaining } from "@/lib/request-credits"
 import {
   buildRequestDetailResponsesItemOwnerRows,
   type RequestDetailResponsesItemOwnerRow,
@@ -110,18 +111,6 @@ export function buildRequestDetailUpstreamHeaderRows(
       value: item.outbound_user_agent || EMPTY,
     },
   ]
-}
-
-function getQuotaLabel(item: AdminRequestItem): string {
-  if (item.premium_unlimited_after) {
-    return "∞"
-  }
-
-  if (item.premium_remaining_after != null) {
-    return fmtNum(item.premium_remaining_after)
-  }
-
-  return ""
 }
 
 function StatusBadge({ status }: { status: number }): React.JSX.Element {
@@ -634,7 +623,7 @@ export function RequestDetailPage(): React.JSX.Element {
     )
   }
 
-  const quota = getQuotaLabel(item)
+  const quota = formatRequestCreditsRemaining(item)
   const ownerKeyRows = buildRequestDetailResponsesItemOwnerRows(item)
   const activeOwnerKeysRow =
     ownerKeyRows.find((row) => row.id === activeOwnerKeysRowId) ?? null
@@ -1052,24 +1041,24 @@ export function RequestDetailPage(): React.JSX.Element {
                         <span className="text-muted-foreground">
                           {t("requestDetailPage.quota.before")}:
                         </span>{" "}
-                        {item.premium_remaining_before != null
-                          ? fmtNum(item.premium_remaining_before)
+                        {item.credits_remaining_before != null
+                          ? fmtNum(item.credits_remaining_before)
                           : EMPTY}
                       </span>
                       <span>
                         <span className="text-muted-foreground">
                           {t("requestDetailPage.quota.after")}:
                         </span>{" "}
-                        {item.premium_remaining_after != null
-                          ? fmtNum(item.premium_remaining_after)
+                        {item.credits_remaining_after != null
+                          ? fmtNum(item.credits_remaining_after)
                           : EMPTY}
                       </span>
                       <span>
                         <span className="text-muted-foreground">
                           {t("requestDetailPage.quota.diff")}:
                         </span>{" "}
-                        {item.premium_remaining_diff != null
-                          ? fmtNum(item.premium_remaining_diff)
+                        {item.credits_remaining_diff != null
+                          ? fmtNum(item.credits_remaining_diff)
                           : EMPTY}
                         {quota ? ` (${quota})` : ""}
                       </span>

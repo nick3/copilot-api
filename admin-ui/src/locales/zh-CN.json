@@ -67,8 +67,8 @@
     "model": "模型",
     "xInitiator": "发起方",
     "subagentRequest": "子代理请求",
-    "cost": "成本",
-    "quota": "额度",
+    "cost": "AI Credits",
+    "quota": "剩余 AI Credits",
     "durationAbbrev": "耗时（s）",
     "loading": "加载中…",
     "loadMore": "加载更多",
@@ -120,7 +120,7 @@
     "exportCsv": "导出 CSV",
     "exportCsvAria": "将账号导出为 CSV",
     "exportSuccess": "账号已导出为 CSV",
-    "premiumReq": "Premium 请求",
+    "premiumReq": "AI Credits",
     "empty": {
       "noAccountsTitle": "还没有账号",
       "noAccountsDescription": "添加你的第一个 GitHub Copilot 账号，即可开始代理 API 请求。",
@@ -128,7 +128,7 @@
       "noMatchesTitle": "无匹配结果",
       "noMatchesDescription": "没有账号匹配当前筛选条件。"
     },
-    "premiumQuotaUsedAria": "Premium 交互额度使用量",
+    "premiumQuotaUsedAria": "AI Credits 使用量",
     "kpiTooltip": {
       "accounts": "已注册的 GitHub Copilot 账号总数。",
       "failed": "认证或 Token 刷新失败的账号。",
@@ -138,10 +138,10 @@
       "tokensPerRequest": "每次请求平均消耗的 Token 数（输入+输出）。",
       "tokens": "在选定时间窗口内所有账号消耗的 Token 总数。",
       "avgDuration": "所有账号的加权平均响应时间（秒）。",
-      "premiumUsage": "所有账号的 Premium 请求额度汇总（不含无限额度账号）"
+      "premiumUsage": "所有账号的 AI Credits 使用量汇总（不含无限额度账号）"
     },
     "tableTooltip": {
-      "premiumReq": "Premium 交互额度：当前计费周期内的已用量与剩余量。",
+      "premiumReq": "AI Credits：当前计费周期内的已用量与剩余量。",
       "avgMs": "该账号的平均响应时间（秒）。"
     },
     "type": "类型",
@@ -152,10 +152,14 @@
       "enterprise": "Enterprise"
     },
     "kpi": {
-      "premiumUsage": "Premium 用量",
+      "premiumUsage": "AI Credits 用量",
       "premiumTotal": "总量",
-      "premiumUsageAria": "Premium 请求使用进度",
+      "premiumUsageAria": "AI Credits 使用进度",
       "premiumUnlimitedNote": "另有 {{count}} 个无限额度账号未计入"
+    },
+    "billing": {
+      "tokenBased": "按 token 计费",
+      "overage": "允许超额"
     },
     "enabledToggleFailed": "更新账号启用状态失败",
     "modelsLastFetched": "模型获取",
@@ -208,8 +212,8 @@
     "columnTooltip": {
       "initiator": "客户端发送的 x-initiator 请求头值（如 IDE 扩展名称）。",
       "subagentRequest": "该请求是否被识别为子代理请求。",
-      "cost": "此请求消耗的 Copilot 成本单位。",
-      "quota": "此请求完成后剩余的 Premium 交互额度。",
+      "cost": "此请求消耗的 AI Credits。",
+      "quota": "此请求完成后剩余的 AI Credits。",
       "duration": "总响应时间（秒）。",
       "tokens": "消耗的总 token 数（输入 + 输出）。"
     },
@@ -240,7 +244,7 @@
       "aliases": "别名",
       "context": "Token 限制",
       "features": "功能",
-      "multiplier": "成本"
+      "multiplier": "AI Credits / 百万 tokens"
     },
     "columnTooltip": {
       "name": "代理对外暴露的模型显示名称。",
@@ -248,12 +252,20 @@
       "originalId": "上游模型的原始标识符及已配置的别名。",
       "context": "输入（prompt）和输出（completion）的最大 token 限制。",
       "features": "该模型支持的功能。",
-      "multiplier": "Copilot 计费成本倍数——值越高，每次请求消耗的 Premium 额度越多。"
+      "multiplier": "每 100 万输入、缓存输入和输出 token 消耗的 AI Credits；旧倍数计费模型仍显示请求倍数。"
     },
     "contextTooltip": "最大输入：{{input}} tokens · 最大输出：{{output}} tokens",
+    "billing": {
+      "input": "输入",
+      "cache": "缓存",
+      "output": "输出",
+      "tooltip": "此模型每 100 万 tokens 消耗的 AI Credits。",
+      "batchSize": "计价批量：{{tokenCount}} tokens"
+    },
     "badges": {
       "preview": "预览",
-      "premium": "高级"
+      "premium": "AI Credits",
+      "billable": "AI Credits"
     },
     "features": {
       "tools": "工具",
@@ -723,9 +735,9 @@
   },
   "statistics": {
     "title": "统计",
-    "premiumUsage": "高级请求用量趋势",
-    "accountUsage": "各账号高级请求消耗",
-    "costUnits": "Premium 消耗",
+    "premiumUsage": "AI Credits 使用趋势",
+    "accountUsage": "各账号 AI Credits 消耗",
+    "costUnits": "AI Credits",
     "requestCount": "请求次数",
     "tokensTotal": "总 Token 数",
     "errorCount": "错误数",
@@ -741,7 +753,7 @@
       "60s": "每 60 秒",
       "5m": "每 5 分钟"
     },
-    "noData": "该时间段无高级请求数据",
+    "noData": "该时间段无 AI Credits 数据",
     "loadFailed": "加载统计数据失败"
   }
 }

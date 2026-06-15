@@ -92,7 +92,7 @@ export function AccountUsageChart({
         row = {}
         dateMap.set(item.date, row)
       }
-      row[item.account_id] = item.premium_consumed
+      row[item.account_id] = item.credits_consumed
     }
 
     const ids = [...accountSet]

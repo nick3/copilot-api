@@ -1,3 +1,4 @@
+import { hasEmptyTokenPrices, hasTokenPrices } from "~/lib/model-billing"
 import type { AccountRuntime } from "~/lib/types/account"
 import type { Model } from "~/services/copilot/get-models"
 
@@ -10,7 +11,12 @@ export const getCostUnits = (model: Model): number => {
     return 0
   }
 
-  if (billing.is_premium !== true) {
+  if (hasEmptyTokenPrices(billing.token_prices)) {
+    return 0
+  }
+
+  const isTokenPriced = hasTokenPrices(billing.token_prices)
+  if (billing.is_premium !== true && !isTokenPriced) {
     return 0
   }
 

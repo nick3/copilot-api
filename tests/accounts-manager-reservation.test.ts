@@ -5,6 +5,7 @@ import type { Model, ModelsResponse } from "../src/services/copilot/get-models"
 import type { QuotaDetail } from "../src/services/github/get-copilot-usage"
 
 import { AccountsManager } from "../src/lib/accounts-manager"
+import { getCostUnits } from "../src/lib/accounts-manager-quota"
 import {
   applyQuotaRefreshSuccessIfCurrent,
   takeAuthSnapshot,
@@ -208,6 +209,44 @@ test("selectAccountForRequest treats missing billing as free (costUnits=0)", asy
   expect(selection.costUnits).toBe(0)
   expect(selection.reservation).toBeUndefined()
   expect(account.premiumReserved).toBeUndefined()
+})
+
+test("selectAccountForRequest treats token-priced models as billable", async () => {
+  const model = makeModel({
+    id: "gpt-5-token-priced",
+    billing: {
+      token_prices: {
+        batch_size: 1_000_000,
+        cache_price: 50_000_000_000,
+        input_price: 500_000_000_000,
+        output_price: 3_000_000_000_000,
+      },
+    },
+  })
+
+  const account: AccountRuntime = {
+    id: "octocat",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_test",
+    vsCodeVersion: "1.0.0",
+    models: makeModelsResponse([model]),
+    premiumRemaining: 10,
+    lastQuotaFetch: Date.now(),
+  }
+
+  const manager = setupManagerWithAccount(account)
+
+  const selection = await manager.selectAccountForRequest([
+    { modelId: "gpt-5-token-priced", endpoint: "/chat/completions" },
+  ])
+
+  expect(selection.ok).toBe(true)
+  if (!selection.ok) return
+
+  expect(selection.costUnits).toBe(1)
+  expect(selection.reservation).toBeDefined()
+  expect(account.premiumReserved).toBe(1)
 })
 
 test("selectAccountForRequest allows request with overagePermitted=true when quota exhausted", async () => {
@@ -647,8 +686,15 @@ test("applyQuotaRefreshSuccessIfCurrent sets overagePermitted from quota respons
   expect(account.premiumRemaining).toBe(50)
 })
 
-test("getAccountStatus includes overagePermitted in returned status", () => {
-  const model = makeModel({ id: "gpt-5" })
+test("getAccountStatus includes runtime billing metadata in returned status", () => {
+  const model = makeModel({
+    id: "gpt-5",
+    billing: {
+      is_premium: true,
+      multiplier: 1,
+      token_prices: { input_price: 500_000_000_000 },
+    },
+  })
 
   const account: AccountRuntime = {
     id: "enterprise-user",
@@ -670,5 +716,54 @@ test("getAccountStatus includes overagePermitted in returned status", () => {
   expect(statuses).toHaveLength(1)
   expect(statuses[0].id).toBe("enterprise-user")
   expect(statuses[0].overagePermitted).toBe(true)
+  expect(statuses[0].tokenBasedBilling).toBe(true)
   expect(statuses[0].unlimited).toBe(false)
+})
+
+test("getCostUnits ignores empty token prices", () => {
+  expect(
+    getCostUnits(
+      makeModel({
+        billing: {
+          is_premium: false,
+          token_prices: {},
+        },
+      }),
+    ),
+  ).toBe(0)
+
+  expect(
+    getCostUnits(
+      makeModel({
+        billing: {
+          is_premium: true,
+          token_prices: {},
+        },
+      }),
+    ),
+  ).toBe(0)
+})
+
+test("getAccountStatus ignores empty token prices for runtime billing metadata", () => {
+  const model = makeModel({
+    id: "gpt-5-empty-prices",
+    billing: {
+      is_premium: true,
+      token_prices: {},
+    },
+  })
+
+  const account: AccountRuntime = {
+    id: "enterprise-user",
+    accountType: "enterprise",
+    addedAt: Date.now(),
+    githubToken: "ghp_test",
+    vsCodeVersion: "1.0.0",
+    models: makeModelsResponse([model]),
+  }
+
+  const manager = setupManagerWithAccount(account)
+  const statuses = manager.getAccountStatus()
+
+  expect(statuses[0].tokenBasedBilling).toBe(false)
 })

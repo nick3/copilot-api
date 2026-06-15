@@ -97,9 +97,17 @@ interface ModelCapabilities {
   type: string
 }
 
+interface ModelTokenPrices {
+  batch_size?: number
+  cache_price?: number
+  input_price?: number
+  output_price?: number
+}
+
 interface ModelBilling {
   is_premium?: boolean
   multiplier?: number
+  token_prices?: ModelTokenPrices
 }
 
 export interface Model {

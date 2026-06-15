@@ -296,6 +296,27 @@ export type RequestLogRow = {
   affinity_cache_key: string | null
 }
 
+export type AdminRequestLogRow = RequestLogRow & {
+  credits_consumed: number | null
+  credits_remaining_before: number | null
+  credits_remaining_after: number | null
+  credits_remaining_diff: number | null
+  credits_unlimited_before: number | null
+  credits_unlimited_after: number | null
+}
+
+export function toAdminRequestLogRow(row: RequestLogRow): AdminRequestLogRow {
+  return {
+    ...row,
+    credits_consumed: row.cost_units,
+    credits_remaining_before: row.premium_remaining_before,
+    credits_remaining_after: row.premium_remaining_after,
+    credits_remaining_diff: row.premium_remaining_diff,
+    credits_unlimited_before: row.premium_unlimited_before,
+    credits_unlimited_after: row.premium_unlimited_after,
+  }
+}
+
 export type RequestLogQuery = {
   limit: number
   cursorId?: number

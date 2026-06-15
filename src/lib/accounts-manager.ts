@@ -19,6 +19,7 @@ import {
 } from "~/lib/account-affinity"
 import { resolveModelAlias } from "~/lib/config"
 import { HTTPError } from "~/lib/error"
+import { hasTokenPrices } from "~/lib/model-billing"
 import { getModels, type Model } from "~/services/copilot/get-models"
 import { getCopilotToken } from "~/services/github/get-copilot-token"
 import { getCopilotUsage } from "~/services/github/get-copilot-usage"
@@ -152,6 +153,7 @@ export type AccountStatusEntry = {
   remaining?: number
   unlimited?: boolean
   overagePermitted?: boolean
+  tokenBasedBilling?: boolean
   failed?: boolean
   failureReason?: string
   enabled?: boolean
@@ -177,6 +179,13 @@ function preserveSubagentSelectionReason(
   return initialSelectionReason.startsWith("subagent_") ?
       initialSelectionReason
     : nextSelectionReason
+}
+
+function hasTokenBasedBilling(account: AccountRuntime): boolean | undefined {
+  const models = account.models?.data
+  if (!Array.isArray(models)) return undefined
+
+  return models.some((model) => hasTokenPrices(model.billing?.token_prices))
 }
 
 function normalizeCacheKeys(keys?: ReadonlyArray<string>): Array<string> {
@@ -1682,6 +1691,7 @@ export class AccountsManager {
         remaining: this.temporaryAccount.premiumRemaining,
         unlimited: this.temporaryAccount.unlimited,
         overagePermitted: this.temporaryAccount.overagePermitted,
+        tokenBasedBilling: hasTokenBasedBilling(this.temporaryAccount),
         failed: this.temporaryAccount.failed,
         failureReason: this.temporaryAccount.failureReason,
         lastModelsFetch: this.temporaryAccount.lastModelsFetch,
@@ -1698,6 +1708,7 @@ export class AccountsManager {
           remaining: account.premiumRemaining,
           unlimited: account.unlimited,
           overagePermitted: account.overagePermitted,
+          tokenBasedBilling: hasTokenBasedBilling(account),
           failed: account.failed,
           failureReason: account.failureReason,
           enabled: account.enabled,

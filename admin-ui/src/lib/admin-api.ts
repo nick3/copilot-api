@@ -19,10 +19,17 @@ type AdminRequestItemWire = {
   account_id?: string
 
   cost_units?: number
-  premium_unlimited_after?: boolean
+  credits_consumed?: number
+  premium_unlimited_after?: boolean | number | null
+  premium_unlimited_before?: boolean | number | null
   premium_remaining_after?: number
   premium_remaining_before?: number
   premium_remaining_diff?: number
+  credits_unlimited_after?: boolean | number | null
+  credits_unlimited_before?: boolean | number | null
+  credits_remaining_after?: number
+  credits_remaining_before?: number
+  credits_remaining_diff?: number
 
   tokens_input?: number
   tokens_output?: number
@@ -60,25 +67,85 @@ type AdminRequestItemWire = {
 }
 
 // UI-facing type with normalized boolean semantics
-export type AdminRequestItem = Omit<AdminRequestItemWire, "is_subagent"> & {
+export type AdminRequestItem = Omit<
+  AdminRequestItemWire,
+  | "is_subagent"
+  | "credits_unlimited_after"
+  | "credits_unlimited_before"
+> & {
   is_subagent?: boolean | null
+  credits_consumed?: number
+  credits_unlimited_after?: boolean | null
+  credits_unlimited_before?: boolean | null
+}
+
+function normalizeNullableBool(value: boolean | number | null | undefined): boolean | null {
+  if (value === true || value === 1) return true
+  if (value === false || value === 0) return false
+  return null
+}
+
+type AdminRequestCreditsWire = Pick<
+  AdminRequestItemWire,
+  | "cost_units"
+  | "credits_consumed"
+  | "premium_remaining_before"
+  | "premium_remaining_after"
+  | "premium_remaining_diff"
+  | "premium_unlimited_before"
+  | "premium_unlimited_after"
+  | "credits_remaining_before"
+  | "credits_remaining_after"
+  | "credits_remaining_diff"
+  | "credits_unlimited_before"
+  | "credits_unlimited_after"
+>
+
+function normalizeAdminRequestCredits(
+  wire: AdminRequestCreditsWire,
+): Pick<
+  AdminRequestItem,
+  | "credits_consumed"
+  | "credits_remaining_before"
+  | "credits_remaining_after"
+  | "credits_remaining_diff"
+  | "credits_unlimited_before"
+  | "credits_unlimited_after"
+> {
+  return {
+    credits_consumed: wire.credits_consumed ?? wire.cost_units,
+    credits_remaining_before:
+      wire.credits_remaining_before ?? wire.premium_remaining_before,
+    credits_remaining_after:
+      wire.credits_remaining_after ?? wire.premium_remaining_after,
+    credits_remaining_diff:
+      wire.credits_remaining_diff ?? wire.premium_remaining_diff,
+    credits_unlimited_before: normalizeNullableBool(
+      wire.credits_unlimited_before ?? wire.premium_unlimited_before,
+    ),
+    credits_unlimited_after: normalizeNullableBool(
+      wire.credits_unlimited_after ?? wire.premium_unlimited_after,
+    ),
+  }
 }
 
 export function normalizeAdminRequestItem(
   wire: AdminRequestItemWire,
 ): AdminRequestItem {
-  const { is_subagent, ...rest } = wire
+  const {
+    is_subagent,
+    credits_unlimited_after: _creditsUnlimitedAfter,
+    credits_unlimited_before: _creditsUnlimitedBefore,
+    ...rest
+  } = wire
 
-  let normalizedIsSubagent: boolean | null = null
-  if (is_subagent === 1) {
-    normalizedIsSubagent = true
-  } else if (is_subagent === 0) {
-    normalizedIsSubagent = false
-  }
+  void _creditsUnlimitedAfter
+  void _creditsUnlimitedBefore
 
   return {
     ...rest,
-    is_subagent: normalizedIsSubagent,
+    ...normalizeAdminRequestCredits(wire),
+    is_subagent: normalizeNullableBool(is_subagent),
   }
 }
 
@@ -87,13 +154,18 @@ export type AdminMeta = {
   dbPath?: string
 }
 
-export type AdminAccountItem = {
+export type AdminAccountItemWire = {
   account_id: string
   account_type?: string
   runtime?: {
     entitlement?: number
     remaining?: number
     unlimited?: boolean
+    creditsEntitlement?: number
+    creditsRemaining?: number
+    creditsUnlimited?: boolean
+    overagePermitted?: boolean
+    tokenBasedBilling?: boolean
     failed?: boolean
     failureReason?: string
     enabled?: boolean
@@ -107,6 +179,31 @@ export type AdminAccountItem = {
     tokens_total?: number
     avg_duration_ms?: number
     last_request_at_ms?: number
+  }
+}
+
+export type AdminAccountItem = AdminAccountItemWire
+
+function normalizeAdminAccountRuntime(
+  runtime: NonNullable<AdminAccountItemWire["runtime"]>,
+): NonNullable<AdminAccountItem["runtime"]> {
+  return {
+    ...runtime,
+    creditsEntitlement: runtime.creditsEntitlement ?? runtime.entitlement,
+    creditsRemaining: runtime.creditsRemaining ?? runtime.remaining,
+    creditsUnlimited: runtime.creditsUnlimited ?? runtime.unlimited,
+  }
+}
+
+export function normalizeAdminAccountItem(
+  wire: AdminAccountItemWire,
+): AdminAccountItem {
+  const runtime = wire.runtime
+  if (!runtime) return wire
+
+  return {
+    ...wire,
+    runtime: normalizeAdminAccountRuntime(runtime),
   }
 }
 
@@ -185,6 +282,13 @@ export type AdminModelsResponse = {
   items: string[]
 }
 
+export type AdminModelTokenPrices = {
+  batch_size?: number
+  cache_price?: number
+  input_price?: number
+  output_price?: number
+}
+
 export type AdminModelDetailsItem = {
   id: string
   name: string
@@ -192,6 +296,9 @@ export type AdminModelDetailsItem = {
   billing?: {
     is_premium?: boolean
     multiplier?: number
+    token_based?: boolean
+    tokenBasedBilling?: boolean
+    token_prices?: AdminModelTokenPrices
   }
   supported_endpoints?: Array<string>
   capabilities: {
@@ -215,22 +322,91 @@ export type AdminModelsDetailsResponse = {
   items: Array<AdminModelDetailsItem>
 }
 
-export type DailyStatsItem = {
+function normalizeAdminModelBilling(
+  billing: NonNullable<AdminModelDetailsItem["billing"]>,
+): NonNullable<AdminModelDetailsItem["billing"]> {
+  const prices = billing.token_prices
+  const hasTokenPrice =
+    prices !== undefined &&
+    [prices.cache_price, prices.input_price, prices.output_price].some(
+      (price) => typeof price === "number" && Number.isFinite(price),
+    )
+
+  return {
+    ...billing,
+    tokenBasedBilling:
+      billing.tokenBasedBilling ?? billing.token_based ?? (hasTokenPrice ? true : undefined),
+  }
+}
+
+export function normalizeAdminModelDetailsItem(
+  item: AdminModelDetailsItem,
+): AdminModelDetailsItem {
+  const billing = item.billing
+  if (!billing) return item
+
+  return {
+    ...item,
+    billing: normalizeAdminModelBilling(billing),
+  }
+}
+
+export type DailyStatsItemWire = {
   date: string
   request_count: number
-  premium_consumed: number
+  premium_consumed?: number
+  credits_consumed?: number
   tokens_total: number
   error_count: number
+}
+
+export type DailyStatsItem = DailyStatsItemWire & {
+  premium_consumed: number
+  credits_consumed: number
+}
+
+export type DailyAccountStatsItemWire = DailyStatsItemWire & {
+  account_id: string
 }
 
 export type DailyAccountStatsItem = DailyStatsItem & {
   account_id: string
 }
 
+export type PremiumStatsResponseWire = {
+  daily: Array<DailyStatsItemWire>
+  by_account: Array<DailyAccountStatsItemWire>
+  range: { from: string; to: string; granularity: "day" | "hour" }
+}
+
 export type PremiumStatsResponse = {
   daily: Array<DailyStatsItem>
   by_account: Array<DailyAccountStatsItem>
   range: { from: string; to: string; granularity: "day" | "hour" }
+}
+
+export function getCreditsConsumed(
+  wire: Pick<DailyStatsItemWire, "credits_consumed" | "premium_consumed">,
+): number {
+  return wire.credits_consumed ?? wire.premium_consumed ?? 0
+}
+
+export function normalizeDailyStatsItem(wire: DailyStatsItemWire): DailyStatsItem {
+  const creditsConsumed = getCreditsConsumed(wire)
+  return {
+    ...wire,
+    premium_consumed: wire.premium_consumed ?? creditsConsumed,
+    credits_consumed: creditsConsumed,
+  }
+}
+
+export function normalizeDailyAccountStatsItem(
+  wire: DailyAccountStatsItemWire,
+): DailyAccountStatsItem {
+  return {
+    ...normalizeDailyStatsItem(wire),
+    account_id: wire.account_id,
+  }
 }
 
 export type DevModeState = {
@@ -367,7 +543,12 @@ export async function getAdminAccounts(params: {
   const q = new URLSearchParams()
   q.set("since_ms", String(params.sinceMs))
   q.set("include_stats", params.includeStats === false ? "0" : "1")
-  return fetchAdminJson<AdminAccountsResponse>(`/api/admin/accounts?${q.toString()}`)
+  const response = await fetchAdminJson<{ items: AdminAccountItemWire[] }>(
+    `/api/admin/accounts?${q.toString()}`,
+  )
+  return {
+    items: response.items.map(normalizeAdminAccountItem),
+  }
 }
 
 export async function queryAdminRequests(params: {
@@ -467,7 +648,12 @@ export async function getAdminModels(): Promise<AdminModelsResponse> {
 }
 
 export async function getAdminModelDetails(): Promise<AdminModelsDetailsResponse> {
-  return fetchAdminJson<AdminModelsDetailsResponse>("/api/admin/models/details")
+  const response = await fetchAdminJson<AdminModelsDetailsResponse>(
+    "/api/admin/models/details",
+  )
+  return {
+    items: response.items.map(normalizeAdminModelDetailsItem),
+  }
 }
 
 export async function refreshAllModels(): Promise<{
@@ -497,9 +683,14 @@ export async function getAdminPremiumStats(params: {
   if (params.granularity) q.set("granularity", params.granularity)
   if (params.fromMs != null) q.set("from_ms", String(params.fromMs))
   if (params.toMs != null) q.set("to_ms", String(params.toMs))
-  return fetchAdminJson<PremiumStatsResponse>(
+  const response = await fetchAdminJson<PremiumStatsResponseWire>(
     `/api/admin/stats/premium-daily?${q.toString()}`,
   )
+  return {
+    ...response,
+    daily: response.daily.map(normalizeDailyStatsItem),
+    by_account: response.by_account.map(normalizeDailyAccountStatsItem),
+  }
 }
 
 export async function getDevMode(): Promise<DevModeState> {

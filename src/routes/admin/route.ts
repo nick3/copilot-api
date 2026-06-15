@@ -505,9 +505,11 @@ const html = `<!doctype html>
               const status = r.http_status
               const statusP = status >= 400 ? pill(status, 'bad') : pill(status, 'good')
               const when = fmtMs(r.started_at_ms)
-              const quota = r.premium_unlimited_after
+              const quota = r.credits_unlimited_after ?? r.premium_unlimited_after
                 ? '∞'
-                : (r.premium_remaining_after != null ? fmtNum(r.premium_remaining_after) : '')
+                : (r.credits_remaining_after ?? r.premium_remaining_after) != null
+                  ? fmtNum(r.credits_remaining_after ?? r.premium_remaining_after)
+                  : ''
               const dur = r.duration_ms != null ? fmtNum(r.duration_ms) : ''
               const acct = r.account_id || ''
               const model = r.upstream_model || ''
@@ -521,7 +523,7 @@ const html = `<!doctype html>
                 + '<td class="mono">' + escapeHtml(acct) + '</td>'
                 + '<td class="mono">' + escapeHtml(model) + '</td>'
                 + '<td class="mono">' + tokens + '</td>'
-                + '<td class="mono">' + (r.cost_units ?? '') + '</td>'
+                + '<td class="mono">' + (r.credits_consumed ?? r.cost_units ?? '') + '</td>'
                 + '<td class="mono">' + quota + '</td>'
                 + '<td class="mono">' + dur + '</td>'
                 + '<td>' + statusP + '</td>'
@@ -576,7 +578,7 @@ const html = `<!doctype html>
           '        <tr><th>model</th><td class="mono">' + escapeHtml(r.upstream_model || '') + '</td></tr>',
           '        <tr><th>client</th><td class="mono">' + escapeHtml(r.client_ip || '') + ' ' + (r.user_agent ? '(' + escapeHtml(r.user_agent) + ')' : '') + '</td></tr>',
           '        <tr><th>tokens</th><td class="mono">in=' + (r.tokens_input ?? '') + ' out=' + (r.tokens_output ?? '') + ' total=' + (r.tokens_total ?? '') + ' cached=' + (r.tokens_cached_input ?? '') + '</td></tr>',
-          '        <tr><th>quota</th><td class="mono">before=' + (r.premium_remaining_before ?? '') + ' after=' + (r.premium_remaining_after ?? '') + ' diff=' + (r.premium_remaining_diff ?? '') + '</td></tr>',
+          '        <tr><th>AI Credits</th><td class="mono">before=' + (r.credits_remaining_before ?? r.premium_remaining_before ?? '') + ' after=' + (r.credits_remaining_after ?? r.premium_remaining_after ?? '') + ' diff=' + (r.credits_remaining_diff ?? r.premium_remaining_diff ?? '') + '</td></tr>',
           '      </tbody>',
           '    </table>',
           '  </div>',

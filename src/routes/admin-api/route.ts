@@ -34,6 +34,7 @@ import { updateQuotaRefreshSchedulerFromConfig } from "~/lib/quota-refresh-sched
 import {
   getRequestHistoryStore,
   getStatsStore,
+  toAdminRequestLogRow,
   type AccountStatsRow,
 } from "~/lib/request-history"
 import { getRequestOutboundStore } from "~/lib/request-outbound"
@@ -141,6 +142,11 @@ type AccountItem = {
     entitlement?: number
     remaining?: number
     unlimited?: boolean
+    creditsEntitlement?: number
+    creditsRemaining?: number
+    creditsUnlimited?: boolean
+    overagePermitted?: boolean
+    tokenBasedBilling?: boolean
     failed?: boolean
     failureReason?: string
     enabled?: boolean
@@ -1361,6 +1367,13 @@ adminApiRoutes.get("/models", (c) => {
   }
 })
 
+type AdminModelTokenPrices = {
+  batch_size?: number
+  cache_price?: number
+  input_price?: number
+  output_price?: number
+}
+
 type AdminModelDetailsItem = {
   id: string
   name: string
@@ -1368,6 +1381,8 @@ type AdminModelDetailsItem = {
   billing?: {
     is_premium?: boolean
     multiplier?: number
+    token_based?: boolean
+    token_prices?: AdminModelTokenPrices
   }
   supported_endpoints?: Array<string>
   capabilities: {
@@ -1413,14 +1428,38 @@ function parseStringArray(value: unknown): Array<string> | undefined {
   return out.length > 0 ? out : undefined
 }
 
+function parseTokenPrices(value: unknown): AdminModelTokenPrices | undefined {
+  if (!isPlainObject(value)) return undefined
+
+  const token_prices: AdminModelTokenPrices = {
+    batch_size: parseOptionalFiniteNumber(value.batch_size),
+    cache_price: parseOptionalFiniteNumber(value.cache_price),
+    input_price: parseOptionalFiniteNumber(value.input_price),
+    output_price: parseOptionalFiniteNumber(value.output_price),
+  }
+
+  return Object.values(token_prices).some((price) => price !== undefined) ?
+      token_prices
+    : undefined
+}
+
 function parseBilling(value: unknown): AdminModelDetailsItem["billing"] {
   if (!isPlainObject(value)) return undefined
 
   const multiplier = parseOptionalFiniteNumber(value.multiplier)
   const is_premium = toBooleanOrUndefined(value.is_premium)
+  const token_prices = parseTokenPrices(value.token_prices)
+  const token_based = token_prices !== undefined ? true : undefined
 
-  if (multiplier === undefined && is_premium === undefined) return undefined
-  return { multiplier, is_premium }
+  if (
+    multiplier === undefined
+    && is_premium === undefined
+    && token_prices === undefined
+  ) {
+    return undefined
+  }
+
+  return { multiplier, is_premium, token_based, token_prices }
 }
 
 function parseCapabilities(
@@ -1572,6 +1611,11 @@ adminApiRoutes.get("/accounts", async (c) => {
         entitlement: s.entitlement,
         remaining: s.remaining,
         unlimited: s.unlimited,
+        creditsEntitlement: s.entitlement,
+        creditsRemaining: s.remaining,
+        creditsUnlimited: s.unlimited,
+        overagePermitted: s.overagePermitted,
+        tokenBasedBilling: s.tokenBasedBilling,
         failed: s.failed,
         failureReason: s.failureReason,
         enabled: s.enabled,
@@ -1624,7 +1668,7 @@ adminApiRoutes.get("/requests", (c) => {
     result.items.map((i) => i.request_id),
   )
   const itemsWithOutbound = result.items.map((item) => ({
-    ...item,
+    ...toAdminRequestLogRow(item),
     has_outbound: outboundIds.has(item.request_id),
   }))
 
@@ -1642,7 +1686,10 @@ adminApiRoutes.get("/requests/:requestId", (c) => {
   const hasOutbound =
     item !== null
     && getRequestOutboundStore().getByRequestId(requestId) !== null
-  return c.json({ item, has_outbound: hasOutbound })
+  return c.json({
+    item: item ? toAdminRequestLogRow(item) : null,
+    has_outbound: hasOutbound,
+  })
 })
 
 adminApiRoutes.post("/accounts/auth/start", async (c) => {

@@ -547,6 +547,7 @@ test("getDailyPremiumStats returns aggregated daily totals", () => {
   expect(result.daily[0].date).toBe("2026-04-10")
   expect(result.daily[0].request_count).toBe(2)
   expect(result.daily[0].premium_consumed).toBe(0) // No snapshots inserted
+  expect(result.daily[0].credits_consumed).toBe(0)
   expect(result.daily[0].tokens_total).toBe(1500)
   expect(result.daily[0].error_count).toBe(1)
 
@@ -554,6 +555,7 @@ test("getDailyPremiumStats returns aggregated daily totals", () => {
   expect(result.daily[1].request_count).toBe(1)
 
   expect(result.byAccount.length).toBe(3)
+  expect(result.byAccount[0]?.credits_consumed).toBe(0)
 })
 
 test("getDailyPremiumStats filters by account_id", () => {
@@ -587,6 +589,7 @@ test("getDailyPremiumStats filters by account_id", () => {
   expect(result.daily.length).toBe(1)
   expect(result.daily[0].request_count).toBe(1)
   expect(result.daily[0].premium_consumed).toBe(0) // No snapshots inserted
+  expect(result.daily[0].credits_consumed).toBe(0)
 
   expect(result.byAccount.length).toBe(1)
   expect(result.byAccount[0].account_id).toBe("acct-a")
@@ -635,6 +638,7 @@ test("getHourlyPremiumStats aggregates by hour from request_log", () => {
   // First hour should have 2 requests aggregated
   expect(result.daily[0].request_count).toBe(2)
   expect(result.daily[0].premium_consumed).toBe(0) // No snapshots inserted
+  expect(result.daily[0].credits_consumed).toBe(0)
   // Second hour should have 1 request
   expect(result.daily[1].request_count).toBe(1)
 

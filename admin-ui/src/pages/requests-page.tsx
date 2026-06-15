@@ -12,6 +12,7 @@ import {
 } from "@/lib/admin-api"
 import { fmtDurationSeconds, fmtLocalDateTime, fmtNum } from "@/lib/format"
 import { i18n } from "@/lib/i18n"
+import { formatRequestCreditsRemaining } from "@/lib/request-credits"
 import {
   localInputToFromMs,
   localInputToToMs,
@@ -763,11 +764,7 @@ export function RequestsPage(): React.JSX.Element {
                   </TableRow>
                 ) : (
                   items.map((r) => {
-                    const quota = r.premium_unlimited_after
-                      ? "∞"
-                      : r.premium_remaining_after != null
-                        ? fmtNum(r.premium_remaining_after)
-                        : ""
+                    const quota = formatRequestCreditsRemaining(r)
 
                     const statusBadge = r.http_status >= 400 ? (
                       <Badge variant="destructive" aria-label={`Error ${r.http_status}`}>
@@ -854,7 +851,7 @@ export function RequestsPage(): React.JSX.Element {
                           {r.tokens_total != null ? fmtNum(r.tokens_total) : ""}
                         </TableCell>
                         <TableCell className={cn(requestsTableColVisibility[8], "font-mono text-xs text-muted-foreground")}>
-                          {r.cost_units ?? ""}
+                          {r.credits_consumed ?? ""}
                         </TableCell>
                         <TableCell className={cn(requestsTableColVisibility[9], "font-mono text-xs text-muted-foreground")}>
                           {quota}

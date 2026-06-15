@@ -16,6 +16,7 @@ import {
   buildAccountsCsv,
   getAccountsCsvFilename,
 } from "@/lib/accounts-export"
+import { getAccountCreditsSummary, clampPercent } from "@/lib/account-credits"
 import { fmtDurationSeconds, fmtLocalDateTime, fmtNum, fmtRelativeTime } from "@/lib/format"
 import { i18n } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
@@ -84,10 +85,6 @@ function windowPresetToRange(
   const windowMs = Number(preset)
   const sinceMs = nowMs - windowMs
   return { sinceMs, fromMs: String(sinceMs), toMs: String(nowMs) }
-}
-
-function clampPercent(value: number): number {
-  return Math.min(100, Math.max(0, value))
 }
 
 function fmtNumOrDash(n?: number | null): string {
@@ -329,17 +326,26 @@ export function AccountsPage(): React.JSX.Element {
     const errorRatePct = totalRequests > 0 ? (totalErrors / totalRequests) * 100 : 0
     const tokensPerRequest = totalRequests > 0 ? totalTokens / totalRequests : 0
 
-    const premiumAccounts = accounts.filter(
-      (a) => a.runtime && !a.runtime.unlimited && a.runtime.entitlement != null,
+    const premiumAccountCredits = accounts
+      .map(getAccountCreditsSummary)
+      .filter(
+        (summary) =>
+          !summary.isUnlimited &&
+          summary.entitlement != null &&
+          summary.remaining != null,
+      )
+    const totalPremiumEntitlement = sum(
+      premiumAccountCredits.map((summary) => summary.entitlement),
     )
-    const totalPremiumEntitlement = sum(premiumAccounts.map((a) => a.runtime?.entitlement))
-    const totalPremiumRemaining = sum(premiumAccounts.map((a) => a.runtime?.remaining))
+    const totalPremiumRemaining = sum(
+      premiumAccountCredits.map((summary) => summary.remaining),
+    )
     const totalPremiumUsed = totalPremiumEntitlement - totalPremiumRemaining
     const premiumUsedPercent =
       totalPremiumEntitlement > 0
         ? clampPercent((totalPremiumUsed / totalPremiumEntitlement) * 100)
         : 0
-    const unlimitedAccountCount = accounts.filter((a) => a.runtime?.unlimited).length
+    const unlimitedAccountCount = accounts.filter((a) => a.runtime?.creditsUnlimited).length
 
     return {
       totalAccounts,
@@ -675,24 +681,9 @@ export function AccountsPage(): React.JSX.Element {
                     <Badge variant="secondary">{t("common.statusOk")}</Badge>
                   )
 
-                  const total = a.runtime?.entitlement
-                  const remainingQuota = a.runtime?.remaining
-                  const usedQuota =
-                    total != null && remainingQuota != null ?
-                      total - remainingQuota
-                      : undefined
+                  const creditsSummary = getAccountCreditsSummary(a)
 
-                  const percentUsedRaw =
-                    total != null && total > 0 && usedQuota != null ?
-                      (usedQuota / total) * 100
-                      : undefined
-
-                  const percentUsed =
-                    percentUsedRaw != null && Number.isFinite(percentUsedRaw) ?
-                      clampPercent(percentUsedRaw)
-                      : undefined
-
-                  const remainingCell = a.runtime?.unlimited ? (
+                  const remainingCell = creditsSummary.isUnlimited ? (
                     <Badge variant="secondary">{t("common.unlimited")}</Badge>
                   ) : (
                     <div className="flex flex-col gap-1">
@@ -700,19 +691,19 @@ export function AccountsPage(): React.JSX.Element {
                         <div className="flex items-baseline gap-1">
                           <span className="text-muted-foreground">{t("common.used")}</span>
                           <span className="tabular-nums font-medium">
-                            {fmtNumOrDash(usedQuota)}
+                            {fmtNumOrDash(creditsSummary.used)}
                           </span>
                         </div>
                         <div className="flex items-baseline gap-1">
                           <span className="text-muted-foreground">{t("common.remaining")}</span>
                           <span className="tabular-nums font-medium">
-                            {fmtNumOrDash(remainingQuota)}
+                            {fmtNumOrDash(creditsSummary.remaining)}
                           </span>
                         </div>
                       </div>
-                      {percentUsed != null ? (
+                      {creditsSummary.percentUsed != null ? (
                         <Progress
-                          value={percentUsed}
+                          value={creditsSummary.percentUsed}
                           className="h-1.5"
                           aria-label={t("accountsPage.premiumQuotaUsedAria")}
                         />
@@ -771,9 +762,21 @@ export function AccountsPage(): React.JSX.Element {
                         </div>
                       </TableCell>
                       <TableCell className={cn(accountsTableColVisibility[2])}>
-                        <Badge variant="outline">
-                          {t(`accountsPage.accountType.${a.account_type ?? "free"}`, t("accountsPage.accountType.free"))}
-                        </Badge>
+                        <div className="flex flex-wrap gap-1">
+                          <Badge variant="outline">
+                            {t(`accountsPage.accountType.${a.account_type ?? "free"}`, t("accountsPage.accountType.free"))}
+                          </Badge>
+                          {a.runtime?.tokenBasedBilling ? (
+                            <Badge variant="secondary" className="text-[10px]">
+                              {t("accountsPage.billing.tokenBased")}
+                            </Badge>
+                          ) : null}
+                          {a.runtime?.overagePermitted ? (
+                            <Badge variant="secondary" className="text-[10px]">
+                              {t("accountsPage.billing.overage")}
+                            </Badge>
+                          ) : null}
+                        </div>
                       </TableCell>
                       <TableCell
                         className={cn(accountsTableColVisibility[3], "whitespace-normal")}

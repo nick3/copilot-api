@@ -67,8 +67,8 @@
     "model": "Model",
     "xInitiator": "Initiator",
     "subagentRequest": "Subagent Request",
-    "cost": "Cost",
-    "quota": "Quota",
+    "cost": "AI Credits",
+    "quota": "AI Credits left",
     "durationAbbrev": "Duration (s)",
     "loading": "Loading...",
     "loadMore": "Load more",
@@ -120,7 +120,7 @@
     "exportCsv": "Export CSV",
     "exportCsvAria": "Export accounts as CSV",
     "exportSuccess": "Accounts exported as CSV",
-    "premiumReq": "Premium req",
+    "premiumReq": "AI Credits",
     "empty": {
       "noAccountsTitle": "No accounts yet",
       "noAccountsDescription": "Add your first GitHub Copilot account to start proxying API requests.",
@@ -128,7 +128,7 @@
       "noMatchesTitle": "No matches",
       "noMatchesDescription": "No accounts match the current filter."
     },
-    "premiumQuotaUsedAria": "Premium interactions quota used",
+    "premiumQuotaUsedAria": "AI Credits used",
     "kpiTooltip": {
       "accounts": "Total number of registered GitHub Copilot accounts.",
       "failed": "Accounts that failed authentication or token refresh.",
@@ -138,10 +138,10 @@
       "tokensPerRequest": "Average number of tokens (input + output) consumed per request.",
       "tokens": "Total tokens consumed across all accounts in the selected time window.",
       "avgDuration": "Weighted average response time across all accounts (in seconds).",
-      "premiumUsage": "Aggregated premium request quota across all accounts (excluding unlimited accounts)"
+      "premiumUsage": "Aggregated AI Credits usage across all accounts (excluding unlimited accounts)"
     },
     "tableTooltip": {
-      "premiumReq": "Premium interactions quota: used vs remaining for the current billing cycle.",
+      "premiumReq": "AI Credits: used vs remaining for the current billing cycle.",
       "avgMs": "Average response time in seconds for this account."
     },
     "type": "Type",
@@ -152,10 +152,14 @@
       "enterprise": "Enterprise"
     },
     "kpi": {
-      "premiumUsage": "Premium Usage",
+      "premiumUsage": "AI Credits Usage",
       "premiumTotal": "Total",
-      "premiumUsageAria": "Premium request usage progress",
+      "premiumUsageAria": "AI Credits usage progress",
       "premiumUnlimitedNote": "+{{count}} unlimited account(s) not included"
+    },
+    "billing": {
+      "tokenBased": "token-based",
+      "overage": "overage"
     },
     "enabledToggleFailed": "Failed to update account enabled state",
     "modelsLastFetched": "Models fetched",
@@ -208,8 +212,8 @@
     "columnTooltip": {
       "initiator": "Value of the x-initiator header sent by the client (e.g. IDE extension name).",
       "subagentRequest": "Whether this request was identified as a subagent request.",
-      "cost": "Copilot cost units consumed by this request.",
-      "quota": "Premium interactions quota remaining after this request.",
+      "cost": "AI Credits consumed by this request.",
+      "quota": "AI Credits remaining after this request.",
       "duration": "Total response time in seconds.",
       "tokens": "Total tokens consumed (input + output)."
     },
@@ -240,7 +244,7 @@
       "aliases": "Aliases",
       "context": "Token Limits",
       "features": "Features",
-      "multiplier": "Cost"
+      "multiplier": "AI Credits / 1M tokens"
     },
     "columnTooltip": {
       "name": "Display name of the model as exposed by the proxy.",
@@ -248,12 +252,20 @@
       "originalId": "Original upstream model identifier and any configured aliases.",
       "context": "Maximum token limits for input (prompt) and output (completion).",
       "features": "Capabilities supported by this model.",
-      "multiplier": "Copilot billing cost multiplier — higher values consume more premium quota per request."
+      "multiplier": "AI Credits charged per 1 million input, cached input, and output tokens. Legacy multiplier models show the old request multiplier."
     },
     "contextTooltip": "Max input: {{input}} tokens · Max output: {{output}} tokens",
+    "billing": {
+      "input": "In",
+      "cache": "Cache",
+      "output": "Out",
+      "tooltip": "AI Credits charged per 1 million tokens for this model.",
+      "batchSize": "Price batch: {{tokenCount}} tokens"
+    },
     "badges": {
       "preview": "preview",
-      "premium": "premium"
+      "premium": "AI Credits",
+      "billable": "AI Credits"
     },
     "features": {
       "tools": "tools",
@@ -723,9 +735,9 @@
   },
   "statistics": {
     "title": "Statistics",
-    "premiumUsage": "Premium Usage Trend",
-    "accountUsage": "Per-Account Premium Usage",
-    "costUnits": "Premium Usage",
+    "premiumUsage": "AI Credits Usage Trend",
+    "accountUsage": "Per-Account AI Credits Usage",
+    "costUnits": "AI Credits",
     "requestCount": "Request Count",
     "tokensTotal": "Total Tokens",
     "errorCount": "Errors",
@@ -741,7 +753,7 @@
       "60s": "Every 60s",
       "5m": "Every 5m"
     },
-    "noData": "No premium request data for this period",
+    "noData": "No AI Credits data for this period",
     "loadFailed": "Failed to load statistics"
   }
 }
