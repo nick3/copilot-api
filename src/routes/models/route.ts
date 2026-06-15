@@ -16,7 +16,8 @@ modelRoutes.get("/", async (c) => {
           model.capabilities.limits?.max_context_window_tokens === 1_000_000
         const clientId = toClientModelId(model.id)
         return {
-          id: is1m ? `${clientId}[1m]` : clientId,
+          claude_model_id: is1m ? `${clientId}[1m]` : clientId,
+          id: clientId,
           object: "model",
           type: "model",
           created: 0,
@@ -28,6 +29,7 @@ modelRoutes.get("/", async (c) => {
 
     const aliasItems = Object.keys(getModelAliases())
     const aliasModels = aliasItems.map((alias) => ({
+      claude_model_id: alias,
       id: alias,
       object: "model",
       type: "model",

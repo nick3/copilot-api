@@ -374,6 +374,54 @@ describe("responses handler context management", () => {
     expect(forwardedPayload?.context_management).toBeUndefined()
   })
 
+  test("does not add context management when input ends with compaction trigger", async () => {
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("/responses", "gpt-5.4"))
+
+    let forwardedPayload: ResponsesPayload | undefined
+    const fetchMock = mock((_url: string, options?: FetchOptions) => {
+      forwardedPayload = JSON.parse(options?.body as string) as ResponsesPayload
+      return Promise.resolve(
+        new Response(JSON.stringify(buildResponsesResult("gpt-5.4", "ok")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-5.4",
+          input: [
+            {
+              content: [
+                {
+                  text: "Completed the review for the latest two commits.",
+                  type: "output_text",
+                },
+              ],
+              phase: "final_answer",
+              role: "assistant",
+              type: "message",
+            },
+            {
+              type: "compaction_trigger",
+            },
+          ],
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(forwardedPayload?.context_management).toBeUndefined()
+  })
+
   test("preserves request-provided context_management", async () => {
     responsesUtilsDependencies.isResponsesApiContextManagementEnabled = () =>
       true

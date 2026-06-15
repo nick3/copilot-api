@@ -14,6 +14,9 @@ export const checkUsage = defineCommand({
     description: "Show current GitHub Copilot usage/quota information",
   },
   async run() {
+    const tlsModule = await import("./lib/tls")
+    tlsModule.enableSystemCACompat()
+
     await ensurePaths()
     await setupGitHubToken()
     try {

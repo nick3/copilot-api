@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@nick3/copilot-api",
-  "version": "1.11.8",
+  "version": "1.12.5",
   "description": "OpenAI and Anthropic-compatible gateway for GitHub Copilot or Codex or third-party providers.",
   "keywords": [
     "ai-gateway",
@@ -25,7 +25,7 @@
   "scripts": {
     "build": "tsdown && bun run --cwd admin-ui build",
     "build:admin": "bun run --cwd admin-ui build",
-    "dev": "bun run --watch ./src/main.ts",
+    "dev": "NODE_USE_SYSTEM_CA=1 bun run --watch ./src/main.ts",
     "dev:admin": "bun run --cwd admin-ui dev",
     "knip": "knip-bun",
     "lint": "eslint --cache --ignore-pattern admin-ui",
@@ -34,7 +34,7 @@
     "prepack": "bun run build",
     "prepare": "[ -n \"$CI\" ] || simple-git-hooks",
     "release": "bumpp && bun publish --access public",
-    "start": "NODE_ENV=production bun run ./src/main.ts",
+    "start": "NODE_USE_SYSTEM_CA=1 NODE_ENV=production bun run ./src/main.ts",
     "typecheck": "tsc",
     "typecheck:admin": "bun run --cwd admin-ui typecheck"
   },
@@ -53,6 +53,7 @@
     "clipboardy": "^5.0.0",
     "consola": "^3.4.2",
     "fetch-event-stream": "^0.1.5",
+    "fzstd": "^0.1.1",
     "gpt-tokenizer": "^3.0.1",
     "hono": "^4.9.9",
     "proxy-from-env": "^1.1.0",

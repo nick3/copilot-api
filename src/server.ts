@@ -10,6 +10,7 @@ import {
 } from "~/mcp-http-config"
 import { handleStreamableHttpMcpRequest, mcpHttpCorsOptions } from "~/mcp-http"
 
+import { zstdDecompressionMiddleware } from "./lib/zstd-request"
 import { adminApiRoutes } from "./routes/admin-api/route"
 import { adminRoutes } from "./routes/admin/route"
 import { completionRoutes } from "./routes/chat-completions/route"
@@ -32,6 +33,7 @@ export function createServer(options: CreateServerOptions = {}): Hono {
 
   app.use(traceIdMiddleware)
   app.use(logger())
+  app.use(zstdDecompressionMiddleware)
 
   if (enableMcpHttp) {
     app.use(DEFAULT_MCP_HTTP_PATH, cors(mcpHttpCorsOptions))

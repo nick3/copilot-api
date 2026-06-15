@@ -385,6 +385,9 @@ async function loginWithProvider(provider: BuiltinProviderName): Promise<void> {
 }
 
 export async function runAuthLogin(options: RunAuthOptions): Promise<void> {
+  const tlsModule = await import("./lib/tls")
+  tlsModule.enableSystemCACompat()
+
   if (options.verbose) {
     consola.level = 5
     consola.info("Verbose logging enabled")

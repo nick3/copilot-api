@@ -173,8 +173,8 @@ export function buildCodexResponsesWebSocketPayload(
   payload: ResponsesPayload,
 ): CodexResponsesWebSocketPayload {
   const websocketPayload: CodexResponsesWebSocketPayload = {
-    ...normalizeCodexResponsesPayload(payload),
     type: "response.create",
+    ...normalizeCodexResponsesPayload(payload),
   }
 
   delete websocketPayload.stream

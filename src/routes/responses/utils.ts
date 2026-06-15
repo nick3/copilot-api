@@ -312,6 +312,10 @@ export const applyResponsesApiContextManagement = (
   maxPromptTokens?: number,
   compactThresholdRatio = DEFAULT_RESPONSES_COMPACT_THRESHOLD_RATIO,
 ): void => {
+  if (hasTerminalCompactionTrigger(payload)) {
+    return
+  }
+
   if (payload.context_management !== undefined) {
     return
   }
@@ -330,6 +334,15 @@ export const applyResponsesApiContextManagement = (
         compactThresholdRatio,
       ),
   )
+}
+
+const hasTerminalCompactionTrigger = (payload: ResponsesPayload): boolean => {
+  const { input } = payload
+  if (!Array.isArray(input) || input.length === 0) {
+    return false
+  }
+
+  return isResponseInputItemType(input.at(-1), "compaction_trigger")
 }
 
 export const compactInputByLatestCompaction = (
@@ -363,10 +376,15 @@ const getLatestCompactionMessageIndex = (
 }
 
 const isCompactionInputItem = (value: ResponseInputItem): boolean => {
+  return isResponseInputItemType(value, "compaction")
+}
+
+const isResponseInputItemType = (value: unknown, type: string): boolean => {
   return (
-    "type" in value
-    && typeof value.type === "string"
-    && value.type === "compaction"
+    typeof value === "object"
+    && value !== null
+    && "type" in value
+    && value.type === type
   )
 }
 
