@@ -8,6 +8,13 @@ export function getProxyEnvDispatcher(): Dispatcher | undefined {
   return proxyEnvDispatcher
 }
 
+export function getWebSocketProxyUrl(url: string): string | undefined {
+  const proxyUrl = getProxyForUrl(
+    url.replace(/^wss:/, "https:").replace(/^ws:/, "http:"),
+  )
+  return proxyUrl.length > 0 ? proxyUrl : undefined
+}
+
 export function initProxyFromEnv(): void {
   try {
     const direct = new Agent()

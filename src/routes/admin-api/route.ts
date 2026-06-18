@@ -208,6 +208,7 @@ const CONFIG_KEYS = new Set<keyof AppConfig>([
   "useResponsesApiWebSearch",
   "messageApiWebSearchModel",
   "useResponsesApiContextManagement",
+  "copilotUseLocalModels",
   "devMode",
   "quotaRefresh",
 ])
@@ -909,7 +910,8 @@ function applyOptionalBoolean(
     | "compactUseSmallModel"
     | "messageStartInputTokensFallback"
     | "allowOriginalModelNamesForAliases"
-    | "useResponsesApiContextManagement",
+    | "useResponsesApiContextManagement"
+    | "copilotUseLocalModels",
   value: unknown,
 ): string | undefined {
   const parsed = parseOptionalBoolean(value, key)
@@ -1231,6 +1233,8 @@ const CONFIG_PATCH_HANDLERS: Partial<Record<string, ConfigPatchHandler>> = {
     applyOptionalString(next, "messageApiWebSearchModel", value),
   useResponsesApiContextManagement: (next, value) =>
     applyOptionalBoolean(next, "useResponsesApiContextManagement", value),
+  copilotUseLocalModels: (next, value) =>
+    applyOptionalBoolean(next, "copilotUseLocalModels", value),
   devMode: applyDevModeConfig,
   quotaRefresh: applyQuotaRefreshConfig,
 }

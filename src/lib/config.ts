@@ -69,6 +69,7 @@ export interface AppConfig {
   logLevel?: LogLevel
   devMode?: DevModeConfig
   quotaRefresh?: QuotaRefreshConfig
+  copilotUseLocalModels?: boolean
 }
 
 export interface ModelConfig {
@@ -194,6 +195,7 @@ const defaultConfig: AppConfig = {
     captureOther: false,
   },
   quotaRefresh: DEFAULT_QUOTA_REFRESH_CONFIG,
+  copilotUseLocalModels: false,
 }
 
 let cachedConfig: AppConfig | null = null
@@ -1133,4 +1135,9 @@ export function getMessageApiWebSearchModel(): string | undefined {
 export function getClaudeTokenMultiplier(): number {
   const config = getConfig()
   return config.claudeTokenMultiplier ?? 1.15
+}
+
+export function isCopilotUseLocalModelsEnabled(): boolean {
+  const config = getConfig()
+  return config.copilotUseLocalModels ?? false
 }

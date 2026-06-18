@@ -4,11 +4,13 @@ import fs from "node:fs/promises"
 import type { AccountContext } from "~/lib/types/account"
 
 import { copilotBaseUrl, copilotModelsHeaders } from "~/lib/api-config"
+import { isCopilotUseLocalModelsEnabled } from "~/lib/config"
 import { HTTPError } from "~/lib/error"
 import { PATHS } from "~/lib/paths"
 import { accountFromState } from "~/lib/state"
 
 import { copilotFetch } from "./copilot-fetch"
+import localModelsData from "./local-models.json" with { type: "json" }
 
 export const getModels = async (
   account?: AccountContext,
@@ -16,6 +18,17 @@ export const getModels = async (
     requestId?: string
   },
 ) => {
+  if (isCopilotUseLocalModelsEnabled()) {
+    const models = structuredClone(localModelsData) as ModelsResponse
+    for (const model of models.data) {
+      if (model.policy?.state === "disabled") {
+        model.model_picker_enabled = true
+      }
+    }
+    consola.info(`Loaded ${models.data.length} models from local file`)
+    return models
+  }
+
   const ctx = account ?? accountFromState()
   const response = await copilotFetch(
     `${copilotBaseUrl(ctx)}/models`,

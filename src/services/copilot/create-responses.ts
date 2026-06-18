@@ -20,7 +20,7 @@ import {
   type CopilotQuotaSnapshot,
 } from "~/lib/copilot-rate-limit"
 import { HTTPError } from "~/lib/error"
-import { getProxyEnvDispatcher } from "~/lib/proxy"
+import { getProxyEnvDispatcher, getWebSocketProxyUrl } from "~/lib/proxy"
 import { captureOutboundHeadersSnapshot } from "~/lib/request-context"
 import { resolveEffectiveInitiator } from "~/lib/request-initiator"
 import { accountFromState } from "~/lib/state"
@@ -996,8 +996,15 @@ const openResponsesWebSocket = async ({
   url: string
 }): Promise<InstanceType<typeof WebSocket>> =>
   await new Promise((resolve, reject) => {
-    const dispatcher = getProxyEnvDispatcher()
-    const init = dispatcher ? { dispatcher, headers } : { headers }
+    const proxy =
+      typeof Bun === "undefined" ? undefined : getWebSocketProxyUrl(url)
+    const dispatcher =
+      typeof Bun === "undefined" ? getProxyEnvDispatcher() : undefined
+    const init = {
+      headers,
+      ...(proxy ? { proxy } : {}),
+      ...(dispatcher ? { dispatcher } : {}),
+    }
     const websocket = new WebSocket(url, init)
 
     const cleanup = () => {

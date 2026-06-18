@@ -272,6 +272,7 @@ export type AdminConfig = {
   useResponsesApiWebSearch?: boolean
   messageApiWebSearchModel?: string
   useResponsesApiContextManagement?: boolean
+  copilotUseLocalModels?: boolean
 }
 
 export type AdminConfigResponse = AdminConfig & {
@@ -629,6 +630,7 @@ const ADMIN_CONFIG_KEYS = new Set<keyof AdminConfig>([
   "useResponsesApiWebSearch",
   "messageApiWebSearchModel",
   "useResponsesApiContextManagement",
+  "copilotUseLocalModels",
 ])
 
 export async function updateAdminConfig(

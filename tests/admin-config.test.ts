@@ -179,6 +179,27 @@ test("POST /api/admin/config updates useMessagesApi", async () => {
   })
 })
 
+test("POST /api/admin/config updates copilotUseLocalModels", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ copilotUseLocalModels: true }),
+      }),
+    )
+
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as { copilotUseLocalModels?: boolean }
+    expect(body.copilotUseLocalModels).toBe(true)
+  })
+})
+
 test("POST /api/admin/config updates useResponsesApiWebSearch", async () => {
   await withConfig({}, async () => {
     const { server } = await import("../src/server")

@@ -17,8 +17,33 @@ type ListenerEvent = {
 
 type Listener = (event: ListenerEvent) => void
 
+type MockWebSocketInit = {
+  headers?: Record<string, string>
+  proxy?: string
+}
+
 const originalClearTimeout = globalThis.clearTimeout
 const originalSetTimeout = globalThis.setTimeout
+const proxyEnvKeys = [
+  "http_proxy",
+  "HTTP_PROXY",
+  "https_proxy",
+  "HTTPS_PROXY",
+  "npm_config_http_proxy",
+  "NPM_CONFIG_HTTP_PROXY",
+  "npm_config_https_proxy",
+  "NPM_CONFIG_HTTPS_PROXY",
+  "npm_config_proxy",
+  "NPM_CONFIG_PROXY",
+  "all_proxy",
+  "ALL_PROXY",
+  "no_proxy",
+  "NO_PROXY",
+  "npm_config_no_proxy",
+  "NPM_CONFIG_NO_PROXY",
+] as const
+
+type ProxyEnvKey = (typeof proxyEnvKeys)[number]
 
 class MockWebSocket {
   static readonly CONNECTING = 0
@@ -33,16 +58,13 @@ class MockWebSocket {
   static instances: Array<MockWebSocket> = []
 
   readonly sent: Array<string> = []
-  readonly init: { dispatcher?: unknown; headers?: Record<string, string> }
+  readonly init: MockWebSocketInit
   readonly url: string
   readyState = MockWebSocket.CONNECTING
 
   private readonly listeners = new Map<string, Set<Listener>>()
 
-  constructor(
-    url: string,
-    init: { dispatcher?: unknown; headers?: Record<string, string> },
-  ) {
+  constructor(url: string, init: MockWebSocketInit) {
     this.init = init
     this.url = url
     MockWebSocket.instances.push(this)
@@ -608,24 +630,43 @@ test("Responses websocket stream failure includes the underlying reason", async 
   )
 })
 
-test("Responses websocket uses the proxy-env dispatcher when initialized", async () => {
-  const originalHttpProxy = process.env.HTTP_PROXY
-  process.env.HTTP_PROXY = "http://127.0.0.1:8080"
+test("Proxy env init stores a dispatcher for non-Bun websocket fallback", () => {
+  const proxyEnv = clearProxyEnv()
+  process.env.HTTPS_PROXY = "http://127.0.0.1:8080"
 
   try {
     initProxyFromEnv()
-    const dispatcher = getProxyEnvDispatcher()
 
+    expect(getProxyEnvDispatcher()).toBeDefined()
+  } finally {
+    restoreProxyEnv(proxyEnv)
+  }
+})
+
+test("Responses websocket passes HTTPS proxy env to Bun websocket init", async () => {
+  const proxyEnv = clearProxyEnv()
+  process.env.HTTPS_PROXY = "http://127.0.0.1:8080"
+
+  try {
     await collectResponsesStream("proxy-request")
 
-    expect(dispatcher).toBeDefined()
-    expect(MockWebSocket.instances[0]?.init.dispatcher).toBe(dispatcher)
+    expect(MockWebSocket.instances[0]?.init.proxy).toBe("http://127.0.0.1:8080")
   } finally {
-    if (originalHttpProxy === undefined) {
-      delete process.env.HTTP_PROXY
-    } else {
-      process.env.HTTP_PROXY = originalHttpProxy
-    }
+    restoreProxyEnv(proxyEnv)
+  }
+})
+
+test("Responses websocket honors NO_PROXY when resolving Bun websocket proxy", async () => {
+  const proxyEnv = clearProxyEnv()
+  process.env.HTTPS_PROXY = "http://127.0.0.1:8080"
+  process.env.NO_PROXY = "api.githubcopilot.com"
+
+  try {
+    await collectResponsesStream("no-proxy-request")
+
+    expect(MockWebSocket.instances[0]?.init.proxy).toBeUndefined()
+  } finally {
+    restoreProxyEnv(proxyEnv)
   }
 })
 
@@ -820,4 +861,29 @@ const waitFor = async (predicate: () => boolean): Promise<void> => {
   }
 
   throw new Error("Timed out waiting for condition")
+}
+
+const clearProxyEnv = (): Map<ProxyEnvKey, string | undefined> => {
+  const originalValues = new Map<ProxyEnvKey, string | undefined>()
+
+  for (const key of proxyEnvKeys) {
+    originalValues.set(key, process.env[key])
+    delete process.env[key]
+  }
+
+  return originalValues
+}
+
+const restoreProxyEnv = (
+  originalValues: Map<ProxyEnvKey, string | undefined>,
+): void => {
+  for (const key of proxyEnvKeys) {
+    const value = originalValues.get(key)
+    if (value === undefined) {
+      delete process.env[key]
+      continue
+    }
+
+    process.env[key] = value
+  }
 }
