@@ -20,14 +20,18 @@ import {
   getModelAliasesInfo,
   getModelRefreshIntervalMs,
   isAccountAffinityEnabled,
+  isSupportedProviderType,
   mergeConfigWithDefaults,
-  PROVIDER_TYPE_ANTHROPIC,
+  SUPPORTED_PROVIDER_TYPES,
   type AppConfig,
   type DevModeConfig,
   type LogLevel,
   type ModelConfig,
   type ProviderConfig,
   type QuotaRefreshConfig,
+  type TokenUsagePricingConfig,
+  type TokenUsagePricingTier,
+  type ToolContentSupportType,
 } from "~/lib/config"
 import { PATHS } from "~/lib/paths"
 import { updateQuotaRefreshSchedulerFromConfig } from "~/lib/quota-refresh-scheduler-runtime"
@@ -40,8 +44,15 @@ import {
 import { getRequestOutboundStore } from "~/lib/request-outbound"
 import { applySharedSessionAffinityRetention } from "~/lib/session-affinity-store"
 import { toLocalDateString } from "~/lib/stats-store"
+import {
+  getTokenUsageDailySummary,
+  getTokenUsageEventsPage,
+  getTokenUsageSummary,
+  type TokenUsagePeriod,
+} from "~/lib/token-usage"
 import { isAccountType } from "~/lib/types/account"
 
+import { getAggregatedModelsResponse } from "../models/route"
 import { authSessionManager } from "./auth-sessions"
 import { writeConfigFile } from "./config-writer"
 import { replayRoutes } from "./replay"
@@ -173,6 +184,20 @@ function parseTriStateBool(value: string | null): boolean | undefined {
   if (value === "1") return true
   if (value === "0") return false
   return undefined
+}
+
+const TOKEN_USAGE_PERIODS = new Set<TokenUsagePeriod>(["day", "week", "month"])
+const DEFAULT_TOKEN_USAGE_EVENTS_PAGE_SIZE = 20
+
+function parseTokenUsagePeriod(value: string | null): TokenUsagePeriod {
+  return TOKEN_USAGE_PERIODS.has(value as TokenUsagePeriod) ?
+      (value as TokenUsagePeriod)
+    : "day"
+}
+
+function parsePositiveInt(value: string | null, fallback: number): number {
+  const parsed = Number.parseInt(value ?? "", 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
 }
 
 type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
@@ -378,7 +403,16 @@ function parseStringRecord(
   return { value: record }
 }
 
-const PROVIDER_MODEL_CONFIG_FIELDS = ["temperature", "topP", "topK"] as const
+const PROVIDER_MODEL_CONFIG_FIELDS = [
+  "temperature",
+  "topP",
+  "topK",
+  "extraBody",
+  "contextCache",
+  "pricing",
+  "supportPdf",
+  "toolContentSupportType",
+] as const
 
 type ProviderModelConfigField = (typeof PROVIDER_MODEL_CONFIG_FIELDS)[number]
 
@@ -386,12 +420,39 @@ const PROVIDER_MODEL_CONFIG_KEYS = new Set<ProviderModelConfigField>(
   PROVIDER_MODEL_CONFIG_FIELDS,
 )
 
+const TOOL_CONTENT_SUPPORT_TYPES = [
+  "array",
+  "image",
+  "pdf",
+] as const satisfies ReadonlyArray<ToolContentSupportType>
+
+const TOOL_CONTENT_SUPPORT_TYPE_SET = new Set<ToolContentSupportType>(
+  TOOL_CONTENT_SUPPORT_TYPES,
+)
+
+const TOKEN_USAGE_PRICING_NUMBER_FIELDS = [
+  "cachedInput",
+  "cacheCreationInput",
+  "explicitCachedInput",
+  "input",
+  "maxInputTokens",
+  "output",
+] as const
+
+const TOKEN_USAGE_PRICING_FIELDS = [
+  ...TOKEN_USAGE_PRICING_NUMBER_FIELDS,
+  "tiers",
+] as const
+
+const TOKEN_USAGE_PRICING_KEYS = new Set<string>(TOKEN_USAGE_PRICING_FIELDS)
+
 const PROVIDER_CONFIG_FIELDS = [
   "type",
   "enabled",
   "baseUrl",
   "apiKey",
   "authType",
+  "pricingCurrency",
   "models",
   "adjustInputTokens",
 ] as const
@@ -416,6 +477,9 @@ function validateAllowedObjectKeys(
   allowed: ReadonlySet<string>,
 ): string | undefined {
   for (const key of Object.keys(value)) {
+    if (BLOCKED_KEYS.has(key)) {
+      return `${field}.${key} is not allowed`
+    }
     if (!allowed.has(key)) {
       return `${field}.${key} is not supported`
     }
@@ -465,6 +529,211 @@ function applyProviderModelTopK(
   return undefined
 }
 
+function applyProviderModelContextCache(
+  config: ModelConfig,
+  value: Record<string, unknown>,
+  field: string,
+): string | undefined {
+  if (!Object.hasOwn(value, "contextCache")) return undefined
+
+  const parsed = parseOptionalBoolean(
+    value.contextCache,
+    `${field}.contextCache`,
+  )
+  if ("error" in parsed) return parsed.error
+  if ("value" in parsed) config.contextCache = parsed.value
+  return undefined
+}
+
+function applyProviderModelSupportPdf(
+  config: ModelConfig,
+  value: Record<string, unknown>,
+  field: string,
+): string | undefined {
+  if (!Object.hasOwn(value, "supportPdf")) return undefined
+
+  const parsed = parseOptionalBoolean(value.supportPdf, `${field}.supportPdf`)
+  if ("error" in parsed) return parsed.error
+  if ("value" in parsed) config.supportPdf = parsed.value
+  return undefined
+}
+
+function applyProviderModelToolContentSupportType(
+  config: ModelConfig,
+  value: Record<string, unknown>,
+  field: string,
+): string | undefined {
+  if (!Object.hasOwn(value, "toolContentSupportType")) return undefined
+
+  const raw = value.toolContentSupportType
+  if (raw === null || raw === undefined) return undefined
+  if (!Array.isArray(raw)) {
+    return `${field}.toolContentSupportType must be an array`
+  }
+
+  const normalized: Array<ToolContentSupportType> = []
+  const seen = new Set<ToolContentSupportType>()
+  for (const [index, item] of raw.entries()) {
+    if (
+      typeof item !== "string"
+      || !TOOL_CONTENT_SUPPORT_TYPE_SET.has(item as ToolContentSupportType)
+    ) {
+      return `${field}.toolContentSupportType[${index}] must be one of: ${TOOL_CONTENT_SUPPORT_TYPES.join(", ")}`
+    }
+
+    const typedItem = item as ToolContentSupportType
+    if (!seen.has(typedItem)) {
+      seen.add(typedItem)
+      normalized.push(typedItem)
+    }
+  }
+
+  if (normalized.length > 0) {
+    config.toolContentSupportType = normalized
+  }
+  return undefined
+}
+
+function isJsonLikeValue(value: unknown): boolean {
+  if (
+    value === null
+    || typeof value === "string"
+    || typeof value === "number"
+    || typeof value === "boolean"
+  ) {
+    return typeof value !== "number" || Number.isFinite(value)
+  }
+
+  if (Array.isArray(value)) {
+    return value.every((item) => isJsonLikeValue(item))
+  }
+
+  if (!isPlainObject(value)) return false
+
+  return Object.values(value).every((item) => isJsonLikeValue(item))
+}
+
+function applyProviderModelExtraBody(
+  config: ModelConfig,
+  value: Record<string, unknown>,
+  field: string,
+): string | undefined {
+  if (!Object.hasOwn(value, "extraBody")) return undefined
+
+  const raw = value.extraBody
+  if (raw === null || raw === undefined) return undefined
+  if (!isPlainObject(raw)) {
+    return `${field}.extraBody must be an object`
+  }
+
+  for (const key of Object.keys(raw)) {
+    if (BLOCKED_KEYS.has(key)) {
+      return `${field}.extraBody.${key} is not allowed`
+    }
+  }
+  if (!isJsonLikeValue(raw)) {
+    return `${field}.extraBody must contain JSON-compatible values`
+  }
+
+  config.extraBody = raw
+  return undefined
+}
+
+function assignPricingNumber(
+  pricing: TokenUsagePricingTier,
+  key: (typeof TOKEN_USAGE_PRICING_NUMBER_FIELDS)[number],
+  value: number,
+): void {
+  pricing[key] = value
+}
+
+function parseTokenUsagePricingTier(
+  value: unknown,
+  field: string,
+  allowTiers: boolean,
+): ParseFieldResult<TokenUsagePricingTier> {
+  if (!isPlainObject(value)) {
+    return { error: `${field} must be an object` }
+  }
+
+  for (const key of Object.keys(value)) {
+    if (BLOCKED_KEYS.has(key)) {
+      return { error: `${field}.${key} is not allowed` }
+    }
+    if (!TOKEN_USAGE_PRICING_KEYS.has(key)) {
+      return { error: `${field}.${key} is not supported` }
+    }
+    if (key === "tiers" && !allowTiers) {
+      return { error: `${field}.tiers is not supported` }
+    }
+  }
+
+  const pricing: TokenUsagePricingTier = {}
+  for (const key of TOKEN_USAGE_PRICING_NUMBER_FIELDS) {
+    if (!Object.hasOwn(value, key)) continue
+
+    const parsed = parseOptionalNonNegativeNumber(value[key], `${field}.${key}`)
+    if ("error" in parsed) return parsed
+    if ("value" in parsed) assignPricingNumber(pricing, key, parsed.value)
+  }
+
+  return { value: pricing }
+}
+
+function parseTokenUsagePricingConfig(
+  value: unknown,
+  field: string,
+): ParseFieldResult<TokenUsagePricingConfig> {
+  const parsed = parseTokenUsagePricingTier(value, field, true)
+  if ("error" in parsed) return parsed
+
+  if ("clear" in parsed) return { value: {} }
+
+  const pricing: TokenUsagePricingConfig = { ...parsed.value }
+  if (!isPlainObject(value) || !Object.hasOwn(value, "tiers")) {
+    return { value: pricing }
+  }
+
+  const rawTiers = value.tiers
+  if (rawTiers === null || rawTiers === undefined) {
+    return { value: pricing }
+  }
+  if (!Array.isArray(rawTiers)) {
+    return { error: `${field}.tiers must be an array` }
+  }
+
+  const tiers: Array<TokenUsagePricingTier> = []
+  for (const [index, rawTier] of rawTiers.entries()) {
+    const tier = parseTokenUsagePricingTier(
+      rawTier,
+      `${field}.tiers[${index}]`,
+      false,
+    )
+    if ("error" in tier) return tier
+    if ("clear" in tier) continue
+    tiers.push(tier.value)
+  }
+  pricing.tiers = tiers
+
+  return { value: pricing }
+}
+
+function applyProviderModelPricing(
+  config: ModelConfig,
+  value: Record<string, unknown>,
+  field: string,
+): string | undefined {
+  if (!Object.hasOwn(value, "pricing")) return undefined
+
+  const raw = value.pricing
+  if (raw === null || raw === undefined) return undefined
+
+  const parsed = parseTokenUsagePricingConfig(raw, `${field}.pricing`)
+  if ("error" in parsed) return parsed.error
+  if ("value" in parsed) config.pricing = parsed.value
+  return undefined
+}
+
 function parseProviderModelConfig(
   value: unknown,
   field: string,
@@ -493,6 +762,27 @@ function parseProviderModelConfig(
 
   const topKError = applyProviderModelTopK(config, value, field)
   if (topKError) return { error: topKError }
+
+  const contextCacheError = applyProviderModelContextCache(config, value, field)
+  if (contextCacheError) return { error: contextCacheError }
+
+  const supportPdfError = applyProviderModelSupportPdf(config, value, field)
+  if (supportPdfError) return { error: supportPdfError }
+
+  const toolContentSupportTypeError = applyProviderModelToolContentSupportType(
+    config,
+    value,
+    field,
+  )
+  if (toolContentSupportTypeError) {
+    return { error: toolContentSupportTypeError }
+  }
+
+  const extraBodyError = applyProviderModelExtraBody(config, value, field)
+  if (extraBodyError) return { error: extraBodyError }
+
+  const pricingError = applyProviderModelPricing(config, value, field)
+  if (pricingError) return { error: pricingError }
 
   return { value: config }
 }
@@ -549,10 +839,10 @@ function applyProviderType(
   const parsed = parseOptionalString(value.type, `${field}.type`)
   if ("error" in parsed) return parsed.error
   if ("value" in parsed) {
-    if (parsed.value !== PROVIDER_TYPE_ANTHROPIC) {
-      return `${field}.type must be "${PROVIDER_TYPE_ANTHROPIC}"`
+    if (!isSupportedProviderType(parsed.value)) {
+      return `${field}.type must be one of: ${SUPPORTED_PROVIDER_TYPES.map((item) => `"${item}"`).join(", ")}`
     }
-    provider.type = PROVIDER_TYPE_ANTHROPIC
+    provider.type = parsed.value
   }
 
   return undefined
@@ -615,6 +905,22 @@ function applyProviderAuthType(
   return undefined
 }
 
+function applyProviderPricingCurrency(
+  provider: ProviderConfig,
+  value: Record<string, unknown>,
+  field: string,
+): string | undefined {
+  if (!Object.hasOwn(value, "pricingCurrency")) return undefined
+
+  const parsed = parseOptionalString(
+    value.pricingCurrency,
+    `${field}.pricingCurrency`,
+  )
+  if ("error" in parsed) return parsed.error
+  if ("value" in parsed) provider.pricingCurrency = parsed.value
+  return undefined
+}
+
 function applyProviderModels(
   provider: ProviderConfig,
   value: Record<string, unknown>,
@@ -674,6 +980,13 @@ function parseProviderConfig(
 
   const authTypeError = applyProviderAuthType(provider, value, field)
   if (authTypeError) return { error: authTypeError }
+
+  const pricingCurrencyError = applyProviderPricingCurrency(
+    provider,
+    value,
+    field,
+  )
+  if (pricingCurrencyError) return { error: pricingCurrencyError }
 
   const modelsError = applyProviderModels(provider, value, field)
   if (modelsError) return { error: modelsError }
@@ -1371,6 +1684,17 @@ adminApiRoutes.get("/models", (c) => {
   }
 })
 
+adminApiRoutes.get("/models/aggregated", async (c) => {
+  try {
+    return c.json(await getAggregatedModelsResponse(c.req.raw.headers))
+  } catch {
+    return jsonError(c, 500, {
+      message: "Failed to load aggregated models.",
+      type: "internal_error",
+    })
+  }
+})
+
 type AdminModelTokenPrices = {
   batch_size?: number
   cache_price?: number
@@ -1909,6 +2233,33 @@ adminApiRoutes.post("/accounts/:id/reauth", async (c) => {
       type: "internal_error",
     })
   }
+})
+
+adminApiRoutes.get("/token-usage", async (c) => {
+  const url = new URL(c.req.url, "http://local")
+  const period = parseTokenUsagePeriod(url.searchParams.get("period"))
+  const summary = await getTokenUsageSummary(period)
+  return c.json(summary)
+})
+
+adminApiRoutes.get("/token-usage/daily", async (c) => {
+  const url = new URL(c.req.url, "http://local")
+  const period = parseTokenUsagePeriod(url.searchParams.get("period"))
+  const summary = await getTokenUsageDailySummary(period)
+  return c.json(summary)
+})
+
+adminApiRoutes.get("/token-usage/events", async (c) => {
+  const url = new URL(c.req.url, "http://local")
+  const p = url.searchParams
+  const period = parseTokenUsagePeriod(p.get("period"))
+  const page = parsePositiveInt(p.get("page"), 1)
+  const pageSize = parsePositiveInt(
+    p.get("page_size"),
+    DEFAULT_TOKEN_USAGE_EVENTS_PAGE_SIZE,
+  )
+  const eventsPage = await getTokenUsageEventsPage({ page, pageSize, period })
+  return c.json(eventsPage)
 })
 
 adminApiRoutes.get("/stats/premium-daily", (c) => {

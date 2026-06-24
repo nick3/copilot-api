@@ -55,9 +55,26 @@ interface ToolResultMessages {
   toolMessage: Message
 }
 
+type ChatCompletionsReasoningEffort = NonNullable<
+  ChatCompletionsPayload["reasoning_effort"]
+>
+
+const CHAT_COMPLETIONS_REASONING_EFFORTS =
+  new Set<ChatCompletionsReasoningEffort>([
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+  ])
+
 interface TranslateToOpenAIOptions {
   supportPdf?: boolean
   toolContentSupportType?: Array<ToolContentSupportType>
+  validateReasoningEffort?: boolean
+  reasoningEffortSupport?: Array<string>
 }
 
 type MappableContentBlock =
@@ -73,6 +90,7 @@ export function translateToOpenAI(
   const modelId = payload.model
   const model = getAvailableModels().find((m) => m.id === modelId)
   const thinkingBudget = getThinkingBudget(payload, model)
+  const reasoningEffort = getReasoningEffort(payload, options)
   const capabilities = {
     supportPdf: options.supportPdf ?? false,
     toolContentSupportType:
@@ -94,7 +112,50 @@ export function translateToOpenAI(
     tools: translateAnthropicToolsToOpenAI(payload.tools),
     tool_choice: translateAnthropicToolChoiceToOpenAI(payload.tool_choice),
     thinking_budget: thinkingBudget,
+    ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
   }
+}
+
+function getReasoningEffort(
+  payload: AnthropicMessagesPayload,
+  options: TranslateToOpenAIOptions,
+): ChatCompletionsReasoningEffort | undefined {
+  const effort = normalizeChatCompletionsReasoningEffort(
+    payload.output_config?.effort,
+  )
+  if (!effort) {
+    return undefined
+  }
+
+  if (!options.validateReasoningEffort) {
+    return effort
+  }
+
+  const supportedEfforts = options.reasoningEffortSupport
+    ?.map(normalizeChatCompletionsReasoningEffort)
+    .filter((value): value is ChatCompletionsReasoningEffort => Boolean(value))
+  if (!supportedEfforts || supportedEfforts.length === 0) {
+    return undefined
+  }
+
+  if (supportedEfforts.includes(effort)) {
+    return effort
+  }
+
+  return supportedEfforts.at(-1)
+}
+
+function normalizeChatCompletionsReasoningEffort(
+  value: string | undefined,
+): ChatCompletionsReasoningEffort | undefined {
+  return (
+      value
+        && CHAT_COMPLETIONS_REASONING_EFFORTS.has(
+          value as ChatCompletionsReasoningEffort,
+        )
+    ) ?
+      (value as ChatCompletionsReasoningEffort)
+    : undefined
 }
 
 function getThinkingBudget(
@@ -102,7 +163,7 @@ function getThinkingBudget(
   model: Model | undefined,
 ): number | undefined {
   const thinking = payload.thinking
-  if (model && thinking) {
+  if (model && thinking?.budget_tokens !== undefined) {
     const maxThinkingBudget = Math.min(
       model.capabilities.supports.max_thinking_budget ?? 0,
       (model.capabilities.limits.max_output_tokens ?? 0) - 1,

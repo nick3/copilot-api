@@ -83,6 +83,8 @@ export async function handleProviderChatCompletionsForProvider(
   const recordUsage = createProviderChatCompletionsUsageRecorder(
     payload,
     provider,
+    modelConfig,
+    providerConfig.pricingCurrency,
   )
   const contentType = upstreamResponse.headers.get("content-type") ?? ""
   const isStreamingResponse =
@@ -138,10 +140,14 @@ const applyProviderStreamOptions = (payload: ChatCompletionsPayload): void => {
 const createProviderChatCompletionsUsageRecorder = (
   payload: ChatCompletionsPayload,
   provider: string,
+  modelConfig: ModelConfig | undefined,
+  pricingCurrency: string | undefined,
 ) =>
   createProviderTokenUsageRecorder({
     endpoint: "chat_completions",
     model: payload.model,
+    pricing: modelConfig?.pricing,
+    pricingCurrency,
     providerName: provider,
   })
 

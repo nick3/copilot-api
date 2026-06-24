@@ -385,16 +385,18 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
   ```
 - **auth.apiKeys:** API keys used for request authentication. Supports multiple keys for rotation. Requests can authenticate with either `x-api-key: <key>` or `Authorization: Bearer <key>`. If empty or omitted, authentication is disabled.
 - **extraPrompts:** Map of `model -> prompt` appended to the first system prompt when translating Anthropic-style requests to Copilot. Use this to inject guardrails or guidance per model. Missing default entries are auto-added without overwriting your custom prompts. The built-in prompts for `gpt-5.3-codex`, `gpt-5.4-mini`, and `gpt-5.4` enable phase-aware commentary, which lets the model emit a short user-facing progress update before tools or deeper reasoning.
-- **providers:** Global upstream provider map. Each provider key (for example `custom`) becomes a route prefix (`/custom/v1/messages`). Currently only `type: "anthropic"` is supported.
+- **providers:** Global upstream provider map. Each provider key (for example `custom`) becomes a route prefix (`/custom/v1/messages`). Supports `type: "anthropic"`, `type: "openai-compatible"`, and `type: "openai-responses"`. Top-level clients can also use `model: "provider/model-id"`; the gateway strips the provider prefix before forwarding upstream. `GET /v1/models` aggregates Copilot models, configured aliases, and enabled provider model lists.
   - `enabled` defaults to `true` if omitted.
-  - `baseUrl` should be provider API base URL without trailing `/v1/messages`.
+  - `baseUrl` should be provider API base URL without the final endpoint. For Anthropic providers, omit `/v1/messages`; for OpenAI-compatible providers, omit `/v1/chat/completions`; for Responses providers, omit `/v1/responses`.
   - `apiKey` is used as the upstream credential value.
-  - `authType` (optional): Controls how `apiKey` is sent upstream. Supports `x-api-key` (default) and `authorization`. When set to `authorization`, the proxy sends `Authorization: Bearer <apiKey>`.
+  - `authType` (optional): Controls how `apiKey` is sent upstream. Supports `x-api-key`, `authorization`, and `oauth2`. Anthropic providers default to `x-api-key`; OpenAI-compatible and Responses providers default to `authorization`. When set to `authorization`, the proxy sends `Authorization: Bearer <apiKey>`.
+  - `pricingCurrency` (optional): Currency code used when token-usage cost is calculated for this provider, for example `USD` or `CNY`.
   - `adjustInputTokens` (optional): When `true`, the proxy will adjust the `input_tokens` in the usage response by subtracting `cache_read_input_tokens` and `cache_creation_input_tokens`.
   - `models` (optional): Per-model configuration map. Each key is a model ID (matching the model name in requests), and the value is:
     - `temperature` (optional): Default temperature value used when the request does not specify one.
     - `topP` (optional): Default top_p value used when the request does not specify one.
     - `topK` (optional): Default top_k value used when the request does not specify one.
+    - `pricing` (optional): Per-million-token pricing used by `/token-usage` cost calculation. Supports `input`, `output`, `cachedInput`, `cacheCreationInput`, `explicitCachedInput`, and tiered `tiers` entries with `maxInputTokens`.
 
   Example provider config:
 
@@ -472,16 +474,18 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
 - **auth.adminApiKey:** Single admin key used only for `/admin/*` routes. If missing, the server generates a random key at startup and writes it back to `config.json`. Requests use the same `x-api-key` or `Authorization: Bearer` headers, but regular `auth.apiKeys` never grant access to `/admin/*`.
 - **modelMappings:** Exact `sourceModel -> targetModel` rewrites shared by top-level `POST /v1/messages`, `POST /v1/messages/count_tokens`, `POST /v1/responses`, and `POST /v1/chat/completions` requests. Omit it or leave it as `{}` to disable rewrites. Both the source and target must be non-empty strings. Targets can be regular model IDs or `provider/model` aliases such as `dashscope/qwen3.6-plus`, and the rewrite happens before provider alias parsing. These mappings are not split per interface. The admin endpoints `GET/POST /admin/config/model-mappings` read and update only this field.
 - **extraPrompts:** Map of `model -> prompt` appended to the first system prompt when translating Anthropic-style requests to Copilot. Use this to inject guardrails or guidance per model. Missing default entries are auto-added without overwriting your custom prompts. The built-in prompts for `gpt-5.3-codex` and `gpt-5.4` enable phase-aware commentary, which lets the model emit a short user-facing progress update before tools or deeper reasoning.
-- **providers:** Global upstream provider map. Each provider key (for example `dashscope`) becomes a route prefix (`/dashscope/v1/messages`). Supports `type: "anthropic"`, `type: "openai-compatible"`, and `type: "openai-responses"`. Top-level clients can also use `model: "dashscope/model-id"` with `/v1/messages`, `/v1/messages/count_tokens`, `/v1/responses`, and `/v1/chat/completions`; the gateway strips the `dashscope/` prefix before forwarding upstream. `GET /v1/models` does not aggregate provider models; use `GET /dashscope/v1/models` for provider model lists.
+- **providers:** Global upstream provider map. Each provider key (for example `dashscope`) becomes a route prefix (`/dashscope/v1/messages`). Supports `type: "anthropic"`, `type: "openai-compatible"`, and `type: "openai-responses"`. Top-level clients can also use `model: "dashscope/model-id"` with `/v1/messages`, `/v1/messages/count_tokens`, `/v1/responses`, and `/v1/chat/completions`; the gateway strips the `dashscope/` prefix before forwarding upstream. `GET /v1/models` aggregates Copilot models, configured aliases, and enabled provider model lists; provider-specific lists remain available at `GET /dashscope/v1/models`.
   - `enabled` defaults to `true` if omitted.
-  - `baseUrl` should be provider API base URL without the final endpoint. For Anthropic providers, omit `/v1/messages`; for OpenAI-compatible providers, omit `/v1/chat/completions`.
+  - `baseUrl` should be provider API base URL without the final endpoint. For Anthropic providers, omit `/v1/messages`; for OpenAI-compatible providers, omit `/v1/chat/completions`; for Responses providers, omit `/v1/responses`.
   - `apiKey` is used as the upstream credential value.
-  - `authType` (optional): Controls how `apiKey` is sent upstream. Supports `x-api-key` and `authorization`. Anthropic providers default to `x-api-key`; OpenAI-compatible providers default to `authorization`. When set to `authorization`, the proxy sends `Authorization: Bearer <apiKey>`.
+  - `authType` (optional): Controls how `apiKey` is sent upstream. Supports `x-api-key`, `authorization`, and `oauth2`. Anthropic providers default to `x-api-key`; OpenAI-compatible and Responses providers default to `authorization`. When set to `authorization`, the proxy sends `Authorization: Bearer <apiKey>`.
+  - `pricingCurrency` (optional): Currency code used when token-usage cost is calculated for this provider, for example `USD` or `CNY`.
   - `adjustInputTokens` (optional): When `true`, the proxy will adjust the `input_tokens` in the usage response by subtracting `cache_read_input_tokens` and `cache_creation_input_tokens`.
   - `models` (optional): Per-model configuration map. Each key is a model ID (matching the model name in requests), and the value is:
     - `temperature` (optional): Default temperature value used when the request does not specify one.
     - `topP` (optional): Default top_p value used when the request does not specify one.
     - `topK` (optional): Default top_k value used when the request does not specify one.
+    - `pricing` (optional): Per-million-token pricing used by `/token-usage` cost calculation. Supports `input`, `output`, `cachedInput`, `cacheCreationInput`, `explicitCachedInput`, and tiered `tiers` entries with `maxInputTokens`.
     - `extraBody` (optional): Dynamic fields merged into the upstream request body for that model. Request body fields with the same name take precedence. OpenAI-compatible providers can use this for fields such as `enable_thinking`, `preserve_thinking`, `reasoning_effort`. `thinking_budget` is a special OpenAI-compatible provider override: when configured in `extraBody`, it is forced after Anthropic `thinking.budget_tokens` translation and overrides the request-derived budget.
     - `contextCache` (optional): Defaults to `true` for OpenAI-compatible providers. This enables Alibaba Cloud Model Studio/DashScope explicit context cache by injecting `cache_control: { "type": "ephemeral" }` on up to 4 content blocks using the Context Cache format. The cache breakpoint strategy matches opencode's main provider flow: the first 2 system messages plus the last 2 non-system messages. Marked string content is converted to text content part arrays for `system` / `user` / `assistant` / `tool` messages; existing array content is marked on the last part. Set this to `false` when the model already supports implicit caching, or when the upstream does not accept this explicit-cache extension field.
     - `supportPdf` (optional): Controls whether the model supports PDF/document content. Defaults to `false`; unsupported PDFs are converted to a text notice. Set it to `true` to send PDF/document blocks as OpenAI Chat Completions file parts.
@@ -543,7 +547,7 @@ These endpoints mimic the OpenAI API structure.
 | `POST /v1/responses`        | `POST` | OpenAI Most advanced interface for generating model responses. Supports `provider/model` aliases for `openai-responses` providers. |
 | `GET /v1/responses`         | `WS`   | Codex-compatible Responses WebSocket transport.                  |
 | `POST /v1/chat/completions` | `POST` | Creates a model response for the given chat conversation. Supports `provider/model` aliases for `openai-compatible` providers. |
-| `GET /v1/models`            | `GET`  | Lists the currently available models.                            |
+| `GET /v1/models`            | `GET`  | Lists Copilot models, configured aliases, and enabled provider models. |
 | `POST /v1/embeddings`       | `POST` | Creates an embedding vector representing the input text.         |
 
 ### Anthropic Compatible Endpoints
@@ -566,6 +570,9 @@ Endpoints for monitoring Copilot account runtime status and per-account usage de
 | --------------------------- | ------ | ----------------------------------------------------------------------------------------------- |
 | `GET /usage`                | `GET`  | Get runtime status snapshots of all loaded accounts (ID, remaining quota, unlimited flag).     |
 | `GET /usage/:accountIndex`  | `GET`  | Get detailed Copilot usage for a specific account index (0-based, includes `quota_snapshots`). |
+| `GET /token-usage`          | `GET`  | Get token and estimated-cost summary for recorded Copilot/provider requests. Query `period=day|week|month`. |
+| `GET /token-usage/daily`    | `GET`  | Get daily token-usage summaries for the selected period. Query `period=day|week|month`.        |
+| `GET /token-usage/events`   | `GET`  | Get paged token-usage events. Query `period=day|week|month&page=1&page_size=20`.               |
 | `GET /token`                | `GET`  | Get the current Copilot token being used by the API.                                            |
 
 > **Note on account indices**
@@ -655,6 +662,14 @@ bunx --bun @nick3/copilot-api@latest auth
 
 # Run auth flow with verbose logging
 bunx --bun @nick3/copilot-api@latest auth --verbose
+
+# Configure quick upstream providers in config.json
+bunx --bun @nick3/copilot-api@latest auth login --provider deepseek
+bunx --bun @nick3/copilot-api@latest auth login --provider dashscope
+bunx --bun @nick3/copilot-api@latest auth login --provider openrouter
+
+# Configure a custom upstream provider in config.json
+bunx --bun @nick3/copilot-api@latest auth login --provider custom
 
 # Add multiple accounts (each account is added in order)
 bunx --bun @nick3/copilot-api@latest auth add

@@ -21,6 +21,7 @@ import { providerMessageRoutes } from "./routes/provider/messages/route"
 import { providerModelRoutes } from "./routes/provider/models/route"
 import { responsesRoutes } from "./routes/responses/route"
 import { tokenRoute } from "./routes/token/route"
+import { tokenUsageRoute } from "./routes/token-usage/route"
 import { usageRoute } from "./routes/usage/route"
 
 export interface CreateServerOptions {
@@ -70,6 +71,7 @@ export function createServer(options: CreateServerOptions = {}): Hono {
   app.route("/models", modelRoutes)
   app.route("/embeddings", embeddingRoutes)
   app.route("/usage", usageRoute)
+  app.route("/token-usage", tokenUsageRoute)
   app.route("/token", tokenRoute)
   app.route("/responses", responsesRoutes)
 

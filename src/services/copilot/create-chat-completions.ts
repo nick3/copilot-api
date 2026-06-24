@@ -141,11 +141,14 @@ export interface ChatCompletionChunk {
   created: number
   model: string
   choices: Array<Choice>
+  copilot_usage?: CopilotUsage | null
   system_fingerprint?: string
   usage?: {
     prompt_tokens: number
     completion_tokens: number
     total_tokens: number
+    prompt_cache_hit_tokens?: number
+    prompt_cache_miss_tokens?: number
     prompt_tokens_details?: {
       cache_creation_input_tokens?: number
       cached_tokens?: number
@@ -189,16 +192,23 @@ export interface ChatCompletionResponse {
   created: number
   model: string
   choices: Array<ChoiceNonStreaming>
+  copilot_usage?: CopilotUsage | null
   system_fingerprint?: string
   usage?: {
     prompt_tokens: number
     completion_tokens: number
     total_tokens: number
+    prompt_cache_hit_tokens?: number
+    prompt_cache_miss_tokens?: number
     prompt_tokens_details?: {
       cache_creation_input_tokens?: number
       cached_tokens?: number
     }
   }
+}
+
+export interface CopilotUsage {
+  total_nano_aiu?: number | null
 }
 
 interface ResponseMessage {
@@ -227,6 +237,7 @@ export interface ChatCompletionsPayload {
   temperature?: number | null
   top_p?: number | null
   max_tokens?: number | null
+  max_completion_tokens?: number | null
   stop?: string | Array<string> | null
   n?: number | null
   stream?: boolean | null
@@ -252,6 +263,7 @@ export interface ChatCompletionsPayload {
     | "medium"
     | "high"
     | "xhigh"
+    | "max"
     | null
   stream_options?: {
     include_usage?: boolean | null

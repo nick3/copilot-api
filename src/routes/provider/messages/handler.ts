@@ -30,7 +30,13 @@ import {
 } from "~/lib/handler-utils"
 import { createHandlerLogger, debugJson, debugLazy } from "~/lib/logger"
 import { resolveBridgeToolSearchName } from "~/lib/tool-search"
-import { normalizeResponsesUsage } from "~/lib/token-usage"
+import {
+  mergeAnthropicUsage,
+  normalizeAnthropicUsage,
+  normalizeOpenAIUsage,
+  normalizeResponsesUsage,
+  type UsageTokens,
+} from "~/lib/token-usage"
 import {
   translateToAnthropic,
   translateToOpenAI,
@@ -105,13 +111,6 @@ const OPENAI_COMPATIBLE_CONTEXT_CACHE_ROLES = new Set<Message["role"]>([
   "assistant",
   "tool",
 ])
-
-export type UsageTokens = {
-  inputTokens?: number
-  outputTokens?: number
-  cacheCreationInputTokens?: number
-  cacheReadInputTokens?: number
-}
 
 export type ProviderStreamError = {
   errorMessage: string
@@ -1144,58 +1143,6 @@ const respondOpenAICompatibleProviderMessagesJson = (
   const response = c.json(anthropicResponse)
   instrumentation?.onComplete?.(normalizeOpenAIUsage(body.usage))
   return response
-}
-
-const normalizeOpenAIUsage = (
-  usage: ChatCompletionResponse["usage"] | ChatCompletionChunk["usage"],
-): UsageTokens => {
-  const cacheCreationInputTokens =
-    usage?.prompt_tokens_details?.cache_creation_input_tokens
-  const cacheReadInputTokens = usage?.prompt_tokens_details?.cached_tokens
-  const inputTokens =
-    usage?.prompt_tokens === undefined ?
-      undefined
-    : Math.max(
-        0,
-        usage.prompt_tokens
-          - (cacheCreationInputTokens ?? 0)
-          - (cacheReadInputTokens ?? 0),
-      )
-
-  return {
-    inputTokens,
-    outputTokens: usage?.completion_tokens,
-    cacheCreationInputTokens,
-    cacheReadInputTokens,
-  }
-}
-
-const normalizeAnthropicUsage = (
-  usage?: AnthropicResponse["usage"] | AnthropicMessageUsage,
-): UsageTokens => ({
-  inputTokens: usage?.input_tokens,
-  outputTokens: usage?.output_tokens,
-  cacheCreationInputTokens: usage?.cache_creation_input_tokens,
-  cacheReadInputTokens: usage?.cache_read_input_tokens,
-})
-
-const mergeAnthropicUsage = (
-  current: UsageTokens,
-  next: UsageTokens,
-): UsageTokens => ({
-  inputTokens: next.inputTokens ?? current.inputTokens,
-  outputTokens: next.outputTokens ?? current.outputTokens,
-  cacheCreationInputTokens:
-    next.cacheCreationInputTokens ?? current.cacheCreationInputTokens,
-  cacheReadInputTokens:
-    next.cacheReadInputTokens ?? current.cacheReadInputTokens,
-})
-
-type AnthropicMessageUsage = {
-  input_tokens?: number
-  output_tokens?: number
-  cache_read_input_tokens?: number
-  cache_creation_input_tokens?: number
 }
 
 const respondResponsesProviderMessagesJson = (

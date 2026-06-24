@@ -280,12 +280,7 @@ const makeResponsesStreamResponse = (body: ResponsesResult) =>
       "",
       "event: response.output_item.done",
       `data: ${JSON.stringify({
-        item: {
-          id: "msg-1",
-          role: "assistant",
-          status: "completed",
-          type: "message",
-        },
+        item: body.output[1],
         output_index: 1,
         sequence_number: 7,
         type: "response.output_item.done",

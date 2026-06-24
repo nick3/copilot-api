@@ -76,19 +76,7 @@
 
 - [ ] **Step 1: Replace the conflict block**
 
-Replace the current conflict section:
-
-```json
-<<<<<<< HEAD
-  "name": "@nick3/copilot-api",
-  "version": "1.10.8",
-=======
-  "name": "@jeffreycao/copilot-api",
-  "version": "1.10.9",
->>>>>>> caozhiyuan
-```
-
-with:
+Replace the current conflict section where the HEAD side keeps `"name": "@nick3/copilot-api"` with version `1.10.8`, while the caozhiyuan side changes it to `"name": "@jeffreycao/copilot-api"` with version `1.10.9`, with:
 
 ```json
   "name": "@nick3/copilot-api",

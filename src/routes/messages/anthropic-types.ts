@@ -178,13 +178,29 @@ export type AnthropicWebSearchContentBlock =
   | AnthropicServerToolUseBlock
   | AnthropicWebSearchToolResultBlock
 
-export interface AnthropicResponse {
+export interface AnthropicUsage {
+  input_tokens: number
+  output_tokens: number
+  cache_creation_input_tokens?: number
+  cache_read_input_tokens?: number
+  service_tier?: "standard" | "priority" | "batch"
+  server_tool_use?: {
+    web_search_requests?: number
+  }
+}
+
+export type AnthropicResponseContentBlock =
+  | AnthropicAssistantContentBlock
+  | AnthropicWebSearchContentBlock
+
+export interface AnthropicResponse<
+  TContentBlock extends AnthropicResponseContentBlock =
+    AnthropicResponseContentBlock,
+> {
   id: string
   type: "message"
   role: "assistant"
-  content: Array<
-    AnthropicAssistantContentBlock | AnthropicWebSearchContentBlock
-  >
+  content: Array<TContentBlock>
   model: string
   stop_reason:
     | "end_turn"
@@ -195,18 +211,8 @@ export interface AnthropicResponse {
     | "refusal"
     | null
   stop_sequence: string | null
-  usage: {
-    input_tokens: number
-    output_tokens: number
-    cache_creation_input_tokens?: number
-    cache_read_input_tokens?: number
-    service_tier?: "standard" | "priority" | "batch"
-  }
+  usage: AnthropicUsage
 }
-
-export type AnthropicResponseContentBlock =
-  | AnthropicAssistantContentBlock
-  | AnthropicWebSearchContentBlock
 
 // Anthropic Stream Event Types
 export interface AnthropicMessageStartEvent {
@@ -230,6 +236,8 @@ export interface AnthropicContentBlockStartEvent {
         input: Record<string, unknown>
       })
     | { type: "thinking"; thinking: string }
+    | AnthropicServerToolUseBlock
+    | AnthropicWebSearchToolResultBlock
 }
 
 export interface AnthropicContentBlockDeltaEvent {

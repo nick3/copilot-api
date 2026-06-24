@@ -254,7 +254,7 @@ export const reconstructWebSearchResponse = (
       server_tool_use: {
         web_search_requests: Math.max(extract.queries.length, 1),
       },
-    } as AnthropicResponse["usage"],
+    },
   }
 
   return { extract, response }

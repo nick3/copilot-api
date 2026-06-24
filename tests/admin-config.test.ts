@@ -556,16 +556,42 @@ test("POST /api/admin/config updates providers", async () => {
         body: JSON.stringify({
           providers: {
             custom: {
-              type: "anthropic",
+              type: "openai-compatible",
               enabled: true,
               baseUrl: "https://example.com",
               apiKey: "sk-test",
-              authType: "authorization",
+              authType: "oauth2",
+              pricingCurrency: " CNY ",
               adjustInputTokens: true,
               models: {
                 "kimi-k2.5": {
                   temperature: 1,
                   topP: 0.95,
+                  topK: 40,
+                  contextCache: true,
+                  supportPdf: true,
+                  toolContentSupportType: ["array", "image", "pdf", "image"],
+                  extraBody: {
+                    metadata: {
+                      source: "admin-ui",
+                    },
+                    thinking_budget: 2048,
+                  },
+                  pricing: {
+                    cachedInput: 0.5,
+                    cacheCreationInput: 0.75,
+                    explicitCachedInput: 0.25,
+                    input: 1,
+                    maxInputTokens: 32_000,
+                    output: 2,
+                    tiers: [
+                      {
+                        input: 2,
+                        maxInputTokens: 200_000,
+                        output: 4,
+                      },
+                    ],
+                  },
                 },
               },
             },
@@ -584,25 +610,297 @@ test("POST /api/admin/config updates providers", async () => {
           baseUrl: string
           apiKey: string
           authType: string
+          pricingCurrency: string
           adjustInputTokens: boolean
           models: {
             "kimi-k2.5": {
               temperature: number
               topP: number
+              topK: number
+              contextCache: boolean
+              supportPdf: boolean
+              toolContentSupportType: Array<string>
+              extraBody: {
+                metadata: {
+                  source: string
+                }
+                thinking_budget: number
+              }
+              pricing: {
+                cachedInput: number
+                cacheCreationInput: number
+                explicitCachedInput: number
+                input: number
+                maxInputTokens: number
+                output: number
+                tiers: Array<{
+                  input: number
+                  maxInputTokens: number
+                  output: number
+                }>
+              }
             }
           }
         }
       }
     }
 
-    expect(body.providers.custom.type).toBe("anthropic")
-    expect(body.providers.custom.enabled).toBe(true)
-    expect(body.providers.custom.baseUrl).toBe("https://example.com")
-    expect(body.providers.custom.apiKey).toBe("sk-test")
-    expect(body.providers.custom.authType).toBe("authorization")
-    expect(body.providers.custom.adjustInputTokens).toBe(true)
-    expect(body.providers.custom.models["kimi-k2.5"].temperature).toBe(1)
-    expect(body.providers.custom.models["kimi-k2.5"].topP).toBe(0.95)
+    const provider = body.providers.custom
+    const model = provider.models["kimi-k2.5"]
+
+    expect(provider.type).toBe("openai-compatible")
+    expect(provider.enabled).toBe(true)
+    expect(provider.baseUrl).toBe("https://example.com")
+    expect(provider.apiKey).toBe("sk-test")
+    expect(provider.authType).toBe("oauth2")
+    expect(provider.pricingCurrency).toBe("CNY")
+    expect(provider.adjustInputTokens).toBe(true)
+    expect(model.temperature).toBe(1)
+    expect(model.topP).toBe(0.95)
+    expect(model.topK).toBe(40)
+    expect(model.contextCache).toBe(true)
+    expect(model.supportPdf).toBe(true)
+    expect(model.toolContentSupportType).toEqual(["array", "image", "pdf"])
+    expect(model.extraBody).toEqual({
+      metadata: {
+        source: "admin-ui",
+      },
+      thinking_budget: 2048,
+    })
+    expect(model.pricing).toEqual({
+      cachedInput: 0.5,
+      cacheCreationInput: 0.75,
+      explicitCachedInput: 0.25,
+      input: 1,
+      maxInputTokens: 32_000,
+      output: 2,
+      tiers: [
+        {
+          input: 2,
+          maxInputTokens: 200_000,
+          output: 4,
+        },
+      ],
+    })
+  })
+})
+
+test("POST /api/admin/config accepts supported provider types", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          providers: {
+            anthropicProvider: { type: "anthropic" },
+            chatProvider: { type: "openai-compatible" },
+            responsesProvider: { type: "openai-responses" },
+          },
+        }),
+      }),
+    )
+
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as {
+      providers: Record<string, { type?: string }>
+    }
+    expect(body.providers.anthropicProvider.type).toBe("anthropic")
+    expect(body.providers.chatProvider.type).toBe("openai-compatible")
+    expect(body.providers.responsesProvider.type).toBe("openai-responses")
+  })
+})
+
+test("POST /api/admin/config trims and clears provider pricingCurrency", async () => {
+  await withConfig(
+    {
+      providers: {
+        custom: {
+          pricingCurrency: "USD",
+        },
+      },
+    },
+    async () => {
+      const { server } = await import("../src/server")
+
+      const updateRes = await server.fetch(
+        new Request("http://localhost/api/admin/config", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            providers: {
+              custom: {
+                pricingCurrency: " CNY ",
+              },
+            },
+          }),
+        }),
+      )
+
+      expect(updateRes.status).toBe(200)
+      const updateBody = (await updateRes.json()) as {
+        providers: Record<string, { pricingCurrency?: string }>
+      }
+      expect(updateBody.providers.custom.pricingCurrency).toBe("CNY")
+
+      const clearRes = await server.fetch(
+        new Request("http://localhost/api/admin/config", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            providers: {
+              custom: {
+                pricingCurrency: "",
+              },
+            },
+          }),
+        }),
+      )
+
+      expect(clearRes.status).toBe(200)
+      const clearBody = (await clearRes.json()) as {
+        providers: Record<string, { pricingCurrency?: string }>
+      }
+      expect(clearBody.providers.custom.pricingCurrency).toBeUndefined()
+    },
+  )
+})
+
+test("POST /api/admin/config rejects invalid provider pricingCurrency", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          providers: {
+            custom: {
+              pricingCurrency: 123,
+            },
+          },
+        }),
+      }),
+    )
+
+    expect(res.status).toBe(400)
+
+    const body = (await res.json()) as { error?: { message?: string } }
+    expect(body.error?.message).toBe(
+      "providers.custom.pricingCurrency must be a string",
+    )
+  })
+})
+
+test("POST /api/admin/config rejects invalid provider model advanced fields", async () => {
+  const cases = [
+    {
+      config: { extraBody: [] },
+      message: "providers.custom.models.model.extraBody must be an object",
+    },
+    {
+      config: { extraBody: Object.fromEntries([["__proto__", true]]) },
+      message:
+        "providers.custom.models.model.extraBody.__proto__ is not allowed",
+    },
+    {
+      config: { contextCache: "yes" },
+      message: "providers.custom.models.model.contextCache must be a boolean",
+    },
+    {
+      config: { supportPdf: "yes" },
+      message: "providers.custom.models.model.supportPdf must be a boolean",
+    },
+    {
+      config: { toolContentSupportType: ["audio"] },
+      message:
+        "providers.custom.models.model.toolContentSupportType[0] must be one of",
+    },
+    {
+      config: { pricing: { input: -1 } },
+      message:
+        "providers.custom.models.model.pricing.input must be a non-negative number",
+    },
+    {
+      config: { pricing: { tiers: {} } },
+      message: "providers.custom.models.model.pricing.tiers must be an array",
+    },
+    {
+      config: { pricing: { tiers: [null] } },
+      message:
+        "providers.custom.models.model.pricing.tiers[0] must be an object",
+    },
+    {
+      config: { pricing: { tiers: [{ tiers: [] }] } },
+      message:
+        "providers.custom.models.model.pricing.tiers[0].tiers is not supported",
+    },
+  ]
+
+  for (const testCase of cases) {
+    await withConfig({}, async () => {
+      const { server } = await import("../src/server")
+
+      const res = await server.fetch(
+        new Request("http://localhost/api/admin/config", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            providers: {
+              custom: {
+                models: {
+                  model: testCase.config,
+                },
+              },
+            },
+          }),
+        }),
+      )
+
+      expect(res.status).toBe(400)
+
+      const body = (await res.json()) as { error?: { message?: string } }
+      expect(body.error?.message).toContain(testCase.message)
+    })
+  }
+})
+
+test("POST /api/admin/config keeps reasoning max out of config layer", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          modelReasoningEfforts: {
+            "gpt-5.5": "max",
+          },
+        }),
+      }),
+    )
+
+    expect(res.status).toBe(400)
+
+    const body = (await res.json()) as { error?: { message?: string } }
+    expect(body.error?.message).toContain("modelReasoningEfforts.gpt-5.5")
   })
 })
 

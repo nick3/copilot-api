@@ -60,11 +60,11 @@ import {
   extractResponsesResultOwnerKeys,
   extractResponsesStreamEventOwnerKeys,
 } from "~/routes/messages/responses-item-ownership"
+import { type UsageTokens } from "~/lib/token-usage"
 import {
   handleProviderMessagesForProvider,
   type ProviderMessagesInstrumentation,
   type ProviderStreamError,
-  type UsageTokens,
 } from "~/routes/provider/messages/handler"
 import {
   buildErrorEvent,
@@ -213,27 +213,30 @@ type InstrumentationContext = {
 }
 
 function normalizeProviderAliasUsage(usage: UsageTokens): NormalizedUsage {
+  const inputTokens = usage.input_tokens ?? undefined
+  const outputTokens = usage.output_tokens ?? undefined
+  const cacheCreationTokens = usage.cache_creation_input_tokens ?? undefined
+  const tokensCachedInput = usage.cache_read_input_tokens ?? undefined
   const tokensInput =
-    usage.inputTokens === undefined ? undefined : Math.max(0, usage.inputTokens)
-  const tokensCachedInput = usage.cacheReadInputTokens
+    inputTokens === undefined ? undefined : Math.max(0, inputTokens)
   const tokensTotal =
-    usage.inputTokens === undefined && usage.outputTokens === undefined ?
+    inputTokens === undefined && outputTokens === undefined ?
       undefined
     : (tokensInput ?? 0)
-      + (usage.outputTokens ?? 0)
-      + (usage.cacheCreationInputTokens ?? 0)
+      + (outputTokens ?? 0)
+      + (cacheCreationTokens ?? 0)
       + (tokensCachedInput ?? 0)
 
   return {
     tokensCachedInput,
     tokensInput,
-    tokensOutput: usage.outputTokens,
+    tokensOutput: outputTokens,
     tokensTotal,
     usageJson: JSON.stringify({
-      input_tokens: usage.inputTokens,
-      output_tokens: usage.outputTokens,
-      cache_creation_input_tokens: usage.cacheCreationInputTokens,
-      cache_read_input_tokens: usage.cacheReadInputTokens,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      cache_creation_input_tokens: cacheCreationTokens,
+      cache_read_input_tokens: tokensCachedInput,
     }),
   }
 }

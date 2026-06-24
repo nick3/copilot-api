@@ -117,6 +117,90 @@ async function* makeResponsesStream(result: ResponsesResult) {
     }),
   }
   yield {
+    event: "response.in_progress",
+    data: JSON.stringify({
+      response: {
+        ...result,
+        output: [],
+        output_text: "",
+        usage: null,
+      },
+      sequence_number: 3,
+      type: "response.in_progress",
+    }),
+  }
+  yield {
+    event: "response.web_search_call.in_progress",
+    data: JSON.stringify({
+      item_id: "search-1",
+      output_index: 0,
+      sequence_number: 4,
+      type: "response.web_search_call.in_progress",
+    }),
+  }
+  yield {
+    event: "response.web_search_call.searching",
+    data: JSON.stringify({
+      item_id: "search-1",
+      output_index: 0,
+      sequence_number: 5,
+      type: "response.web_search_call.searching",
+    }),
+  }
+  yield {
+    event: "response.web_search_call.completed",
+    data: JSON.stringify({
+      item_id: "search-1",
+      output_index: 0,
+      sequence_number: 6,
+      type: "response.web_search_call.completed",
+    }),
+  }
+  yield {
+    event: "response.reasoning_summary_part.added",
+    data: JSON.stringify({
+      item_id: "reasoning-1",
+      output_index: 0,
+      part: { text: "", type: "summary_text" },
+      sequence_number: 7,
+      summary_index: 0,
+      type: "response.reasoning_summary_part.added",
+    }),
+  }
+  yield {
+    event: "response.reasoning_summary_text.delta",
+    data: JSON.stringify({
+      delta: "Searching",
+      item_id: "reasoning-1",
+      output_index: 0,
+      sequence_number: 8,
+      summary_index: 0,
+      type: "response.reasoning_summary_text.delta",
+    }),
+  }
+  yield {
+    event: "response.reasoning_summary_text.done",
+    data: JSON.stringify({
+      item_id: "reasoning-1",
+      output_index: 0,
+      sequence_number: 9,
+      summary_index: 0,
+      text: "Searching",
+      type: "response.reasoning_summary_text.done",
+    }),
+  }
+  yield {
+    event: "response.reasoning_summary_part.done",
+    data: JSON.stringify({
+      item_id: "reasoning-1",
+      output_index: 0,
+      part: { text: "Searching", type: "summary_text" },
+      sequence_number: 10,
+      summary_index: 0,
+      type: "response.reasoning_summary_part.done",
+    }),
+  }
+  yield {
     event: "response.output_item.added",
     data: JSON.stringify({
       item: {
@@ -126,8 +210,19 @@ async function* makeResponsesStream(result: ResponsesResult) {
         type: "message",
       },
       output_index: 1,
-      sequence_number: 3,
+      sequence_number: 11,
       type: "response.output_item.added",
+    }),
+  }
+  yield {
+    event: "response.content_part.added",
+    data: JSON.stringify({
+      content_index: 0,
+      item_id: "msg-1",
+      output_index: 1,
+      part: { annotations: [], text: "", type: "output_text" },
+      sequence_number: 12,
+      type: "response.content_part.added",
     }),
   }
   yield {
@@ -137,7 +232,7 @@ async function* makeResponsesStream(result: ResponsesResult) {
       delta: "Node.js 24 is the latest LTS.",
       item_id: "msg-1",
       output_index: 1,
-      sequence_number: 4,
+      sequence_number: 13,
       type: "response.output_text.delta",
     }),
   }
@@ -153,7 +248,7 @@ async function* makeResponsesStream(result: ResponsesResult) {
       content_index: 0,
       item_id: "msg-1",
       output_index: 1,
-      sequence_number: 5,
+      sequence_number: 14,
       type: "response.output_text.annotation.added",
     }),
   }
@@ -163,7 +258,7 @@ async function* makeResponsesStream(result: ResponsesResult) {
       content_index: 0,
       item_id: "msg-1",
       output_index: 1,
-      sequence_number: 6,
+      sequence_number: 15,
       text: "Node.js 24 is the latest LTS.",
       type: "response.output_text.done",
     }),
@@ -171,14 +266,9 @@ async function* makeResponsesStream(result: ResponsesResult) {
   yield {
     event: "response.output_item.done",
     data: JSON.stringify({
-      item: {
-        id: "msg-1",
-        role: "assistant",
-        status: "completed",
-        type: "message",
-      },
+      item: result.output[1],
       output_index: 1,
-      sequence_number: 7,
+      sequence_number: 16,
       type: "response.output_item.done",
     }),
   }
@@ -190,7 +280,7 @@ async function* makeResponsesStream(result: ResponsesResult) {
         output: [],
         output_text: "",
       },
-      sequence_number: 8,
+      sequence_number: 17,
       type: "response.completed",
     }),
   }

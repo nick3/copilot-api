@@ -4,13 +4,15 @@ import { events } from "fetch-event-stream"
 import { streamSSE } from "hono/streaming"
 
 import { logCodexRateLimitsEvent } from "~/lib/codex-rate-limit"
+import type { ModelConfig } from "~/lib/config"
 import { HTTPError } from "~/lib/error"
 import { createHandlerLogger, debugJson } from "~/lib/logger"
 import { resolveProviderConfig } from "~/lib/provider-resolver"
 import {
+  createProviderTokenUsageRecorder,
   normalizeResponsesUsage,
-  type NormalizedUsage,
-} from "~/lib/request-history"
+  type UsageTokens,
+} from "~/lib/token-usage"
 import {
   applyResponsesApiContextManagement,
   compactInputByLatestCompaction,
@@ -79,7 +81,12 @@ export async function handleProviderResponsesForProvider(
       c.req.raw.headers,
       providerConfig.baseUrl,
     )
-    const recordUsage = createProviderResponsesUsageRecorder(payload, provider)
+    const recordUsage = createProviderResponsesUsageRecorder(
+      payload,
+      provider,
+      providerConfig.models?.[payload.model],
+      providerConfig.pricingCurrency,
+    )
 
     if (payload.stream && isResponsesStream(upstreamResponse)) {
       return streamProviderResponses(c, upstreamResponse, {
@@ -107,7 +114,12 @@ export async function handleProviderResponsesForProvider(
     )
   }
 
-  const recordUsage = createProviderResponsesUsageRecorder(payload, provider)
+  const recordUsage = createProviderResponsesUsageRecorder(
+    payload,
+    provider,
+    providerConfig.models?.[payload.model],
+    providerConfig.pricingCurrency,
+  )
 
   if (payload.stream) {
     return streamProviderResponses(c, getResponsesEvents(upstreamResponse), {
@@ -126,12 +138,18 @@ export async function handleProviderResponsesForProvider(
 }
 
 const createProviderResponsesUsageRecorder = (
-  _payload: ResponsesPayload,
-  _provider: string,
-): ((usage: NormalizedUsage) => void) => {
-  // TODO: wire up to request-history when token-usage tracking is added for provider responses
-  return (_usage: NormalizedUsage) => {}
-}
+  payload: ResponsesPayload,
+  provider: string,
+  modelConfig: ModelConfig | undefined,
+  pricingCurrency: string | undefined,
+) =>
+  createProviderTokenUsageRecorder({
+    endpoint: "responses",
+    model: payload.model,
+    pricing: modelConfig?.pricing,
+    pricingCurrency,
+    providerName: provider,
+  })
 
 const streamProviderResponses = async (
   c: Context,
@@ -139,7 +157,7 @@ const streamProviderResponses = async (
   options: {
     normalizeCodex: boolean
     provider: string
-    recordUsage: (usage: NormalizedUsage) => void
+    recordUsage: (usage: UsageTokens) => void
   },
 ): Promise<Response> => {
   const iterator = upstreamResponse[Symbol.asyncIterator]()
@@ -174,7 +192,7 @@ const streamProviderResponses = async (
   }
 
   return streamSSE(c, async (stream) => {
-    let usage: NormalizedUsage = {}
+    let usage: UsageTokens = {}
 
     const writeChunk = async (chunk: typeof firstChunk) => {
       debugJson(logger, "Responses stream chunk:", chunk)
@@ -247,7 +265,7 @@ const parseProviderResponsesStreamEvent = (
 
 const getResponsesStreamEventUsage = (
   event: ResponseStreamEvent,
-): NormalizedUsage | null => {
+): UsageTokens | null => {
   if (
     event.type === "response.completed"
     || event.type === "response.failed"

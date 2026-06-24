@@ -9,6 +9,7 @@ import { RequestReplayPage } from "@/pages/request-replay-page"
 import { RequestsPage } from "@/pages/requests-page"
 import { SettingsPage } from "@/pages/settings-page"
 import { StatisticsPage } from "@/pages/statistics-page"
+import { TokenUsagePage } from "@/pages/token-usage-page"
 
 export default function App(): React.JSX.Element {
   return (
@@ -18,6 +19,7 @@ export default function App(): React.JSX.Element {
         <Route path="/accounts" element={<AccountsPage />} />
         <Route path="/requests" element={<RequestsPage />} />
         <Route path="/statistics" element={<StatisticsPage />} />
+        <Route path="/token-usage" element={<TokenUsagePage />} />
         <Route path="/models" element={<ModelsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/request/:requestId" element={<RequestDetailPage />} />

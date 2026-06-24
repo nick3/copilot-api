@@ -16,9 +16,14 @@ import {
   type AdminConfigResponse,
   type DevModeState,
   type ModelAliasSpec,
+  type ProviderAuthType,
   type ProviderConfig,
   type ProviderModelConfig,
+  type ProviderType,
   type ReasoningEffort,
+  type TokenUsagePricingConfig,
+  type TokenUsagePricingTier,
+  type ToolContentSupportType,
   getAdminConfig,
   getAdminModels,
   getDevMode,
@@ -74,6 +79,76 @@ const REASONING_EFFORTS: Array<ReasoningEffort> = [
   "xhigh",
 ]
 
+const PROVIDER_TYPES: Array<ProviderType> = [
+  "anthropic",
+  "openai-compatible",
+  "openai-responses",
+]
+
+const PROVIDER_AUTH_TYPES: Array<ProviderAuthType> = [
+  "x-api-key",
+  "authorization",
+  "oauth2",
+]
+
+const TOOL_CONTENT_SUPPORT_TYPES: Array<ToolContentSupportType> = [
+  "array",
+  "image",
+  "pdf",
+]
+
+const TOKEN_USAGE_PRICING_NUMBER_FIELDS = [
+  "cachedInput",
+  "cacheCreationInput",
+  "explicitCachedInput",
+  "input",
+  "maxInputTokens",
+  "output",
+] as const
+
+const TOKEN_USAGE_PRICING_FIELDS = [
+  ...TOKEN_USAGE_PRICING_NUMBER_FIELDS,
+  "tiers",
+] as const
+
+const TOKEN_USAGE_PRICING_KEYS = new Set<string>(TOKEN_USAGE_PRICING_FIELDS)
+
+export type QuickProviderName = "deepseek" | "dashscope" | "openrouter" | "custom"
+
+type QuickProviderTemplate = {
+  name: string
+  type: ProviderType
+  baseUrl: string
+  pricingCurrency: string
+}
+
+const QUICK_PROVIDER_TEMPLATES = {
+  deepseek: {
+    name: "deepseek",
+    type: "anthropic",
+    baseUrl: "https://api.deepseek.com/anthropic",
+    pricingCurrency: "CNY",
+  },
+  dashscope: {
+    name: "dashscope",
+    type: "openai-compatible",
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode",
+    pricingCurrency: "CNY",
+  },
+  openrouter: {
+    name: "openrouter",
+    type: "anthropic",
+    baseUrl: "https://openrouter.ai/api",
+    pricingCurrency: "USD",
+  },
+  custom: {
+    name: "",
+    type: "anthropic",
+    baseUrl: "",
+    pricingCurrency: "",
+  },
+} satisfies Record<QuickProviderName, QuickProviderTemplate>
+
 type ExtraPromptItem = {
   id: string
   model: string
@@ -110,9 +185,14 @@ type ProviderModelItem = {
   temperature: string
   topP: string
   topK: string
+  contextCache: boolean
+  contextCacheConfigured: boolean
+  supportPdf: boolean
+  supportPdfConfigured: boolean
+  toolContentSupportType: Array<ToolContentSupportType>
+  pricingJson: string
+  extraBodyJson: string
 }
-
-type ProviderAuthType = NonNullable<ProviderConfig["authType"]>
 
 type ProviderItem = {
   id: string
@@ -122,6 +202,7 @@ type ProviderItem = {
   baseUrl: string
   apiKey: string
   authType: ProviderAuthType
+  pricingCurrency: string
   adjustInputTokens: boolean
   models: Array<ProviderModelItem>
 }
@@ -403,17 +484,125 @@ function aliasRecordFromItems(items: Array<ModelAliasItem>): ModelAliasRecord {
 
 const BLOCKED_PROVIDER_KEYS = new Set(["__proto__", "constructor", "prototype"])
 
+function normalizeProviderType(value: ProviderConfig["type"] | string | undefined): string {
+  return value ?? "anthropic"
+}
+
+function isProviderType(value: string): value is ProviderType {
+  return PROVIDER_TYPES.includes(value as ProviderType)
+}
+
+function normalizeProviderAuthType(
+  value: ProviderConfig["authType"],
+): ProviderAuthType {
+  return value && PROVIDER_AUTH_TYPES.includes(value) ? value : "x-api-key"
+}
+
+function hasNonEmptyJsonText(value: string): boolean {
+  const trimmed = value.trim()
+  return Boolean(trimmed && trimmed !== "{}")
+}
+
+function stringifyOptionalJson(value: unknown): string {
+  return value === undefined ? "" : JSON.stringify(value, null, 2)
+}
+
+function createProviderItem(overrides: Partial<ProviderItem> = {}): ProviderItem {
+  return {
+    id: createItemId(),
+    name: "",
+    type: "anthropic",
+    enabled: true,
+    baseUrl: "",
+    apiKey: "",
+    authType: "x-api-key",
+    pricingCurrency: "",
+    adjustInputTokens: false,
+    models: [],
+    ...overrides,
+  }
+}
+
+export function getUniqueProviderName(
+  baseName: string,
+  items: Array<{ name: string }>,
+): string {
+  const trimmedBaseName = baseName.trim()
+  if (!trimmedBaseName) return ""
+
+  const existingNames = new Set(
+    items
+      .map((item) => item.name.trim().toLowerCase())
+      .filter((name) => name.length > 0),
+  )
+
+  if (!existingNames.has(trimmedBaseName.toLowerCase())) {
+    return trimmedBaseName
+  }
+
+  for (let index = 2; ; index += 1) {
+    const candidate = `${trimmedBaseName}-${index}`
+    if (!existingNames.has(candidate.toLowerCase())) {
+      return candidate
+    }
+  }
+}
+
+export function createQuickProviderItem(
+  name: QuickProviderName,
+  existingItems: Array<{ name: string }>,
+): ProviderItem {
+  const template = QUICK_PROVIDER_TEMPLATES[name]
+  const providerName = getUniqueProviderName(template.name, existingItems)
+
+  return createProviderItem({
+    name: providerName,
+    type: template.type,
+    baseUrl: template.baseUrl,
+    pricingCurrency: template.pricingCurrency,
+  })
+}
+
+export function deriveProviderModelSuggestions(
+  items: Array<{ name: string; models: Array<{ model: string }> }>,
+  limit = 6,
+): Array<string> {
+  const suggestions: Array<string> = []
+  const seen = new Set<string>()
+
+  for (const provider of items) {
+    const providerName = provider.name.trim()
+    if (!providerName) continue
+
+    for (const model of provider.models) {
+      const modelName = model.model.trim()
+      if (!modelName) continue
+
+      const suggestion = `${providerName}/${modelName}`
+      const normalized = suggestion.toLowerCase()
+      if (seen.has(normalized)) continue
+
+      seen.add(normalized)
+      suggestions.push(suggestion)
+      if (suggestions.length >= limit) return suggestions
+    }
+  }
+
+  return suggestions
+}
+
 function providerItemsFromRecord(record: ProviderRecord | undefined): Array<ProviderItem> {
   if (!record) return []
 
   return Object.entries(record).map(([name, provider]) => ({
     id: createItemId(),
     name,
-    type: provider.type ?? "anthropic",
+    type: normalizeProviderType(provider.type),
     enabled: provider.enabled ?? true,
     baseUrl: provider.baseUrl ?? "",
     apiKey: provider.apiKey ?? "",
-    authType: provider.authType ?? "x-api-key",
+    authType: normalizeProviderAuthType(provider.authType),
+    pricingCurrency: provider.pricingCurrency ?? "",
     adjustInputTokens: provider.adjustInputTokens ?? false,
     models: Object.entries(provider.models ?? {}).map(([model, config]) => ({
       id: createItemId(),
@@ -421,13 +610,23 @@ function providerItemsFromRecord(record: ProviderRecord | undefined): Array<Prov
       temperature: config.temperature === undefined ? "" : String(config.temperature),
       topP: config.topP === undefined ? "" : String(config.topP),
       topK: config.topK === undefined ? "" : String(config.topK),
+      contextCache: config.contextCache ?? false,
+      contextCacheConfigured: Object.hasOwn(config, "contextCache"),
+      supportPdf: config.supportPdf ?? false,
+      supportPdfConfigured: Object.hasOwn(config, "supportPdf"),
+      toolContentSupportType: config.toolContentSupportType ?? [],
+      pricingJson: stringifyOptionalJson(config.pricing),
+      extraBodyJson: stringifyOptionalJson(config.extraBody),
     })),
   }))
 }
 
 function providerHasMeaningfulContent(item: ProviderItem): boolean {
   if (item.enabled === false) return true
-  if (item.baseUrl.trim() || item.apiKey.trim()) return true
+  if (item.type !== "anthropic") return true
+  if (item.baseUrl.trim() || item.apiKey.trim() || item.pricingCurrency.trim()) {
+    return true
+  }
   if (item.authType !== "x-api-key" || item.adjustInputTokens) return true
 
   return item.models.some(
@@ -435,7 +634,12 @@ function providerHasMeaningfulContent(item: ProviderItem): boolean {
       Boolean(model.model.trim())
       || Boolean(model.temperature.trim())
       || Boolean(model.topP.trim())
-      || Boolean(model.topK.trim()),
+      || Boolean(model.topK.trim())
+      || model.contextCacheConfigured
+      || model.supportPdfConfigured
+      || model.toolContentSupportType.length > 0
+      || hasNonEmptyJsonText(model.pricingJson)
+      || hasNonEmptyJsonText(model.extraBodyJson),
   )
 }
 
@@ -446,6 +650,145 @@ type ParsedProviderModelItem =
     }
   | null
 
+type PricingNumberField = (typeof TOKEN_USAGE_PRICING_NUMBER_FIELDS)[number]
+
+function isJsonCompatibleValue(value: unknown): boolean {
+  if (
+    value === null
+    || typeof value === "string"
+    || typeof value === "boolean"
+    || typeof value === "number"
+  ) {
+    return typeof value !== "number" || Number.isFinite(value)
+  }
+
+  if (Array.isArray(value)) {
+    return value.every((item) => isJsonCompatibleValue(item))
+  }
+
+  if (!isPlainObject(value)) return false
+
+  return Object.values(value).every((item) => isJsonCompatibleValue(item))
+}
+
+function parseOptionalPlainObjectJson(
+  value: string,
+  field: string,
+): ParseResult<Record<string, unknown> | undefined> {
+  const trimmed = value.trim()
+  if (!trimmed || trimmed === "{}") return { record: undefined }
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    if (!isPlainObject(parsed)) {
+      return { error: `${field} must be a JSON object.` }
+    }
+    for (const key of Object.keys(parsed)) {
+      if (BLOCKED_PROVIDER_KEYS.has(key)) {
+        return { error: `${field}.${key} is not allowed.` }
+      }
+    }
+    if (!isJsonCompatibleValue(parsed)) {
+      return { error: `${field} must contain JSON-compatible values.` }
+    }
+    return { record: parsed }
+  } catch {
+    return { error: `${field} JSON is not valid.` }
+  }
+}
+
+function assignPricingNumber(
+  pricing: TokenUsagePricingTier,
+  key: PricingNumberField,
+  value: number,
+): void {
+  pricing[key] = value
+}
+
+function parsePricingTierObject(
+  value: unknown,
+  field: string,
+  allowTiers: boolean,
+): ParseResult<TokenUsagePricingTier> {
+  if (!isPlainObject(value)) {
+    return { error: `${field} must be a JSON object.` }
+  }
+
+  for (const key of Object.keys(value)) {
+    if (BLOCKED_PROVIDER_KEYS.has(key)) {
+      return { error: `${field}.${key} is not allowed.` }
+    }
+    if (!TOKEN_USAGE_PRICING_KEYS.has(key)) {
+      return { error: `${field}.${key} is not supported.` }
+    }
+    if (key === "tiers" && !allowTiers) {
+      return { error: `${field}.tiers is not supported.` }
+    }
+  }
+
+  const pricing: TokenUsagePricingTier = {}
+  for (const key of TOKEN_USAGE_PRICING_NUMBER_FIELDS) {
+    if (!Object.hasOwn(value, key)) continue
+
+    const raw = value[key]
+    if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) {
+      return { error: `${field}.${key} must be a non-negative number.` }
+    }
+    assignPricingNumber(pricing, key, raw)
+  }
+
+  return { record: pricing }
+}
+
+function parseOptionalPricingJson(
+  value: string,
+  field: string,
+): ParseResult<TokenUsagePricingConfig | undefined> {
+  const trimmed = value.trim()
+  if (!trimmed || trimmed === "{}") return { record: undefined }
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    const base = parsePricingTierObject(parsed, field, true)
+    if ("error" in base) return base
+
+    const pricing: TokenUsagePricingConfig = { ...base.record }
+    if (!isPlainObject(parsed) || !Object.hasOwn(parsed, "tiers")) {
+      return {
+        record: Object.keys(pricing).length > 0 ? pricing : undefined,
+      }
+    }
+
+    const rawTiers = parsed.tiers
+    if (rawTiers === null || rawTiers === undefined) {
+      return {
+        record: Object.keys(pricing).length > 0 ? pricing : undefined,
+      }
+    }
+    if (!Array.isArray(rawTiers)) {
+      return { error: `${field}.tiers must be an array.` }
+    }
+
+    const tiers: Array<TokenUsagePricingTier> = []
+    for (const [index, rawTier] of rawTiers.entries()) {
+      const tier = parsePricingTierObject(
+        rawTier,
+        `${field}.tiers[${index}]`,
+        false,
+      )
+      if ("error" in tier) return tier
+      tiers.push(tier.record)
+    }
+    if (tiers.length > 0) pricing.tiers = tiers
+
+    return {
+      record: Object.keys(pricing).length > 0 ? pricing : undefined,
+    }
+  } catch {
+    return { error: `${field} JSON is not valid.` }
+  }
+}
+
 function parseSingleModelItem(
   modelItem: ProviderModelItem,
   providerName: string,
@@ -455,11 +798,29 @@ function parseSingleModelItem(
   const temperatureInput = modelItem.temperature.trim()
   const topPInput = modelItem.topP.trim()
   const topKInput = modelItem.topK.trim()
+  const pricing = parseOptionalPricingJson(
+    modelItem.pricingJson,
+    `Provider '${providerName}' model pricing`,
+  )
+  if ("error" in pricing) return pricing
+
+  const extraBody = parseOptionalPlainObjectJson(
+    modelItem.extraBodyJson,
+    `Provider '${providerName}' model extraBody`,
+  )
+  if ("error" in extraBody) return extraBody
 
   const hasNumericOverride = Boolean(temperatureInput || topPInput || topKInput)
+  const hasAdvancedOverride = Boolean(
+    modelItem.contextCacheConfigured
+    || modelItem.supportPdfConfigured
+    || modelItem.toolContentSupportType.length > 0
+    || pricing.record
+    || extraBody.record,
+  )
 
   if (!modelId) {
-    if (hasNumericOverride) {
+    if (hasNumericOverride || hasAdvancedOverride) {
       return {
         error: `Provider '${providerName}': model id is required when setting overrides.`,
       }
@@ -506,6 +867,18 @@ function parseSingleModelItem(
     }
     config.topK = parsed
   }
+
+  if (modelItem.contextCacheConfigured) {
+    config.contextCache = modelItem.contextCache
+  }
+  if (modelItem.supportPdfConfigured) {
+    config.supportPdf = modelItem.supportPdf
+  }
+  if (modelItem.toolContentSupportType.length > 0) {
+    config.toolContentSupportType = modelItem.toolContentSupportType
+  }
+  if (pricing.record) config.pricing = pricing.record
+  if (extraBody.record) config.extraBody = extraBody.record
 
   if (Object.keys(config).length === 0) {
     return { record: null }
@@ -555,15 +928,24 @@ function providerRecordFromItems(items: Array<ProviderItem>): ParseResult<Provid
 
     seenProviders.add(normalizedProviderName)
 
+    const providerType = item.type.trim() || "anthropic"
+    if (!isProviderType(providerType)) {
+      return {
+        error: `Provider '${providerName}' type must be one of: ${PROVIDER_TYPES.join(", ")}.`,
+      }
+    }
+
     const baseUrl = item.baseUrl.trim()
     const apiKey = item.apiKey.trim()
+    const pricingCurrency = item.pricingCurrency.trim()
 
     const provider: ProviderConfig = {
-      type: item.type || "anthropic",
+      type: providerType,
       enabled: item.enabled,
       baseUrl: baseUrl || undefined,
       apiKey: apiKey || undefined,
       authType: item.authType,
+      pricingCurrency: pricingCurrency || undefined,
       adjustInputTokens: item.adjustInputTokens,
     }
 
@@ -584,6 +966,7 @@ type ProvidersEditor = {
   items: Array<ProviderItem>
   issue: string | null
   onAddProvider: () => void
+  onQuickAddProvider: (name: QuickProviderName) => void
   onRemoveProvider: (id: string) => void
   onUpdateProvider: (id: string, patch: Partial<ProviderItem>) => void
   onAddModel: (providerId: string) => void
@@ -603,8 +986,10 @@ function useProvidersEditor(
   const [issue, setIssue] = useState<string | null>(null)
 
   const setFromRecord = useCallback((record?: ProviderRecord) => {
-    setItems(providerItemsFromRecord(record))
-    setIssue(null)
+    const nextItems = providerItemsFromRecord(record)
+    const result = providerRecordFromItems(nextItems)
+    setItems(nextItems)
+    setIssue("error" in result ? result.error : null)
   }, [])
 
   const updateItems = useCallback(
@@ -622,20 +1007,15 @@ function useProvidersEditor(
   )
 
   const onAddProvider = useCallback(() => {
-    updateItems(
-      items.concat({
-        id: createItemId(),
-        name: "",
-        type: "anthropic",
-        enabled: true,
-        baseUrl: "",
-        apiKey: "",
-        authType: "x-api-key",
-        adjustInputTokens: false,
-        models: [],
-      }),
-    )
+    updateItems(items.concat(createProviderItem()))
   }, [items, updateItems])
+
+  const onQuickAddProvider = useCallback(
+    (name: QuickProviderName) => {
+      updateItems(items.concat(createQuickProviderItem(name, items)))
+    },
+    [items, updateItems],
+  )
 
   const onRemoveProvider = useCallback(
     (id: string) => {
@@ -664,6 +1044,13 @@ function useProvidersEditor(
             temperature: "",
             topP: "",
             topK: "",
+            contextCache: false,
+            contextCacheConfigured: false,
+            supportPdf: false,
+            supportPdfConfigured: false,
+            toolContentSupportType: [],
+            pricingJson: "",
+            extraBodyJson: "",
           }),
         }
       })
@@ -710,6 +1097,7 @@ function useProvidersEditor(
     items,
     issue,
     onAddProvider,
+    onQuickAddProvider,
     onRemoveProvider,
     onUpdateProvider,
     onAddModel,
@@ -2222,6 +2610,7 @@ type ResponsesApiSettingsCardProps = {
   compactThresholdsJsonIssue: string | null
   compactThresholdsItems: Array<CompactThresholdItem>
   models: Array<string>
+  providerModelSuggestions?: Array<string>
   onToggleUseResponsesApiWebSocket: (value: boolean) => void
   onToggleUseResponsesApiWebSearch: (value: boolean) => void
   onMessageApiWebSearchModelChange: (value: string) => void
@@ -2248,6 +2637,7 @@ export function ResponsesApiSettingsCard({
   compactThresholdsJsonIssue,
   compactThresholdsItems,
   models,
+  providerModelSuggestions = [],
   onToggleUseResponsesApiWebSocket,
   onToggleUseResponsesApiWebSearch,
   onMessageApiWebSearchModelChange,
@@ -2260,6 +2650,12 @@ export function ResponsesApiSettingsCard({
   onCompactThresholdsUpdateItem,
 }: ResponsesApiSettingsCardProps): React.JSX.Element {
   const { t } = useTranslation()
+  const copilotSuggestions = models.slice(0, 6)
+  const currentValue = messageApiWebSearchModelValue.trim()
+  const allSuggestions = new Set(
+    [...copilotSuggestions, ...providerModelSuggestions].map((value) => value.toLowerCase()),
+  )
+  const showCustomValue = currentValue.length > 0 && !allSuggestions.has(currentValue.toLowerCase())
 
   return (
     <Card className="gap-4 py-4">
@@ -2322,6 +2718,60 @@ export function ResponsesApiSettingsCard({
             onChange={(e) => onMessageApiWebSearchModelChange(e.target.value)}
             className="font-mono text-xs"
           />
+          <div className="space-y-2">
+            <div className="text-muted-foreground text-xs">
+              {t("settingsPage.responsesApi.messageApiWebSearchSuggestionsHint")}
+            </div>
+            {copilotSuggestions.length > 0 ? (
+              <div className="space-y-1">
+                <div className="text-muted-foreground text-xs font-medium">
+                  {t("settingsPage.responsesApi.copilotModelSuggestionsLabel")}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {copilotSuggestions.map((model) => (
+                    <Button
+                      key={model}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 font-mono text-xs"
+                      onClick={() => onMessageApiWebSearchModelChange(model)}
+                    >
+                      {model}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {providerModelSuggestions.length > 0 ? (
+              <div className="space-y-1">
+                <div className="text-muted-foreground text-xs font-medium">
+                  {t("settingsPage.responsesApi.providerModelSuggestionsLabel")}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {providerModelSuggestions.map((model) => (
+                    <Button
+                      key={model}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 font-mono text-xs"
+                      onClick={() => onMessageApiWebSearchModelChange(model)}
+                    >
+                      {model}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {showCustomValue ? (
+              <div className="text-muted-foreground text-xs">
+                {t("settingsPage.responsesApi.messageApiWebSearchCustomValue", {
+                  value: currentValue,
+                })}
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <hr className="border-t" />
@@ -2723,51 +3173,196 @@ function ProviderModelRow({
 }: ProviderModelRowProps): React.JSX.Element {
   const { t } = useTranslation()
 
+  const onToggleToolContentSupportType = (
+    type: ToolContentSupportType,
+    checked: boolean,
+  ) => {
+    const next =
+      checked ?
+        [...new Set(item.toolContentSupportType.concat(type))]
+      : item.toolContentSupportType.filter((current) => current !== type)
+    onUpdateModel(providerId, item.id, { toolContentSupportType: next })
+  }
+
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Input
-        className="min-w-[180px]"
-        placeholder={t("settingsPage.advanced.providersModelIdPlaceholder")}
-        value={item.model}
-        onChange={(e) => onUpdateModel(providerId, item.id, { model: e.target.value })}
-      />
-      <Input
-        className="w-28"
-        type="number"
-        step="0.1"
-        min="0"
-        placeholder="temperature"
-        value={item.temperature}
-        onChange={(e) =>
-          onUpdateModel(providerId, item.id, { temperature: e.target.value })
-        }
-      />
-      <Input
-        className="w-28"
-        type="number"
-        step="0.01"
-        min="0"
-        placeholder="topP"
-        value={item.topP}
-        onChange={(e) => onUpdateModel(providerId, item.id, { topP: e.target.value })}
-      />
-      <Input
-        className="w-28"
-        type="number"
-        step="1"
-        min="0"
-        placeholder="topK"
-        value={item.topK}
-        onChange={(e) => onUpdateModel(providerId, item.id, { topK: e.target.value })}
-      />
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={() => onRemoveModel(providerId, item.id)}
-      >
-        {t("settingsPage.common.remove")}
-      </Button>
+    <div className="grid gap-3 rounded-md border border-dashed p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          className="min-w-[180px]"
+          placeholder={t("settingsPage.advanced.providersModelIdPlaceholder")}
+          value={item.model}
+          onChange={(e) => onUpdateModel(providerId, item.id, { model: e.target.value })}
+        />
+        <Input
+          className="w-28"
+          type="number"
+          step="0.1"
+          min="0"
+          placeholder="temperature"
+          value={item.temperature}
+          onChange={(e) =>
+            onUpdateModel(providerId, item.id, { temperature: e.target.value })
+          }
+        />
+        <Input
+          className="w-28"
+          type="number"
+          step="0.01"
+          min="0"
+          placeholder="topP"
+          value={item.topP}
+          onChange={(e) => onUpdateModel(providerId, item.id, { topP: e.target.value })}
+        />
+        <Input
+          className="w-28"
+          type="number"
+          step="1"
+          min="0"
+          placeholder="topK"
+          value={item.topK}
+          onChange={(e) => onUpdateModel(providerId, item.id, { topK: e.target.value })}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => onRemoveModel(providerId, item.id)}
+        >
+          {t("settingsPage.common.remove")}
+        </Button>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-2 rounded-md bg-muted/40 px-3 py-2">
+          <Label className="text-sm font-medium">
+            {t("settingsPage.advanced.providersContextCacheLabel")}
+          </Label>
+          <Select
+            value={
+              item.contextCacheConfigured ?
+                item.contextCache ? "true" : "false"
+              : "inherit"
+            }
+            onValueChange={(value) =>
+              onUpdateModel(providerId, item.id, {
+                contextCache: value === "true",
+                contextCacheConfigured: value !== "inherit",
+              })
+            }
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="inherit">
+                {t("settingsPage.advanced.providersBooleanInherit")}
+              </SelectItem>
+              <SelectItem value="true">
+                {t("settingsPage.advanced.providersBooleanEnabled")}
+              </SelectItem>
+              <SelectItem value="false">
+                {t("settingsPage.advanced.providersBooleanDisabled")}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="text-muted-foreground text-xs">
+            {t("settingsPage.advanced.providersContextCacheHint")}
+          </div>
+        </div>
+
+        <div className="grid gap-2 rounded-md bg-muted/40 px-3 py-2">
+          <Label className="text-sm font-medium">
+            {t("settingsPage.advanced.providersSupportPdfLabel")}
+          </Label>
+          <Select
+            value={
+              item.supportPdfConfigured ?
+                item.supportPdf ? "true" : "false"
+              : "inherit"
+            }
+            onValueChange={(value) =>
+              onUpdateModel(providerId, item.id, {
+                supportPdf: value === "true",
+                supportPdfConfigured: value !== "inherit",
+              })
+            }
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="inherit">
+                {t("settingsPage.advanced.providersBooleanInherit")}
+              </SelectItem>
+              <SelectItem value="true">
+                {t("settingsPage.advanced.providersBooleanEnabled")}
+              </SelectItem>
+              <SelectItem value="false">
+                {t("settingsPage.advanced.providersBooleanDisabled")}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="text-muted-foreground text-xs">
+            {t("settingsPage.advanced.providersSupportPdfHint")}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-2">
+        <Label className="text-muted-foreground text-xs">
+          {t("settingsPage.advanced.providersToolContentSupportTypeLabel")}
+        </Label>
+        <div className="flex flex-wrap gap-2">
+          {TOOL_CONTENT_SUPPORT_TYPES.map((type) => (
+            <label
+              key={type}
+              className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs"
+            >
+              <input
+                type="checkbox"
+                checked={item.toolContentSupportType.includes(type)}
+                onChange={(e) =>
+                  onToggleToolContentSupportType(type, e.target.checked)
+                }
+              />
+              {type}
+            </label>
+          ))}
+        </div>
+        <div className="text-muted-foreground text-xs">
+          {t("settingsPage.advanced.providersToolContentSupportTypeHint")}
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-2">
+          <Label className="text-muted-foreground text-xs">
+            {t("settingsPage.advanced.providersPricingLabel")}
+          </Label>
+          <Textarea
+            className="min-h-28 font-mono text-xs"
+            placeholder={t("settingsPage.advanced.providersPricingPlaceholder")}
+            value={item.pricingJson}
+            onChange={(e) =>
+              onUpdateModel(providerId, item.id, { pricingJson: e.target.value })
+            }
+          />
+        </div>
+
+        <div className="grid gap-2">
+          <Label className="text-muted-foreground text-xs">
+            {t("settingsPage.advanced.providersExtraBodyLabel")}
+          </Label>
+          <Textarea
+            className="min-h-28 font-mono text-xs"
+            placeholder={t("settingsPage.advanced.providersExtraBodyPlaceholder")}
+            value={item.extraBodyJson}
+            onChange={(e) =>
+              onUpdateModel(providerId, item.id, { extraBodyJson: e.target.value })
+            }
+          />
+        </div>
+      </div>
     </div>
   )
 }
@@ -2804,6 +3399,27 @@ function ProviderItemCard({
           value={item.name}
           onChange={(e) => onUpdateProvider(item.id, { name: e.target.value })}
         />
+        <Select
+          value={item.type}
+          onValueChange={(value) =>
+            onUpdateProvider(item.id, { type: value as ProviderType })
+          }
+        >
+          <SelectTrigger className="w-[190px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="anthropic">
+              {t("settingsPage.advanced.providersTypeAnthropic")}
+            </SelectItem>
+            <SelectItem value="openai-compatible">
+              {t("settingsPage.advanced.providersTypeOpenAICompatible")}
+            </SelectItem>
+            <SelectItem value="openai-responses">
+              {t("settingsPage.advanced.providersTypeOpenAIResponses")}
+            </SelectItem>
+          </SelectContent>
+        </Select>
         <div className="flex items-center gap-2">
           <Switch
             checked={item.enabled}
@@ -2823,8 +3439,8 @@ function ProviderItemCard({
         </Button>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-3">
-        <div className="grid gap-2">
+      <div className="grid gap-3 md:grid-cols-4">
+        <div className="grid gap-2 md:col-span-2">
           <Label className="text-muted-foreground text-xs">
             {t("settingsPage.advanced.providersBaseUrlLabel")}
           </Label>
@@ -2851,6 +3467,31 @@ function ProviderItemCard({
 
         <div className="grid gap-2">
           <Label className="text-muted-foreground text-xs">
+            {t("settingsPage.advanced.providersPricingCurrencyLabel")}
+          </Label>
+          <Input
+            autoComplete="off"
+            placeholder={t("settingsPage.advanced.providersPricingCurrencyPlaceholder")}
+            value={item.pricingCurrency}
+            onChange={(e) =>
+              onUpdateProvider(item.id, { pricingCurrency: e.target.value })
+            }
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-2">
+          <Label className="text-muted-foreground text-xs">
+            {t("settingsPage.advanced.providersTypeLabel")}
+          </Label>
+          <div className="text-muted-foreground rounded-md bg-muted/40 px-3 py-2 text-xs">
+            {t("settingsPage.advanced.providersTypeHint")}
+          </div>
+        </div>
+
+        <div className="grid gap-2">
+          <Label className="text-muted-foreground text-xs">
             {t("settingsPage.advanced.providersAuthTypeLabel")}
           </Label>
           <Select
@@ -2869,11 +3510,19 @@ function ProviderItemCard({
               <SelectItem value="authorization">
                 {t("settingsPage.advanced.providersAuthTypeAuthorization")}
               </SelectItem>
+              <SelectItem value="oauth2">
+                {t("settingsPage.advanced.providersAuthTypeOauth2")}
+              </SelectItem>
             </SelectContent>
           </Select>
           <div className="text-muted-foreground text-xs">
             {t("settingsPage.advanced.providersAuthTypeHint")}
           </div>
+          {item.authType === "oauth2" ? (
+            <div className="text-muted-foreground rounded-md bg-muted/40 px-3 py-2 text-xs">
+              {t("settingsPage.advanced.providersOAuth2Hint")}
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -2933,6 +3582,7 @@ type ProvidersSettingsCardProps = {
   items: Array<ProviderItem>
   issue: string | null
   onAddProvider: () => void
+  onQuickAddProvider: (name: QuickProviderName) => void
   onRemoveProvider: (id: string) => void
   onUpdateProvider: (id: string, patch: Partial<ProviderItem>) => void
   onAddModel: (providerId: string) => void
@@ -2948,6 +3598,7 @@ function ProvidersSettingsCard({
   items,
   issue,
   onAddProvider,
+  onQuickAddProvider,
   onRemoveProvider,
   onUpdateProvider,
   onAddModel,
@@ -2991,9 +3642,49 @@ function ProvidersSettingsCard({
           ))
         )}
 
-        <Button type="button" variant="outline" size="sm" onClick={onAddProvider}>
-          {t("settingsPage.advanced.providersAddProvider")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-muted-foreground text-xs">
+            {t("settingsPage.advanced.providersQuickAddLabel")}
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onQuickAddProvider("deepseek")}
+          >
+            {t("settingsPage.advanced.providersQuickAddDeepSeek")}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onQuickAddProvider("dashscope")}
+          >
+            {t("settingsPage.advanced.providersQuickAddDashScope")}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onQuickAddProvider("openrouter")}
+          >
+            {t("settingsPage.advanced.providersQuickAddOpenRouter")}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onQuickAddProvider("custom")}
+          >
+            {t("settingsPage.advanced.providersQuickAddCustom")}
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={onAddProvider}>
+            {t("settingsPage.advanced.providersAddProvider")}
+          </Button>
+        </div>
+        <div className="text-muted-foreground text-xs">
+          {t("settingsPage.advanced.providersQuickAddHint")}
+        </div>
       </CardContent>
     </Card>
   )
@@ -3101,6 +3792,7 @@ type SettingsPageViewProps = {
   compactThresholdsJson: string
   compactThresholdsJsonIssue: string | null
   compactThresholdsItems: Array<CompactThresholdItem>
+  providerModelSuggestions: Array<string>
   onCompactThresholdsToggleMode: (next: boolean) => void
   onCompactThresholdsJsonChange: (value: string) => void
   onCompactThresholdsAddItem: () => void
@@ -3146,6 +3838,7 @@ type SettingsPageViewProps = {
   providersItems: Array<ProviderItem>
   providersIssue: string | null
   onProvidersAddProvider: () => void
+  onProvidersQuickAddProvider: (name: QuickProviderName) => void
   onProvidersRemoveProvider: (id: string) => void
   onProvidersUpdateProvider: (id: string, patch: Partial<ProviderItem>) => void
   onProvidersAddModel: (providerId: string) => void
@@ -3269,6 +3962,7 @@ function useSettingsPageState(): SettingsPageViewProps {
     items: providersItems,
     issue: providersIssue,
     onAddProvider: onProvidersAddProvider,
+    onQuickAddProvider: onProvidersQuickAddProvider,
     onRemoveProvider: onProvidersRemoveProvider,
     onUpdateProvider: onProvidersUpdateProvider,
     onAddModel: onProvidersAddModel,
@@ -3651,6 +4345,7 @@ function useSettingsPageState(): SettingsPageViewProps {
   const messageApiWebSearchModelValue = draft.messageApiWebSearchModel ?? ""
   const useResponsesApiContextManagement =
     draft.useResponsesApiContextManagement ?? true
+  const providerModelSuggestions = deriveProviderModelSuggestions(providersItems)
 
   return {
     loading,
@@ -3699,6 +4394,7 @@ function useSettingsPageState(): SettingsPageViewProps {
     compactThresholdsJson,
     compactThresholdsJsonIssue,
     compactThresholdsItems,
+    providerModelSuggestions,
     onCompactThresholdsToggleMode,
     onCompactThresholdsJsonChange,
     onCompactThresholdsAddItem,
@@ -3741,6 +4437,7 @@ function useSettingsPageState(): SettingsPageViewProps {
     providersItems,
     providersIssue,
     onProvidersAddProvider,
+    onProvidersQuickAddProvider,
     onProvidersRemoveProvider,
     onProvidersUpdateProvider,
     onProvidersAddModel,
@@ -3801,6 +4498,7 @@ function SettingsPageView({
   compactThresholdsJson,
   compactThresholdsJsonIssue,
   compactThresholdsItems,
+  providerModelSuggestions,
   onCompactThresholdsToggleMode,
   onCompactThresholdsJsonChange,
   onCompactThresholdsAddItem,
@@ -3843,6 +4541,7 @@ function SettingsPageView({
   providersItems,
   providersIssue,
   onProvidersAddProvider,
+  onProvidersQuickAddProvider,
   onProvidersRemoveProvider,
   onProvidersUpdateProvider,
   onProvidersAddModel,
@@ -4033,6 +4732,7 @@ function SettingsPageView({
               compactThresholdsJsonIssue={compactThresholdsJsonIssue}
               compactThresholdsItems={compactThresholdsItems}
               models={models}
+              providerModelSuggestions={providerModelSuggestions}
               onToggleUseResponsesApiWebSocket={onUseResponsesApiWebSocketToggle}
               onToggleUseResponsesApiWebSearch={onUseResponsesApiWebSearchToggle}
               onMessageApiWebSearchModelChange={onMessageApiWebSearchModelChange}
@@ -4141,6 +4841,7 @@ function SettingsPageView({
               items={providersItems}
               issue={providersIssue}
               onAddProvider={onProvidersAddProvider}
+              onQuickAddProvider={onProvidersQuickAddProvider}
               onRemoveProvider={onProvidersRemoveProvider}
               onUpdateProvider={onProvidersUpdateProvider}
               onAddModel={onProvidersAddModel}

@@ -175,6 +175,88 @@ test("messages Chat Completions flow adds Copilot cache control to system and la
   ])
 })
 
+test("messages Chat Completions flow preserves supported reasoning effort", async () => {
+  const payload: AnthropicMessagesPayload = {
+    model: "gpt-test",
+    max_tokens: 128,
+    messages: [{ role: "user", content: "hello" }],
+    output_config: {
+      effort: "medium",
+    },
+  }
+
+  const response = await handleWithChatCompletions(createContext(), payload, {
+    logger,
+    requestId: "request-1",
+    selectedModel: createModel([], {
+      reasoningEffort: ["low", "medium", "high"],
+    }),
+  })
+
+  expect(response.status).toBe(200)
+  expect(capturedPayload?.reasoning_effort).toBe("medium")
+})
+
+test("messages Chat Completions flow downgrades unsupported reasoning effort", async () => {
+  const payload: AnthropicMessagesPayload = {
+    model: "gpt-test",
+    max_tokens: 128,
+    messages: [{ role: "user", content: "hello" }],
+    output_config: {
+      effort: "xhigh",
+    },
+  }
+
+  const response = await handleWithChatCompletions(createContext(), payload, {
+    logger,
+    requestId: "request-1",
+    selectedModel: createModel([], {
+      reasoningEffort: ["low", "medium", "high"],
+    }),
+  })
+
+  expect(response.status).toBe(200)
+  expect(capturedPayload?.reasoning_effort).toBe("high")
+})
+
+test("messages Chat Completions flow omits reasoning effort without model support", async () => {
+  const createPayload = (): AnthropicMessagesPayload => ({
+    model: "gpt-test",
+    max_tokens: 128,
+    messages: [{ role: "user", content: "hello" }],
+    output_config: {
+      effort: "high",
+    },
+  })
+
+  let response = await handleWithChatCompletions(
+    createContext(),
+    createPayload(),
+    {
+      logger,
+      requestId: "request-1",
+      selectedModel: createModel([]),
+    },
+  )
+
+  expect(response.status).toBe(200)
+  expect(capturedPayload).not.toHaveProperty("reasoning_effort")
+
+  capturedPayload = null
+  createChatCompletions.mockClear()
+
+  response = await handleWithChatCompletions(createContext(), createPayload(), {
+    logger,
+    requestId: "request-2",
+    selectedModel: createModel([], {
+      reasoningEffort: [],
+    }),
+  })
+
+  expect(response.status).toBe(200)
+  expect(capturedPayload).not.toHaveProperty("reasoning_effort")
+})
+
 test("Copilot Chat Completions payload preparation marks two system and latest two non-system messages", () => {
   const payload: ChatCompletionsPayload = {
     model: "gpt-test",
@@ -411,14 +493,20 @@ test("messages Responses flow preserves the configured tool_search alias in non-
   })
 })
 
-const createModel = (supportedEndpoints: Array<string>): Model => ({
+const createModel = (
+  supportedEndpoints: Array<string>,
+  options: { reasoningEffort?: Array<string> } = {},
+): Model => ({
   capabilities: {
     family: "gpt",
     limits: {
       max_prompt_tokens: 128000,
     },
     object: "model_capabilities",
-    supports: {},
+    supports:
+      options.reasoningEffort === undefined ?
+        {}
+      : { reasoning_effort: options.reasoningEffort },
     tokenizer: "o200k_base",
     type: "chat",
   },

@@ -134,6 +134,46 @@ describe("builtin provider config", () => {
     })
   })
 
+  test("does not add quick provider templates by default", () => {
+    const tempDir = createTempConfigDir()
+    const configPath = path.join(tempDir, "config.json")
+
+    runScript(
+      tempDir,
+      'const { mergeConfigWithDefaults } = await import("./src/lib/config"); mergeConfigWithDefaults();',
+    )
+
+    expect(readConfigFile(configPath).providers).toEqual({})
+  })
+
+  test("does not add missing quick providers to existing provider config", () => {
+    const tempDir = createTempConfigDir()
+    const configPath = writeConfigFile(tempDir, {
+      providers: {
+        deepseek: {
+          apiKey: "custom-key",
+          baseUrl: "https://custom.deepseek.example",
+          enabled: false,
+          type: "anthropic",
+        },
+      },
+    })
+
+    runScript(
+      tempDir,
+      'const { mergeConfigWithDefaults } = await import("./src/lib/config"); mergeConfigWithDefaults();',
+    )
+
+    expect(readConfigFile(configPath).providers).toEqual({
+      deepseek: {
+        apiKey: "custom-key",
+        baseUrl: "https://custom.deepseek.example",
+        enabled: false,
+        type: "anthropic",
+      },
+    })
+  })
+
   test("allows overriding model Responses API compact thresholds", () => {
     const tempDir = createTempConfigDir()
     writeConfigFile(tempDir, {

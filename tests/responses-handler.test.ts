@@ -2,9 +2,27 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 
 import "./shared-admin-db-test-home"
 
+import type { UsageTokens } from "~/lib/token-usage"
 import type { AccountRuntime } from "~/lib/types/account"
 import type { ResponsesPayload } from "~/services/copilot/create-responses"
 import type { Model } from "~/services/copilot/get-models"
+
+const actualTokenUsageModule = await import("~/lib/token-usage")
+type ProviderUsageRecorderOptions = Parameters<
+  (typeof actualTokenUsageModule)["createProviderTokenUsageRecorder"]
+>[0]
+const providerUsageRecords: Array<{
+  options: ProviderUsageRecorderOptions
+  usage: UsageTokens
+}> = []
+
+await mock.module("~/lib/token-usage", () => ({
+  ...actualTokenUsageModule,
+  createProviderTokenUsageRecorder:
+    (options: ProviderUsageRecorderOptions) => (usage: UsageTokens) => {
+      providerUsageRecords.push({ options, usage })
+    },
+}))
 
 const [
   { accountsManager },
@@ -142,6 +160,8 @@ function buildResponsesResult(model: string, text: string) {
 }
 
 beforeEach(() => {
+  providerUsageRecords.length = 0
+
   state.manualApprove = false
   state.verbose = false
 
@@ -294,6 +314,19 @@ describe("responses handler provider alias routing", () => {
     expect(response.status).toBe(200)
     expect(selectSpy).not.toHaveBeenCalled()
     expect(providerForwardedUrl).toContain("acme.example.com")
+
+    expect(providerUsageRecords).toHaveLength(1)
+    expect(providerUsageRecords[0]?.options).toMatchObject({
+      endpoint: "responses",
+      model: "gpt-acme",
+      providerName: "acme",
+    })
+    expect(providerUsageRecords[0]?.usage).toMatchObject({
+      cache_read_input_tokens: 0,
+      input_tokens: 1,
+      output_tokens: 1,
+      total_tokens: 2,
+    })
 
     setProviderConfig("acme", { enabled: false })
   })

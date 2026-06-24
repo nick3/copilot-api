@@ -394,16 +394,18 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
   ```
 - **auth.apiKeys：** 用于请求认证的 API key。支持多个 key 轮换使用。请求可通过 `x-api-key: <key>` 或 `Authorization: Bearer <key>` 进行认证。若为空或省略，则禁用认证。
 - **extraPrompts：** `model -> prompt` 的映射。把 Anthropic 风格请求翻译给 Copilot 时，会将其附加到第一条 system prompt 后面。你可以借此为不同模型注入护栏或指引。缺失的默认项会自动补齐，但不会覆盖你自定义的 prompt。内置的 `gpt-5.3-codex`、`gpt-5.4-mini` 与 `gpt-5.4` prompt 会启用带阶段感知的 commentary，让模型在工具调用或更深层推理前先发出简短的、用户可见的进度说明。
-- **providers：** 全局上游 provider 映射。每个 provider key（例如 `custom`）都会变成一个路由前缀（`/custom/v1/messages`）。目前仅支持 `type: "anthropic"`。
+- **providers：** 全局上游 provider 映射。每个 provider key（例如 `custom`）都会变成一个路由前缀（`/custom/v1/messages`）。支持 `type: "anthropic"`、`type: "openai-compatible"` 和 `type: "openai-responses"`。顶层客户端也可以使用 `model: "provider/model-id"`；AI gateway 会在转发上游前移除 provider 前缀。`GET /v1/models` 会聚合 Copilot 模型、已配置别名以及已启用 provider 的模型列表。
   - `enabled`：若省略则默认为 `true`。
-  - `baseUrl`：provider API 的基础 URL，不要带结尾的 `/v1/messages`。
+  - `baseUrl`：provider API 的基础 URL，不要带最终 endpoint。Anthropic provider 不要带 `/v1/messages`；OpenAI 兼容 provider 不要带 `/v1/chat/completions`；Responses provider 不要带 `/v1/responses`。
   - `apiKey`：作为上游凭据值使用。
-  - `authType`（可选）：控制 `apiKey` 如何发送到上游。支持 `x-api-key`（默认）和 `authorization`。当设置为 `authorization` 时，代理会发送 `Authorization: Bearer <apiKey>`。
+  - `authType`（可选）：控制 `apiKey` 如何发送到上游。支持 `x-api-key`、`authorization` 和 `oauth2`。Anthropic provider 默认 `x-api-key`；OpenAI 兼容与 Responses provider 默认 `authorization`。当设置为 `authorization` 时，代理会发送 `Authorization: Bearer <apiKey>`。
+  - `pricingCurrency`（可选）：为该 provider 计算 token usage 成本时使用的货币代码，例如 `USD` 或 `CNY`。
   - `adjustInputTokens`（可选）：当为 `true` 时，代理会在 usage 响应里用 `input_tokens` 减去 `cache_read_input_tokens` 和 `cache_creation_input_tokens`。
   - `models`（可选）：按模型 ID 配置的映射。每个键都是请求中的模型名，值支持：
     - `temperature`（可选）：请求未指定时使用的默认温度。
     - `topP`（可选）：请求未指定时使用的默认 `top_p`。
     - `topK`（可选）：请求未指定时使用的默认 `top_k`。
+    - `pricing`（可选）：供 `/token-usage` 成本计算使用的每百万 token 价格。支持 `input`、`output`、`cachedInput`、`cacheCreationInput`、`explicitCachedInput`，以及带 `maxInputTokens` 的阶梯 `tiers`。
 
   provider 配置示例：
 
@@ -481,16 +483,18 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
 - **auth.adminApiKey：** 仅用于 `/admin/*` 路由的单个 admin key。若未配置，服务会在启动时自动生成一个随机 key，并回写到 `config.json`。它同样使用 `x-api-key` 或 `Authorization: Bearer` 这两种头，但普通 `auth.apiKeys` 不能访问 `/admin/*`。
 - **modelMappings：** 用于顶层 `POST /v1/messages`、`POST /v1/messages/count_tokens`、`POST /v1/responses` 和 `POST /v1/chat/completions` 请求的精确 `sourceModel -> targetModel` 重写映射，这几类接口共用同一份规则。省略该字段或保留为 `{}` 时，不会做模型重写。`source` 和 `target` 都必须是非空字符串。`target` 可以是普通模型 ID，也可以是 `provider/model` 形式的别名，例如 `dashscope/qwen3.6-plus`；重写发生在 provider alias 解析之前。这些映射不再按接口区分。`GET/POST /admin/config/model-mappings` 管理接口读写的也只有这个字段。
 - **extraPrompts：** `model -> prompt` 的映射。把 Anthropic 风格请求翻译给 Copilot 时，会将其附加到第一条 system prompt 后面。你可以借此为不同模型注入护栏或指引。缺失的默认项会自动补齐，但不会覆盖你自定义的 prompt。内置的 `gpt-5.3-codex` 和 `gpt-5.4` prompt 会启用带阶段感知的 commentary，让模型在工具调用或更深层推理前先发出简短的用户可见进度说明。
-- **providers：** 全局上游 provider 映射。每个 provider key（例如 `dashscope`）都会变成一个路由前缀（`/dashscope/v1/messages`）。支持 `type: "anthropic"`、`type: "openai-compatible"` 和 `type: "openai-responses"`。顶层客户端也可以在 `/v1/messages`、`/v1/messages/count_tokens`、`/v1/responses` 和 `/v1/chat/completions` 中使用 `model: "dashscope/model-id"`；AI gateway 会在转发上游前移除 `dashscope/` 前缀。`GET /v1/models` 不聚合 provider 模型；provider 模型列表请使用 `GET /dashscope/v1/models`。
+- **providers：** 全局上游 provider 映射。每个 provider key（例如 `dashscope`）都会变成一个路由前缀（`/dashscope/v1/messages`）。支持 `type: "anthropic"`、`type: "openai-compatible"` 和 `type: "openai-responses"`。顶层客户端也可以在 `/v1/messages`、`/v1/messages/count_tokens`、`/v1/responses` 和 `/v1/chat/completions` 中使用 `model: "dashscope/model-id"`；AI gateway 会在转发上游前移除 `dashscope/` 前缀。`GET /v1/models` 会聚合 Copilot 模型、已配置别名以及已启用 provider 的模型列表；指定 provider 的模型列表仍可通过 `GET /dashscope/v1/models` 获取。
   - `enabled`：可选，若省略则默认为 `true`。
-  - `baseUrl`：provider API 的基础 URL，不要带结尾的 endpoint。Anthropic provider 不要带 `/v1/messages`；OpenAI 兼容 provider 不要带 `/v1/chat/completions`。
+  - `baseUrl`：provider API 的基础 URL，不要带最终 endpoint。Anthropic provider 不要带 `/v1/messages`；OpenAI 兼容 provider 不要带 `/v1/chat/completions`；Responses provider 不要带 `/v1/responses`。
   - `apiKey`：作为上游凭据值使用。
-  - `authType`：可选，控制 `apiKey` 如何发送到上游。支持 `x-api-key` 和 `authorization`。Anthropic provider 默认 `x-api-key`；OpenAI 兼容 provider 默认 `authorization`。当设置为 `authorization` 时，代理会发送 `Authorization: Bearer <apiKey>`。
+  - `authType`：可选，控制 `apiKey` 如何发送到上游。支持 `x-api-key`、`authorization` 和 `oauth2`。Anthropic provider 默认 `x-api-key`；OpenAI 兼容与 Responses provider 默认 `authorization`。当设置为 `authorization` 时，代理会发送 `Authorization: Bearer <apiKey>`。
+  - `pricingCurrency`：可选，为该 provider 计算 token usage 成本时使用的货币代码，例如 `USD` 或 `CNY`。
   - `adjustInputTokens`：可选，当为 `true` 时，代理会在 usage 响应里用 `input_tokens` 减去 `cache_read_input_tokens` 和 `cache_creation_input_tokens`。
   - `models`：可选，按模型 ID 配置的映射。每个键为请求中的模型名，值支持：
     - `temperature`：可选，当请求未指定时使用的默认温度。
     - `topP`：可选，当请求未指定时使用的默认 `top_p`。
     - `topK`：可选，当请求未指定时使用的默认 `top_k`。
+    - `pricing`：可选，供 `/token-usage` 成本计算使用的每百万 token 价格。支持 `input`、`output`、`cachedInput`、`cacheCreationInput`、`explicitCachedInput`，以及带 `maxInputTokens` 的阶梯 `tiers`。
     - `extraBody`：可选，按模型合入上游请求体的动态字段；请求体显式同名字段优先。OpenAI 兼容 provider 可用它配置 `enable_thinking`、`preserve_thinking`、`reasoning_effort` 等字段。`thinking_budget` 是 OpenAI 兼容 provider 的特殊覆盖项：配置在 `extraBody` 后，会在 Anthropic `thinking.budget_tokens` 翻译之后强制写入，并覆盖请求派生出的预算值。
     - `contextCache`：可选，OpenAI 兼容 provider 默认 `true`，用于启用阿里云百炼/DashScope 的显式缓存（explicit context cache），会按其 Context Cache 格式在最多 4 个 content block 上注入 `cache_control: { "type": "ephemeral" }`。缓存断点策略与 opencode 主链路保持一致：前 2 条 system 消息 + 最后 2 条非 system 消息。标记字符串 content 时会把 `system` / `user` / `assistant` / `tool` 消息转换为 text content part 数组；已有数组 content 则标记最后一个 part。如果模型本身已经支持隐式缓存，或上游不支持该显式缓存扩展字段，可在模型配置中设为 `false`。
     - `supportPdf`：可选，控制该模型是否支持 PDF/document content。默认 `false`，不支持时会把 PDF 转成提示文本；设为 `true` 时会把 PDF/document 转成 OpenAI Chat Completions 的 file part。
@@ -552,7 +556,7 @@ curl http://localhost:4141/v1/models \
 | `POST /v1/responses` | `POST` | OpenAI 中用于生成模型响应的高级接口。支持 `openai-responses` provider 的 `provider/model` 别名。 |
 | `GET /v1/responses` | `WS` | Codex 兼容的 Responses WebSocket transport。 |
 | `POST /v1/chat/completions` | `POST` | 为给定聊天对话创建模型响应。支持 `openai-compatible` provider 的 `provider/model` 别名。 |
-| `GET /v1/models` | `GET` | 列出当前可用模型。 |
+| `GET /v1/models` | `GET` | 列出 Copilot 模型、已配置别名以及已启用 provider 的模型。 |
 | `POST /v1/embeddings` | `POST` | 创建表示输入文本的向量嵌入。 |
 
 ### Anthropic 兼容端点
@@ -575,6 +579,9 @@ curl http://localhost:4141/v1/models \
 | --- | --- | --- |
 | `GET /usage` | `GET` | 获取所有已加载账号的运行状态快照（ID、剩余额度、是否无限量）。 |
 | `GET /usage/:accountIndex` | `GET` | 获取指定账号索引的详细 Copilot 用量（0-based，包含 `quota_snapshots`）。 |
+| `GET /token-usage` | `GET` | 获取已记录 Copilot/provider 请求的 token 与估算成本汇总。查询参数：`period=day|week|month`。 |
+| `GET /token-usage/daily` | `GET` | 获取所选周期内按日汇总的 token usage。查询参数：`period=day|week|month`。 |
+| `GET /token-usage/events` | `GET` | 获取分页 token usage 事件。查询参数：`period=day|week|month&page=1&page_size=20`。 |
 | `GET /token` | `GET` | 获取当前 API 正在使用的 Copilot token。 |
 
 > **关于账号索引的说明**
@@ -665,6 +672,14 @@ bunx --bun @nick3/copilot-api@latest auth
 
 # 认证时启用详细日志
 bunx --bun @nick3/copilot-api@latest auth --verbose
+
+# 将快速上游 provider 写入 config.json
+bunx --bun @nick3/copilot-api@latest auth login --provider deepseek
+bunx --bun @nick3/copilot-api@latest auth login --provider dashscope
+bunx --bun @nick3/copilot-api@latest auth login --provider openrouter
+
+# 将自定义上游 provider 写入 config.json
+bunx --bun @nick3/copilot-api@latest auth login --provider custom
 
 # 添加多个账号（账号会按添加顺序记录）
 bunx --bun @nick3/copilot-api@latest auth add

@@ -2,7 +2,9 @@ import { describe, test, expect } from "bun:test"
 import { z } from "zod"
 
 import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
+import type { Model } from "~/services/copilot/get-models"
 
+import { accountsManager } from "../src/lib/accounts-manager"
 import { COMPACT_REQUEST } from "../src/lib/compact"
 import {
   RICH_TOOL_RESULT_MOVED_TEXT,
@@ -52,6 +54,7 @@ const chatCompletionRequestSchema = z.object({
   stream: z.boolean().optional().nullable(),
   temperature: z.number().min(0).max(2).optional().nullable(),
   top_p: z.number().min(0).max(1).optional().nullable(),
+  reasoning_effort: z.string().optional(),
   tools: z.array(z.any()).optional(),
   tool_choice: z.union([z.string(), z.object({})]).optional(),
   user: z.string().optional(),
@@ -77,6 +80,32 @@ function getTextParts(
   return content.flatMap((part) =>
     part.type === "text" && typeof part.text === "string" ? [part.text] : [],
   )
+}
+
+function createThinkingModel(): Model {
+  return {
+    capabilities: {
+      family: "gpt",
+      limits: {
+        max_output_tokens: 4096,
+      },
+      object: "model_capabilities",
+      supports: {
+        max_thinking_budget: 3000,
+        min_thinking_budget: 1024,
+      },
+      tokenizer: "o200k_base",
+      type: "chat",
+    },
+    id: "gpt-thinking",
+    model_picker_enabled: true,
+    name: "gpt-thinking",
+    object: "model",
+    preview: false,
+    supported_endpoints: [],
+    vendor: "openai",
+    version: "1",
+  }
 }
 
 describe("Anthropic to OpenAI translation logic", () => {
@@ -118,6 +147,61 @@ describe("Anthropic to OpenAI translation logic", () => {
     }
     const openAIPayload = translateToOpenAI(anthropicPayload)
     expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+  })
+
+  test("maps non-empty output_config effort to reasoning_effort", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-4o",
+      messages: [{ role: "user", content: "Hello!" }],
+      max_tokens: 0,
+      output_config: {
+        effort: "high",
+      },
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    expect(openAIPayload.reasoning_effort).toBe("high")
+    expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+  })
+
+  test("omits reasoning_effort when output_config effort is missing", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-4o",
+      messages: [{ role: "user", content: "Hello!" }],
+      max_tokens: 0,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    expect(openAIPayload).not.toHaveProperty("reasoning_effort")
+    expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+  })
+
+  test("maps thinking budget within selected model limits", () => {
+    const originalGetFirstAccountModels =
+      accountsManager.getFirstAccountModels.bind(accountsManager)
+    accountsManager.getFirstAccountModels = () => ({
+      object: "list",
+      data: [createThinkingModel()],
+    })
+
+    try {
+      const anthropicPayload: AnthropicMessagesPayload = {
+        model: "gpt-thinking",
+        messages: [{ role: "user", content: "Hello!" }],
+        max_tokens: 0,
+        thinking: {
+          type: "enabled",
+        },
+      }
+
+      const openAIPayload = translateToOpenAI(anthropicPayload)
+
+      expect(openAIPayload.thinking_budget).toBeUndefined()
+    } finally {
+      accountsManager.getFirstAccountModels = originalGetFirstAccountModels
+    }
   })
 
   test("should handle missing fields gracefully", () => {

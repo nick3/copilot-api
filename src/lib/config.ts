@@ -78,18 +78,38 @@ export interface ModelConfig {
   topK?: number
   extraBody?: Record<string, unknown>
   contextCache?: boolean
+  pricing?: TokenUsagePricingConfig
   supportPdf?: boolean
   toolContentSupportType?: Array<ToolContentSupportType>
 }
 
+export interface TokenUsagePricingTier {
+  cachedInput?: number
+  cacheCreationInput?: number
+  explicitCachedInput?: number
+  input?: number
+  maxInputTokens?: number
+  output?: number
+}
+
+export interface TokenUsagePricingConfig extends TokenUsagePricingTier {
+  tiers?: Array<TokenUsagePricingTier>
+}
+
 export const PROVIDER_TYPE_ANTHROPIC = "anthropic" as const
+export const SUPPORTED_PROVIDER_TYPES = [
+  PROVIDER_TYPE_ANTHROPIC,
+  "openai-compatible",
+  "openai-responses",
+] as const
 
 export type ProviderAuthType = "authorization" | "oauth2" | "x-api-key"
-export type ProviderType =
-  | "anthropic"
-  | "openai-compatible"
-  | "openai-responses"
+export type ProviderType = (typeof SUPPORTED_PROVIDER_TYPES)[number]
 export type ToolContentSupportType = "array" | "image" | "pdf"
+
+export function isSupportedProviderType(value: string): value is ProviderType {
+  return SUPPORTED_PROVIDER_TYPES.includes(value as ProviderType)
+}
 
 export interface ProviderConfig {
   type?: string
@@ -97,6 +117,7 @@ export interface ProviderConfig {
   baseUrl?: string
   apiKey?: string
   authType?: ProviderAuthType
+  pricingCurrency?: string
   models?: Record<string, ModelConfig>
   adjustInputTokens?: boolean
 }
@@ -107,6 +128,7 @@ export interface ResolvedProviderConfig {
   baseUrl: string
   apiKey: string
   authType: ProviderAuthType
+  pricingCurrency?: string
   models?: Record<string, ModelConfig>
   adjustInputTokens?: boolean
 }
@@ -943,6 +965,13 @@ export function normalizeProviderBaseUrl(url: string): string {
   return url.trim().replace(/\/+$/u, "")
 }
 
+function normalizePricingCurrency(
+  value: string | undefined,
+): string | undefined {
+  const currency = value?.trim().toUpperCase()
+  return currency || undefined
+}
+
 function getDefaultProviderAuthType(
   providerType: ProviderType,
 ): ProviderAuthType {
@@ -1053,11 +1082,7 @@ export function getProviderConfig(name: string): ResolvedProviderConfig | null {
   }
 
   const type = provider.type ?? PROVIDER_TYPE_ANTHROPIC
-  if (
-    type !== PROVIDER_TYPE_ANTHROPIC
-    && type !== "openai-compatible"
-    && type !== "openai-responses"
-  ) {
+  if (!isSupportedProviderType(type)) {
     consola.warn(
       `Provider ${providerName} is ignored because type '${type}' is not supported`,
     )
@@ -1091,6 +1116,7 @@ export function getProviderConfig(name: string): ResolvedProviderConfig | null {
     baseUrl,
     apiKey,
     authType,
+    pricingCurrency: normalizePricingCurrency(provider.pricingCurrency),
     models: provider.models,
     adjustInputTokens: provider.adjustInputTokens,
   }

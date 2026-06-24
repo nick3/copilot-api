@@ -7,6 +7,8 @@ import { LoaderCircleIcon, RefreshCwIcon, SearchIcon } from "lucide-react"
 import {
   AdminApiError,
   type AdminModelDetailsItem,
+  type AggregatedModelItem,
+  getAdminAggregatedModels,
   getAdminModelDetails,
   refreshAllModels,
 } from "@/lib/admin-api"
@@ -461,6 +463,113 @@ function BillingCell({
   )
 }
 
+type AggregatedModelsPreviewCardProps = {
+  loading: boolean
+  error: string | null
+  models: Array<AggregatedModelItem>
+  onRetry: () => void
+}
+
+const AGGREGATED_PREVIEW_COL_COUNT = 4
+
+export function AggregatedModelsPreviewCard({
+  loading,
+  error,
+  models,
+  onRetry,
+}: AggregatedModelsPreviewCardProps): React.JSX.Element {
+  const { t } = useTranslation()
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <CardTitle>{t("modelsPage.aggregatedPreview.title")}</CardTitle>
+            <CardDescription>
+              {t("modelsPage.aggregatedPreview.description")}
+            </CardDescription>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onRetry}
+            disabled={loading}
+          >
+            {loading ? (
+              <LoaderCircleIcon className="size-4 motion-safe:animate-spin" />
+            ) : (
+              <RefreshCwIcon className="size-4" />
+            )}
+            {t("common.retry")}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {error ? (
+          <InlineAlert
+            variant="error"
+            title={t("modelsPage.aggregatedPreview.errorTitle")}
+            description={error}
+            actionLabel={t("common.retry")}
+            onAction={onRetry}
+          />
+        ) : null}
+        <Table glow>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("modelsPage.aggregatedPreview.columns.id")}</TableHead>
+              <TableHead>{t("modelsPage.aggregatedPreview.columns.displayName")}</TableHead>
+              <TableHead>{t("modelsPage.aggregatedPreview.columns.ownedBy")}</TableHead>
+              <TableHead>{t("modelsPage.aggregatedPreview.columns.claudeModelId")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading && models.length === 0 ? (
+              Array.from({ length: 4 }).map((_, row) => (
+                <TableRow key={row}>
+                  {Array.from({ length: AGGREGATED_PREVIEW_COL_COUNT }).map((__, col) => (
+                    <TableCell key={col}>
+                      <Skeleton className={col === 0 ? "h-4 w-44" : "h-4 w-28"} />
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
+            ) : null}
+            {!loading && !error && models.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={AGGREGATED_PREVIEW_COL_COUNT}>
+                  <InlineAlert
+                    variant="info"
+                    title={t("modelsPage.aggregatedPreview.emptyTitle")}
+                    description={t("modelsPage.aggregatedPreview.emptyDescription")}
+                  />
+                </TableCell>
+              </TableRow>
+            ) : null}
+            {models.map((model) => (
+              <TableRow key={model.id}>
+                <TableCell className="max-w-[18rem] truncate font-mono text-xs" title={model.id}>
+                  {model.id}
+                </TableCell>
+                <TableCell className="max-w-[16rem] truncate" title={model.display_name}>
+                  {model.display_name || "—"}
+                </TableCell>
+                <TableCell className="max-w-[10rem] truncate" title={model.owned_by}>
+                  {model.owned_by || "—"}
+                </TableCell>
+                <TableCell className="max-w-[18rem] truncate font-mono text-xs" title={model.claude_model_id}>
+                  {model.claude_model_id || "—"}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  )
+}
+
 type FilterTag = "premium" | "preview"
 
 export function ModelsPage(): React.JSX.Element {
@@ -470,6 +579,9 @@ export function ModelsPage(): React.JSX.Element {
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [models, setModels] = useState<AdminModelDetailsItem[]>([])
+  const [aggregatedLoading, setAggregatedLoading] = useState(true)
+  const [aggregatedError, setAggregatedError] = useState<string | null>(null)
+  const [aggregatedModels, setAggregatedModels] = useState<AggregatedModelItem[]>([])
 
   const [search, setSearch] = useState("")
   const [activeFilters, setActiveFilters] = useState<Set<FilterTag>>(new Set())
@@ -592,6 +704,21 @@ export function ModelsPage(): React.JSX.Element {
     })
   }, [filteredModels, sortDir, sortKey])
 
+  const loadAggregatedModels = useCallback(async () => {
+    setAggregatedLoading(true)
+    setAggregatedError(null)
+
+    try {
+      const res = await getAdminAggregatedModels()
+      setAggregatedModels(res.data)
+    } catch (err) {
+      const msg = err instanceof AdminApiError ? err.message : String(err)
+      setAggregatedError(msg)
+    } finally {
+      setAggregatedLoading(false)
+    }
+  }, [])
+
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -610,7 +737,8 @@ export function ModelsPage(): React.JSX.Element {
 
   useEffect(() => {
     void load()
-  }, [load])
+    void loadAggregatedModels()
+  }, [load, loadAggregatedModels])
 
   const handleRefreshModels = useCallback(async () => {
     setRefreshing(true)
@@ -631,14 +759,14 @@ export function ModelsPage(): React.JSX.Element {
     }
 
     try {
-      await load()
+      await Promise.all([load(), loadAggregatedModels()])
     } catch (err) {
       const msg = err instanceof AdminApiError ? err.message : String(err)
       toast.error(t("modelsPage.toast.reloadFailed"), { description: msg })
     } finally {
       setRefreshing(false)
     }
-  }, [load, t])
+  }, [load, loadAggregatedModels, t])
 
   return (
     <div className="space-y-4">
@@ -651,6 +779,13 @@ export function ModelsPage(): React.JSX.Element {
           onAction={() => void load()}
         />
       ) : null}
+
+      <AggregatedModelsPreviewCard
+        loading={aggregatedLoading}
+        error={aggregatedError}
+        models={aggregatedModels}
+        onRetry={() => void loadAggregatedModels()}
+      />
 
       <Card>
         <CardHeader>

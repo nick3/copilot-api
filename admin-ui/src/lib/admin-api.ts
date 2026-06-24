@@ -229,20 +229,141 @@ export type ModelAliasSpec = {
   allowOriginal?: boolean
 }
 
+export type ProviderType = "anthropic" | "openai-compatible" | "openai-responses"
+
+export type ProviderAuthType = "authorization" | "oauth2" | "x-api-key"
+
+export type ToolContentSupportType = "array" | "image" | "pdf"
+
+export type TokenUsagePricingTier = {
+  cachedInput?: number
+  cacheCreationInput?: number
+  explicitCachedInput?: number
+  input?: number
+  maxInputTokens?: number
+  output?: number
+}
+
+export type TokenUsagePricingConfig = TokenUsagePricingTier & {
+  tiers?: Array<TokenUsagePricingTier>
+}
+
 export type ProviderModelConfig = {
   temperature?: number
   topP?: number
   topK?: number
+  extraBody?: Record<string, unknown>
+  contextCache?: boolean
+  pricing?: TokenUsagePricingConfig
+  supportPdf?: boolean
+  toolContentSupportType?: Array<ToolContentSupportType>
 }
 
 export type ProviderConfig = {
-  type?: string
+  type?: ProviderType
   enabled?: boolean
   baseUrl?: string
   apiKey?: string
-  authType?: "authorization" | "x-api-key"
+  authType?: ProviderAuthType
+  pricingCurrency?: string
   adjustInputTokens?: boolean
   models?: Record<string, ProviderModelConfig>
+}
+
+export type TokenUsagePeriod = "day" | "week" | "month"
+
+export type TokenUsageSource = "copilot" | "provider"
+
+export type TokenUsageEndpoint =
+  | "chat_completions"
+  | "embeddings"
+  | "messages"
+  | "provider_messages"
+  | "responses"
+
+export type TokenUsageCost = {
+  amount: number
+  currency: string
+  total_cost_nanos: number
+}
+
+export type TokenUsageEventCost = TokenUsageCost & {
+  source: string
+}
+
+export type TokenUsageTotals = {
+  cache_creation_input_tokens: number
+  cache_read_input_tokens: number
+  costs: Array<TokenUsageCost>
+  input_tokens: number
+  output_tokens: number
+  request_count: number
+  total_nano_aiu: number | null
+  total_tokens: number
+}
+
+export type TokenUsageModelSummary = TokenUsageTotals & {
+  model: string
+}
+
+export type TokenUsageRange = {
+  end_ms: number
+  end_utc: string
+  start_ms: number
+  start_utc: string
+}
+
+export type TokenUsageSummary = {
+  byModel: Array<TokenUsageModelSummary>
+  period: TokenUsagePeriod
+  range: TokenUsageRange
+  totals: TokenUsageTotals
+}
+
+export type TokenUsageDailyBucket = {
+  byModel: Array<TokenUsageModelSummary>
+  date: string
+  end_ms: number
+  start_ms: number
+  totals: TokenUsageTotals
+}
+
+export type TokenUsageDailySummary = {
+  byModel: Array<TokenUsageModelSummary>
+  days: Array<TokenUsageDailyBucket>
+  period: TokenUsagePeriod
+  range: TokenUsageRange
+  totals: TokenUsageTotals
+}
+
+export type TokenUsageEventRecord = {
+  cache_creation_input_tokens: number
+  cache_read_input_tokens: number
+  cost: TokenUsageEventCost | null
+  created_at_ms: number
+  created_at_utc: string
+  endpoint: TokenUsageEndpoint
+  id: number
+  input_tokens: number
+  model: string
+  output_tokens: number
+  provider_name: string | null
+  session_id: string
+  source: TokenUsageSource
+  total_nano_aiu: number | null
+  total_tokens: number
+  trace_id: string
+  user_id: string
+}
+
+export type TokenUsageEventsPage = {
+  items: Array<TokenUsageEventRecord>
+  page: number
+  page_size: number
+  period: TokenUsagePeriod
+  range: TokenUsageRange
+  total: number
+  total_pages: number
 }
 
 export type AdminConfig = {
@@ -281,6 +402,23 @@ export type AdminConfigResponse = AdminConfig & {
 
 export type AdminModelsResponse = {
   items: string[]
+}
+
+export type AggregatedModelItem = Record<string, unknown> & {
+  id: string
+  object: string
+  type?: string
+  created?: number
+  created_at?: string
+  owned_by?: string
+  display_name?: string
+  claude_model_id?: string
+}
+
+export type AggregatedModelsResponse = {
+  object: "list"
+  data: Array<AggregatedModelItem>
+  has_more: boolean
 }
 
 export type AdminModelTokenPrices = {
@@ -658,6 +796,12 @@ export async function getAdminModelDetails(): Promise<AdminModelsDetailsResponse
   }
 }
 
+export async function getAdminAggregatedModels(): Promise<AggregatedModelsResponse> {
+  return fetchAdminJson<AggregatedModelsResponse>(
+    "/api/admin/models/aggregated",
+  )
+}
+
 export async function refreshAllModels(): Promise<{
   ok: boolean
   failedCount: number
@@ -693,6 +837,38 @@ export async function getAdminPremiumStats(params: {
     daily: response.daily.map(normalizeDailyStatsItem),
     by_account: response.by_account.map(normalizeDailyAccountStatsItem),
   }
+}
+
+export async function getTokenUsageSummary(params: {
+  period: TokenUsagePeriod
+}): Promise<TokenUsageSummary> {
+  const q = new URLSearchParams()
+  q.set("period", params.period)
+  return fetchAdminJson<TokenUsageSummary>(`/api/admin/token-usage?${q.toString()}`)
+}
+
+export async function getTokenUsageDaily(params: {
+  period: TokenUsagePeriod
+}): Promise<TokenUsageDailySummary> {
+  const q = new URLSearchParams()
+  q.set("period", params.period)
+  return fetchAdminJson<TokenUsageDailySummary>(
+    `/api/admin/token-usage/daily?${q.toString()}`,
+  )
+}
+
+export async function getTokenUsageEvents(params: {
+  page: number
+  pageSize: number
+  period: TokenUsagePeriod
+}): Promise<TokenUsageEventsPage> {
+  const q = new URLSearchParams()
+  q.set("period", params.period)
+  q.set("page", String(params.page))
+  q.set("page_size", String(params.pageSize))
+  return fetchAdminJson<TokenUsageEventsPage>(
+    `/api/admin/token-usage/events?${q.toString()}`,
+  )
 }
 
 export async function getDevMode(): Promise<DevModeState> {
