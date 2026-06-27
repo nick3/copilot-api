@@ -703,3 +703,68 @@ describe("responses handler oversized image sanitization", () => {
     ).toBe(true)
   })
 })
+
+describe("responses handler Codex internal chat metadata stripping", () => {
+  test("strips internal_chat_message_metadata_passthrough from every input item before forwarding upstream", async () => {
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("/responses", "gpt-5.5"))
+
+    let forwardedPayload: ResponsesPayload | undefined
+    const fetchMock = mock((_url: string, options?: FetchOptions) => {
+      forwardedPayload = JSON.parse(options?.body as string) as ResponsesPayload
+      return Promise.resolve(
+        new Response(JSON.stringify(buildResponsesResult("gpt-5.5", "ok")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    // Mirrors a Codex >= v0.142.x turn payload: each input item carries the
+    // turn-id passthrough field that GitHub Copilot's upstream rejects.
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-5.5",
+          input: [
+            {
+              type: "message",
+              role: "user",
+              content: [{ type: "input_text", text: "test message" }],
+              internal_chat_message_metadata_passthrough: {
+                turn_id: "turn-1",
+              },
+            },
+            {
+              type: "function_call",
+              call_id: "call-1",
+              name: "shell",
+              arguments: "{}",
+              internal_chat_message_metadata_passthrough: {
+                turn_id: "turn-1",
+              },
+            },
+          ],
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+
+    const forwardedInput = forwardedPayload?.input as Array<
+      Record<string, unknown>
+    >
+    expect(Array.isArray(forwardedInput)).toBe(true)
+    for (const item of forwardedInput) {
+      expect("internal_chat_message_metadata_passthrough" in item).toBe(false)
+    }
+    // Real content survives the strip.
+    expect(forwardedInput[0].role).toBe("user")
+    expect(forwardedInput[1].name).toBe("shell")
+  })
+})

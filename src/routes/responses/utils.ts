@@ -410,6 +410,30 @@ export const removeWebSearchTool = (payload: ResponsesPayload): void => {
   })
 }
 
+// Codex (>= v0.142.x) stamps every Responses input item with this field to
+// carry a turn id. GitHub Copilot's upstream `/responses` endpoint rejects
+// unknown parameters, so the request fails with a `bad_request` error
+// ("Unknown parameter: ..."). Strip it from each input item before forwarding
+// upstream.
+export const INTERNAL_CHAT_METADATA_PASSTHROUGH_KEY =
+  "internal_chat_message_metadata_passthrough"
+
+export const stripInternalChatMetadataPassthrough = (
+  payload: ResponsesPayload,
+): void => {
+  if (!Array.isArray(payload.input) || payload.input.length === 0) return
+
+  for (const item of payload.input) {
+    if (
+      typeof item === "object"
+      && item !== null
+      && INTERNAL_CHAT_METADATA_PASSTHROUGH_KEY in item
+    ) {
+      delete item[INTERNAL_CHAT_METADATA_PASSTHROUGH_KEY]
+    }
+  }
+}
+
 type StreamChunk = {
   id?: string
   event?: string

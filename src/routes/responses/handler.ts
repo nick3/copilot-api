@@ -61,6 +61,7 @@ import {
   isAsyncIterable,
   removeWebSearchTool,
   sanitizeOversizedInputImages,
+  stripInternalChatMetadataPassthrough,
 } from "./utils"
 import consola from "consola"
 
@@ -107,6 +108,7 @@ export const handleResponses = async (c: Context) => {
   if (!isResponsesApiWebSearchEnabled()) {
     removeWebSearchTool(payload)
   }
+  stripInternalChatMetadataPassthrough(payload)
   compactInputByLatestCompaction(payload)
 
   const streamRequested = Boolean(payload.stream)
