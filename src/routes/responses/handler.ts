@@ -61,6 +61,7 @@ import {
   isAsyncIterable,
   removeWebSearchTool,
   sanitizeOversizedInputImages,
+  stripInternalChatMetadataPassthrough,
 } from "./utils"
 import consola from "consola"
 
@@ -80,6 +81,7 @@ export const handleResponses = async (c: Context) => {
       `Resolved model mapping: ${requestedModel} -> ${payload.model}`,
     )
   }
+  stripInternalChatMetadataPassthrough(payload)
 
   const providerModelAlias = parseProviderModelAlias(payload.model)
   if (providerModelAlias) {

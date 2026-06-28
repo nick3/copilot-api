@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import fs from "node:fs/promises"
+import path from "node:path"
 
 import "./shared-admin-db-test-home"
 
@@ -28,14 +30,16 @@ const [
   { accountsManager },
   { getAdminDb },
   { state },
-  { setModelMappings, setProviderConfig },
+  { mergeConfigWithDefaults, setModelMappings, setProviderConfig },
+  { PATHS },
   { responsesRoutes },
-  { responsesUtilsDependencies },
+  { INTERNAL_CHAT_METADATA_PASSTHROUGH_KEY, responsesUtilsDependencies },
 ] = await Promise.all([
   import("~/lib/accounts-manager"),
   import("~/lib/admin-db"),
   import("~/lib/state"),
   import("~/lib/config"),
+  import("~/lib/paths"),
   import("~/routes/responses/route"),
   import("~/routes/responses/utils"),
 ])
@@ -61,6 +65,20 @@ const originalContextManagementEnabled =
   responsesUtilsDependencies.isResponsesApiContextManagementEnabled
 const originalModelCompactThreshold =
   responsesUtilsDependencies.getModelResponsesApiCompactThreshold
+let configBeforeTest: string | null | undefined
+
+const readConfigText = async (): Promise<string | null> =>
+  await fs.readFile(PATHS.CONFIG_PATH, "utf8").catch(() => null)
+
+const restoreConfigText = async (configText: string | null): Promise<void> => {
+  if (configText === null) {
+    await fs.rm(PATHS.CONFIG_PATH, { force: true })
+  } else {
+    await fs.mkdir(path.dirname(PATHS.CONFIG_PATH), { recursive: true })
+    await fs.writeFile(PATHS.CONFIG_PATH, configText, "utf8")
+  }
+  mergeConfigWithDefaults()
+}
 
 function buildAccount(): AccountRuntime {
   return {
@@ -159,7 +177,9 @@ function buildResponsesResult(model: string, text: string) {
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  configBeforeTest = await readConfigText()
+
   providerUsageRecords.length = 0
 
   state.manualApprove = false
@@ -174,7 +194,7 @@ beforeEach(() => {
   setModelMappings({})
 })
 
-afterEach(() => {
+afterEach(async () => {
   fetchHolder.fetch = originalFetch
   accountsManager.selectAccountForRequest = originalSelect
   accountsManager.finalizeQuota = originalFinalize
@@ -185,8 +205,10 @@ afterEach(() => {
   responsesUtilsDependencies.getModelResponsesApiCompactThreshold =
     originalModelCompactThreshold
 
-  setModelMappings({})
-  setProviderConfig("acme", { enabled: false })
+  if (configBeforeTest !== undefined) {
+    await restoreConfigText(configBeforeTest)
+    configBeforeTest = undefined
+  }
 })
 
 describe("responses handler model mapping", () => {
@@ -327,8 +349,68 @@ describe("responses handler provider alias routing", () => {
       output_tokens: 1,
       total_tokens: 2,
     })
+  })
 
-    setProviderConfig("acme", { enabled: false })
+  test("strips Codex internal chat metadata before forwarding provider aliases", async () => {
+    setProviderConfig("acme", {
+      type: "openai-responses",
+      enabled: true,
+      baseUrl: "https://acme.example.com",
+      apiKey: "acme-key",
+      authType: "authorization",
+    })
+
+    let providerForwardedPayload: ResponsesPayload | undefined
+    const fetchMock = mock((_url: string, options?: FetchOptions) => {
+      providerForwardedPayload = JSON.parse(
+        options?.body as string,
+      ) as ResponsesPayload
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildResponsesResult("gpt-acme", "from acme")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "acme/gpt-acme",
+          input: [
+            {
+              type: "message",
+              role: "user",
+              content: [{ type: "input_text", text: "hello" }],
+              [INTERNAL_CHAT_METADATA_PASSTHROUGH_KEY]: {
+                turn_id: "turn-provider",
+              },
+            },
+          ],
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(providerForwardedPayload?.model).toBe("gpt-acme")
+
+    const forwardedInput = providerForwardedPayload?.input as Array<
+      Record<string, unknown>
+    >
+    expect(INTERNAL_CHAT_METADATA_PASSTHROUGH_KEY in forwardedInput[0]).toBe(
+      false,
+    )
+    expect(forwardedInput[0].content).toEqual([
+      { type: "input_text", text: "hello" },
+    ])
   })
 })
 
@@ -701,5 +783,70 @@ describe("responses handler oversized image sanitization", () => {
     expect(
       forwardedImage?.image_url?.startsWith("data:image/png;base64,"),
     ).toBe(true)
+  })
+})
+
+describe("responses handler Codex internal chat metadata stripping", () => {
+  test("strips internal_chat_message_metadata_passthrough from every input item before forwarding upstream", async () => {
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("/responses", "gpt-5.5"))
+
+    let forwardedPayload: ResponsesPayload | undefined
+    const fetchMock = mock((_url: string, options?: FetchOptions) => {
+      forwardedPayload = JSON.parse(options?.body as string) as ResponsesPayload
+      return Promise.resolve(
+        new Response(JSON.stringify(buildResponsesResult("gpt-5.5", "ok")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    // Mirrors a Codex >= v0.142.x turn payload: each input item carries the
+    // turn-id passthrough field that GitHub Copilot's upstream rejects.
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-5.5",
+          input: [
+            {
+              type: "message",
+              role: "user",
+              content: [{ type: "input_text", text: "test message" }],
+              internal_chat_message_metadata_passthrough: {
+                turn_id: "turn-1",
+              },
+            },
+            {
+              type: "function_call",
+              call_id: "call-1",
+              name: "shell",
+              arguments: "{}",
+              internal_chat_message_metadata_passthrough: {
+                turn_id: "turn-1",
+              },
+            },
+          ],
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+
+    const forwardedInput = forwardedPayload?.input as Array<
+      Record<string, unknown>
+    >
+    expect(Array.isArray(forwardedInput)).toBe(true)
+    for (const item of forwardedInput) {
+      expect("internal_chat_message_metadata_passthrough" in item).toBe(false)
+    }
+    // Real content survives the strip.
+    expect(forwardedInput[0].role).toBe("user")
+    expect(forwardedInput[1].name).toBe("shell")
   })
 })
