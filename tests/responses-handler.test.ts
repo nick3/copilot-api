@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import fs from "node:fs/promises"
+import path from "node:path"
 
 import "./shared-admin-db-test-home"
 
@@ -28,7 +30,8 @@ const [
   { accountsManager },
   { getAdminDb },
   { state },
-  { setModelMappings, setProviderConfig },
+  { mergeConfigWithDefaults, setModelMappings, setProviderConfig },
+  { PATHS },
   { responsesRoutes },
   { INTERNAL_CHAT_METADATA_PASSTHROUGH_KEY, responsesUtilsDependencies },
 ] = await Promise.all([
@@ -36,6 +39,7 @@ const [
   import("~/lib/admin-db"),
   import("~/lib/state"),
   import("~/lib/config"),
+  import("~/lib/paths"),
   import("~/routes/responses/route"),
   import("~/routes/responses/utils"),
 ])
@@ -61,6 +65,20 @@ const originalContextManagementEnabled =
   responsesUtilsDependencies.isResponsesApiContextManagementEnabled
 const originalModelCompactThreshold =
   responsesUtilsDependencies.getModelResponsesApiCompactThreshold
+let configBeforeTest: string | null | undefined
+
+const readConfigText = async (): Promise<string | null> =>
+  await fs.readFile(PATHS.CONFIG_PATH, "utf8").catch(() => null)
+
+const restoreConfigText = async (configText: string | null): Promise<void> => {
+  if (configText === null) {
+    await fs.rm(PATHS.CONFIG_PATH, { force: true })
+  } else {
+    await fs.mkdir(path.dirname(PATHS.CONFIG_PATH), { recursive: true })
+    await fs.writeFile(PATHS.CONFIG_PATH, configText, "utf8")
+  }
+  mergeConfigWithDefaults()
+}
 
 function buildAccount(): AccountRuntime {
   return {
@@ -159,7 +177,9 @@ function buildResponsesResult(model: string, text: string) {
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  configBeforeTest = await readConfigText()
+
   providerUsageRecords.length = 0
 
   state.manualApprove = false
@@ -174,7 +194,7 @@ beforeEach(() => {
   setModelMappings({})
 })
 
-afterEach(() => {
+afterEach(async () => {
   fetchHolder.fetch = originalFetch
   accountsManager.selectAccountForRequest = originalSelect
   accountsManager.finalizeQuota = originalFinalize
@@ -185,8 +205,10 @@ afterEach(() => {
   responsesUtilsDependencies.getModelResponsesApiCompactThreshold =
     originalModelCompactThreshold
 
-  setModelMappings({})
-  setProviderConfig("acme", { enabled: false })
+  if (configBeforeTest !== undefined) {
+    await restoreConfigText(configBeforeTest)
+    configBeforeTest = undefined
+  }
 })
 
 describe("responses handler model mapping", () => {
@@ -327,8 +349,6 @@ describe("responses handler provider alias routing", () => {
       output_tokens: 1,
       total_tokens: 2,
     })
-
-    setProviderConfig("acme", { enabled: false })
   })
 
   test("strips Codex internal chat metadata before forwarding provider aliases", async () => {
