@@ -10,6 +10,7 @@ import type { ResponsesPayload } from "~/services/copilot/create-responses"
 import type { Model } from "~/services/copilot/get-models"
 
 const actualTokenUsageModule = await import("~/lib/token-usage")
+const { closeUsageStore, getTokenUsageEventsPage } = actualTokenUsageModule
 type ProviderUsageRecorderOptions = Parameters<
   (typeof actualTokenUsageModule)["createProviderTokenUsageRecorder"]
 >[0]
@@ -65,6 +66,7 @@ const originalContextManagementEnabled =
   responsesUtilsDependencies.isResponsesApiContextManagementEnabled
 const originalModelCompactThreshold =
   responsesUtilsDependencies.getModelResponsesApiCompactThreshold
+const DB_PATH_ENV = "COPILOT_API_SQLITE_DB_PATH"
 let configBeforeTest: string | null | undefined
 
 const readConfigText = async (): Promise<string | null> =>
@@ -178,6 +180,8 @@ function buildResponsesResult(model: string, text: string) {
 }
 
 beforeEach(async () => {
+  process.env[DB_PATH_ENV] = ":memory:"
+  await closeUsageStore()
   configBeforeTest = await readConfigText()
 
   providerUsageRecords.length = 0
@@ -199,6 +203,8 @@ afterEach(async () => {
   accountsManager.selectAccountForRequest = originalSelect
   accountsManager.finalizeQuota = originalFinalize
   accountsManager.markAccountFailed = originalMarkFailed
+  await closeUsageStore()
+  Reflect.deleteProperty(process.env, DB_PATH_ENV)
 
   responsesUtilsDependencies.isResponsesApiContextManagementEnabled =
     originalContextManagementEnabled
@@ -287,6 +293,158 @@ describe("responses handler model mapping", () => {
 
     expect(response.status).toBe(200)
     expect(selectionCandidates?.[0]?.modelId).toBe("gpt-original")
+  })
+})
+
+describe("responses handler Copilot AIU token usage", () => {
+  test("records Copilot AIU from non-streaming native Responses results", async () => {
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("/responses", "gpt-test"))
+
+    const fetchMock = mock((_url: string, _opts?: FetchOptions) => {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ...buildResponsesResult("gpt-test", "ok"),
+            copilot_usage: {
+              total_nano_aiu: 1_234_000_000,
+            },
+            usage: {
+              input_tokens: 5,
+              input_tokens_details: {
+                cached_tokens: 1,
+              },
+              output_tokens: 2,
+              total_tokens: 7,
+            },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-test",
+          input: "hello",
+        }),
+      }),
+    )
+    await response.text()
+
+    const usageEvents = await getTokenUsageEventsPage({
+      page: 1,
+      pageSize: 10,
+      period: "day",
+    })
+
+    expect(response.status).toBe(200)
+    expect(usageEvents.items).toHaveLength(1)
+    expect(usageEvents.items[0]).toMatchObject({
+      cache_read_input_tokens: 1,
+      cost: {
+        amount: 0.01234,
+        currency: "USD",
+        source: "copilot_aiu",
+        total_cost_nanos: 12_340_000,
+      },
+      endpoint: "responses",
+      input_tokens: 4,
+      model: "gpt-test",
+      output_tokens: 2,
+      source: "copilot",
+      total_nano_aiu: 1_234_000_000,
+      total_tokens: 7,
+    })
+  })
+
+  test("records Copilot AIU from streaming native Responses terminal events", async () => {
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("/responses", "gpt-test"))
+
+    const fetchMock = mock((_url: string, _opts?: FetchOptions) => {
+      return Promise.resolve(
+        new Response(
+          [
+            "event: response.completed",
+            `data: ${JSON.stringify({
+              copilot_usage: {
+                total_nano_aiu: 2_500_000_000,
+              },
+              response: {
+                ...buildResponsesResult("gpt-test", "ok"),
+                usage: {
+                  input_tokens: 10,
+                  input_tokens_details: {
+                    cached_tokens: 4,
+                  },
+                  output_tokens: 3,
+                  total_tokens: 13,
+                },
+              },
+              sequence_number: 1,
+              type: "response.completed",
+            })}`,
+            "",
+            "",
+          ].join("\n"),
+          {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          },
+        ),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-test",
+          input: "hello",
+          stream: true,
+        }),
+      }),
+    )
+    await response.text()
+
+    const usageEvents = await getTokenUsageEventsPage({
+      page: 1,
+      pageSize: 10,
+      period: "day",
+    })
+
+    expect(response.status).toBe(200)
+    expect(usageEvents.items).toHaveLength(1)
+    expect(usageEvents.items[0]).toMatchObject({
+      cache_read_input_tokens: 4,
+      cost: {
+        amount: 0.025,
+        currency: "USD",
+        source: "copilot_aiu",
+        total_cost_nanos: 25_000_000,
+      },
+      endpoint: "responses",
+      input_tokens: 6,
+      model: "gpt-test",
+      output_tokens: 3,
+      source: "copilot",
+      total_nano_aiu: 2_500_000_000,
+      total_tokens: 13,
+    })
   })
 })
 

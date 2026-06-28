@@ -437,7 +437,7 @@ export const stripInternalChatMetadataPassthrough = (
 type StreamChunk = {
   id?: string
   event?: string
-  data?: string
+  data?: string | Promise<string>
 }
 
 export function getStreamChunkFields(chunk: unknown): StreamChunk {

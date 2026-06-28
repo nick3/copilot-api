@@ -62,9 +62,12 @@ import {
 } from "~/routes/messages/responses-item-ownership"
 import {
   createCopilotTokenUsageRecorder,
+  mergeCopilotAiuUsage,
   mergeAnthropicUsage,
   normalizeAnthropicUsage,
+  normalizeOpenAIUsage,
   normalizeOptionalToken,
+  normalizeResponsesUsage,
   type UsageTokens,
 } from "~/lib/token-usage"
 import {
@@ -744,6 +747,12 @@ const handleWithChatCompletions = async (params: {
   })
 
   instr.initiator = effectiveInitiator
+  const recordTokenUsage = createCopilotTokenUsageRecorder({
+    endpoint: "chat_completions",
+    fallbackSessionId: sessionId,
+    model: selectedModel.id,
+    sessionId: instr.promptCacheKey,
+  })
 
   let response: ChatCompletionsResult
 
@@ -771,6 +780,7 @@ const handleWithChatCompletions = async (params: {
       c,
       response,
       instr,
+      recordTokenUsage,
     })
   }
 
@@ -799,6 +809,7 @@ const handleWithChatCompletions = async (params: {
       instr,
       estimatedInputTokens,
       historicalUsage: historicalUsage ?? undefined,
+      recordTokenUsage,
     }),
   )
 }
@@ -837,6 +848,12 @@ const handleWithWebSearchResponsesApi = async (params: {
   const ctx = toAccountContext(instr.account)
 
   instr.initiator = effectiveInitiator
+  const recordTokenUsage = createCopilotTokenUsageRecorder({
+    endpoint: "responses",
+    fallbackSessionId: sessionId,
+    model: selectedModel.id,
+    sessionId: instr.promptCacheKey,
+  })
 
   debugJson(
     logger,
@@ -880,6 +897,7 @@ const handleWithWebSearchResponsesApi = async (params: {
           response,
           originalPayload: anthropicPayload,
           instr,
+          recordTokenUsage,
         }),
       )
     }
@@ -889,6 +907,7 @@ const handleWithWebSearchResponsesApi = async (params: {
       response,
       originalPayload: anthropicPayload,
       instr,
+      recordTokenUsage,
     })
   }
 
@@ -897,6 +916,7 @@ const handleWithWebSearchResponsesApi = async (params: {
     result: response,
     originalPayload: anthropicPayload,
     instr,
+    recordTokenUsage,
   })
 }
 
@@ -947,6 +967,12 @@ const handleWithResponsesApi = async (params: {
   const ctx = toAccountContext(instr.account)
 
   instr.initiator = effectiveInitiator
+  const recordTokenUsage = createCopilotTokenUsageRecorder({
+    endpoint: "responses",
+    fallbackSessionId: sessionId,
+    model: selectedModel.id,
+    sessionId: instr.promptCacheKey,
+  })
 
   let response: Awaited<ReturnType<typeof createResponses>>
 
@@ -1001,6 +1027,7 @@ const handleWithResponsesApi = async (params: {
         instr,
         estimatedInputTokens,
         historicalUsage: historicalUsage ?? undefined,
+        recordTokenUsage,
       }),
     )
   }
@@ -1009,6 +1036,7 @@ const handleWithResponsesApi = async (params: {
     c,
     result: response as ResponsesResult,
     instr,
+    recordTokenUsage,
   })
 }
 
@@ -1171,11 +1199,16 @@ async function handleChatCompletionsNonStreaming(params: {
   c: Context
   response: ChatCompletionResponse
   instr: InstrumentationContext
+  recordTokenUsage: (usage: UsageTokens) => void
 }): Promise<Response> {
-  const { c, response, instr } = params
+  const { c, response, instr, recordTokenUsage } = params
 
   let httpStatus = 200
   const usage: NormalizedUsage = normalizeChatCompletionsUsage(response.usage)
+  const tokenUsage = mergeCopilotAiuUsage(
+    normalizeOpenAIUsage(response.usage),
+    response.copilot_usage,
+  )
 
   let errorName: string | undefined
   let errorStatus: number | undefined
@@ -1193,6 +1226,7 @@ async function handleChatCompletionsNonStreaming(params: {
     const anthropicResponse = translateToAnthropic(response)
     debugJson(logger, "Translated Anthropic response:", anthropicResponse)
 
+    recordTokenUsage(tokenUsage)
     return c.json(anthropicResponse)
   } catch (error) {
     const details = await extractErrorObservability(error)
@@ -1239,12 +1273,20 @@ async function streamChatCompletionsAndLog(params: {
   instr: InstrumentationContext
   estimatedInputTokens?: number
   historicalUsage?: NormalizedUsage
+  recordTokenUsage: (usage: UsageTokens) => void
 }): Promise<void> {
-  const { stream, response, instr, estimatedInputTokens, historicalUsage } =
-    params
+  const {
+    stream,
+    response,
+    instr,
+    estimatedInputTokens,
+    historicalUsage,
+    recordTokenUsage,
+  } = params
 
   let ttfbMs: number | undefined
   let lastUsage: NormalizedUsage = {}
+  let tokenUsage: UsageTokens = {}
 
   let errorName: string | undefined
   let errorStatus: number | undefined
@@ -1288,6 +1330,12 @@ async function streamChatCompletionsAndLog(params: {
       if (chunk.usage) {
         lastUsage = normalizeChatCompletionsUsage(chunk.usage)
       }
+      if (chunk.usage || chunk.copilot_usage) {
+        tokenUsage = mergeCopilotAiuUsage(
+          normalizeOpenAIUsage(chunk.usage),
+          chunk.copilot_usage,
+        )
+      }
 
       const events = translateChunkToAnthropicEvents(chunk, streamState)
       for (const event of events) {
@@ -1322,6 +1370,8 @@ async function streamChatCompletionsAndLog(params: {
       premiumUnlimitedAfter,
       premiumRemainingDiff,
     } = await finalizeQuotaAndGetPremiumSnapshot(instr)
+
+    recordTokenUsage(tokenUsage)
 
     insertRequestLog(instr, {
       finishedAtMs,
@@ -1391,8 +1441,9 @@ async function handleWebSearchResponsesStreamToJson(params: {
   response: AsyncIterable<unknown>
   originalPayload: AnthropicMessagesPayload
   instr: InstrumentationContext
+  recordTokenUsage: (usage: UsageTokens) => void
 }): Promise<Response> {
-  const { c, response, originalPayload, instr } = params
+  const { c, response, originalPayload, instr, recordTokenUsage } = params
 
   try {
     const result = await collectWebSearchResponsesStreamResult({
@@ -1404,6 +1455,7 @@ async function handleWebSearchResponsesStreamToJson(params: {
       result,
       originalPayload,
       instr,
+      recordTokenUsage,
     })
   } catch (error) {
     return await handleResponsesCreateError({
@@ -1419,11 +1471,13 @@ async function streamWebSearchResponsesAndLog(params: {
   response: AsyncIterable<unknown>
   originalPayload: AnthropicMessagesPayload
   instr: InstrumentationContext
+  recordTokenUsage: (usage: UsageTokens) => void
 }): Promise<void> {
-  const { stream, response, originalPayload, instr } = params
+  const { stream, response, originalPayload, instr, recordTokenUsage } = params
 
   let ttfbMs: number | undefined
   let lastUsage: NormalizedUsage = {}
+  let tokenUsage: UsageTokens = {}
 
   let errorName: string | undefined
   let errorStatus: number | undefined
@@ -1437,6 +1491,10 @@ async function streamWebSearchResponsesAndLog(params: {
     })
     ttfbMs = Date.now() - instr.startedAtMs
     lastUsage = extractResponsesUsageFromResult(result)
+    tokenUsage = mergeCopilotAiuUsage(
+      normalizeResponsesUsage(result.usage),
+      result.copilot_usage,
+    )
 
     const responsePayload = {
       ...originalPayload,
@@ -1478,6 +1536,8 @@ async function streamWebSearchResponsesAndLog(params: {
       premiumRemainingDiff,
     } = await finalizeQuotaAndGetPremiumSnapshot(instr)
 
+    recordTokenUsage(tokenUsage)
+
     insertRequestLog(instr, {
       finishedAtMs,
       durationMs: finishedAtMs - instr.startedAtMs,
@@ -1501,11 +1561,13 @@ async function handleWebSearchResponsesNonStreaming(params: {
   result: ResponsesResult
   originalPayload: AnthropicMessagesPayload
   instr: InstrumentationContext
+  recordTokenUsage: (usage: UsageTokens) => void
 }): Promise<Response> {
-  const { c, result, originalPayload, instr } = params
+  const { c, result, originalPayload, instr, recordTokenUsage } = params
 
   let httpStatus = 200
   let usage: NormalizedUsage = {}
+  let tokenUsage: UsageTokens = {}
 
   let errorName: string | undefined
   let errorStatus: number | undefined
@@ -1516,6 +1578,10 @@ async function handleWebSearchResponsesNonStreaming(params: {
 
   try {
     usage = extractResponsesUsageFromResult(result)
+    tokenUsage = mergeCopilotAiuUsage(
+      normalizeResponsesUsage(result.usage),
+      result.copilot_usage,
+    )
     const responsePayload = {
       ...originalPayload,
       model: instr.clientModel,
@@ -1532,6 +1598,7 @@ async function handleWebSearchResponsesNonStreaming(params: {
       result,
     )
 
+    recordTokenUsage(tokenUsage)
     return c.json(response)
   } catch (error) {
     const details = await extractErrorObservability(error)
@@ -1575,11 +1642,13 @@ async function handleResponsesNonStreaming(params: {
   c: Context
   result: ResponsesResult
   instr: InstrumentationContext
+  recordTokenUsage: (usage: UsageTokens) => void
 }): Promise<Response> {
-  const { c, result, instr } = params
+  const { c, result, instr, recordTokenUsage } = params
 
   let httpStatus = 200
   let usage: NormalizedUsage = {}
+  let tokenUsage: UsageTokens = {}
 
   let errorName: string | undefined
   let errorStatus: number | undefined
@@ -1590,6 +1659,10 @@ async function handleResponsesNonStreaming(params: {
 
   try {
     usage = extractResponsesUsageFromResult(result)
+    tokenUsage = mergeCopilotAiuUsage(
+      normalizeResponsesUsage(result.usage),
+      result.copilot_usage,
+    )
     const responseOwnerKeys = extractResponsesResultOwnerKeys(result)
     instr.responsesItemOwnerRecordedKeys = responseOwnerKeys
 
@@ -1609,6 +1682,7 @@ async function handleResponsesNonStreaming(params: {
       )
     }
 
+    recordTokenUsage(tokenUsage)
     return response
   } catch (error) {
     const details = await extractErrorObservability(error)
@@ -1758,6 +1832,23 @@ function getResponsesStreamEventError(event: ResponseStreamEvent):
   return undefined
 }
 
+function getResponsesStreamTokenUsage(
+  event: ResponseStreamEvent,
+): UsageTokens | undefined {
+  if (
+    event.type !== "response.completed"
+    && event.type !== "response.incomplete"
+    && event.type !== "response.failed"
+  ) {
+    return undefined
+  }
+
+  return mergeCopilotAiuUsage(
+    normalizeResponsesUsage(event.response.usage),
+    event.copilot_usage ?? event.response.copilot_usage,
+  )
+}
+
 async function writeTranslatedAnthropicStreamEvents(
   stream: StreamSseStream,
   events: Array<AnthropicStreamEventData>,
@@ -1778,11 +1869,14 @@ async function streamResponsesAndLog(params: {
   instr: InstrumentationContext
   estimatedInputTokens?: number
   historicalUsage?: NormalizedUsage
+  recordTokenUsage: (usage: UsageTokens) => void
 }): Promise<void> {
-  const { stream, response, instr } = params
+  const { stream, response, instr, recordTokenUsage } = params
 
   let ttfbMs: number | undefined
   let lastUsage: NormalizedUsage = {}
+  let tokenUsage: UsageTokens = {}
+  let tokenUsageRecorded = false
 
   let errorName: string | undefined
   let errorStatus: number | undefined
@@ -1804,7 +1898,8 @@ async function streamResponsesAndLog(params: {
         continue
       }
 
-      const data = (chunk as { data?: string }).data
+      const rawData = (chunk as { data?: string | Promise<string> }).data
+      const data = typeof rawData === "string" ? rawData : await rawData
       if (!data) {
         continue
       }
@@ -1824,6 +1919,12 @@ async function streamResponsesAndLog(params: {
       const u = extractResponsesUsageFromStreamEvent(parsed)
       if (u.usageJson) {
         lastUsage = u
+      }
+      const usageForTokenStore = getResponsesStreamTokenUsage(parsed)
+      if (usageForTokenStore) {
+        tokenUsage = usageForTokenStore
+        recordTokenUsage(tokenUsage)
+        tokenUsageRecorded = true
       }
 
       const events = translateResponsesStreamEvent(parsed, streamState)
@@ -1870,6 +1971,10 @@ async function streamResponsesAndLog(params: {
       premiumUnlimitedAfter,
       premiumRemainingDiff,
     } = await finalizeQuotaAndGetPremiumSnapshot(instr)
+
+    if (!tokenUsageRecorded) {
+      recordTokenUsage(tokenUsage)
+    }
 
     insertRequestLog(instr, {
       finishedAtMs,

@@ -12,6 +12,7 @@ import type {
 
 import {
   buildSyntheticStreamEvents,
+  collectWebSearchResponsesStreamResult,
   handleWebSearchViaResponses,
   hasWebSearchServerTool,
   isWebSearchOnlyRequest,
@@ -275,6 +276,9 @@ async function* makeResponsesStream(result: ResponsesResult) {
   yield {
     event: "response.completed",
     data: JSON.stringify({
+      copilot_usage: {
+        total_nano_aiu: 987_000_000,
+      },
       response: {
         ...result,
         output: [],
@@ -426,6 +430,15 @@ describe("resolveWebSearchRoute", () => {
 })
 
 describe("handleWebSearchViaResponses", () => {
+  it("preserves Copilot AIU from terminal Responses stream events", async () => {
+    const result = await collectWebSearchResponsesStreamResult({
+      logger: consola,
+      upstreamResponse: makeResponsesStream(makeResponsesResult()),
+    })
+
+    expect(result.copilot_usage?.total_nano_aiu).toBe(987_000_000)
+  })
+
   it("switches model, runs Responses web_search, and reconstructs blocks", async () => {
     let sentPayload: ResponsesPayload | undefined
     webSearchFlowDependencies.createResponses = (payload: ResponsesPayload) => {
