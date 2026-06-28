@@ -30,7 +30,7 @@ const [
   { state },
   { setModelMappings, setProviderConfig },
   { responsesRoutes },
-  { responsesUtilsDependencies },
+  { INTERNAL_CHAT_METADATA_PASSTHROUGH_KEY, responsesUtilsDependencies },
 ] = await Promise.all([
   import("~/lib/accounts-manager"),
   import("~/lib/admin-db"),
@@ -329,6 +329,68 @@ describe("responses handler provider alias routing", () => {
     })
 
     setProviderConfig("acme", { enabled: false })
+  })
+
+  test("strips Codex internal chat metadata before forwarding provider aliases", async () => {
+    setProviderConfig("acme", {
+      type: "openai-responses",
+      enabled: true,
+      baseUrl: "https://acme.example.com",
+      apiKey: "acme-key",
+      authType: "authorization",
+    })
+
+    let providerForwardedPayload: ResponsesPayload | undefined
+    const fetchMock = mock((_url: string, options?: FetchOptions) => {
+      providerForwardedPayload = JSON.parse(
+        options?.body as string,
+      ) as ResponsesPayload
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildResponsesResult("gpt-acme", "from acme")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "acme/gpt-acme",
+          input: [
+            {
+              type: "message",
+              role: "user",
+              content: [{ type: "input_text", text: "hello" }],
+              [INTERNAL_CHAT_METADATA_PASSTHROUGH_KEY]: {
+                turn_id: "turn-provider",
+              },
+            },
+          ],
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(providerForwardedPayload?.model).toBe("gpt-acme")
+
+    const forwardedInput = providerForwardedPayload?.input as Array<
+      Record<string, unknown>
+    >
+    expect(INTERNAL_CHAT_METADATA_PASSTHROUGH_KEY in forwardedInput[0]).toBe(
+      false,
+    )
+    expect(forwardedInput[0].content).toEqual([
+      { type: "input_text", text: "hello" },
+    ])
   })
 })
 

@@ -81,6 +81,7 @@ export const handleResponses = async (c: Context) => {
       `Resolved model mapping: ${requestedModel} -> ${payload.model}`,
     )
   }
+  stripInternalChatMetadataPassthrough(payload)
 
   const providerModelAlias = parseProviderModelAlias(payload.model)
   if (providerModelAlias) {
@@ -108,7 +109,6 @@ export const handleResponses = async (c: Context) => {
   if (!isResponsesApiWebSearchEnabled()) {
     removeWebSearchTool(payload)
   }
-  stripInternalChatMetadataPassthrough(payload)
   compactInputByLatestCompaction(payload)
 
   const streamRequested = Boolean(payload.stream)
