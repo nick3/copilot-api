@@ -44,7 +44,6 @@ const createChatCompletions = mock(
     })
   },
 )
-
 const createResponses = mock(
   (
     payload: ResponsesPayload,

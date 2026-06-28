@@ -1123,6 +1123,62 @@ describe("prepareMessagesApiPayload", () => {
     expect(payload.output_config).toBeUndefined()
   })
 
+  test("preserves output format when stripping unsupported reasoning effort", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-haiku-4.5",
+      max_tokens: 128,
+      messages: [{ role: "user", content: "hello" }],
+      output_config: {
+        effort: "high",
+        format: {
+          schema: {
+            type: "object",
+          },
+          type: "json_schema",
+        },
+      },
+    }
+
+    prepareMessagesApiPayload(payload, {
+      capabilities: {
+        supports: {},
+      },
+    } as never)
+
+    expect(payload.output_config).toEqual({
+      format: {
+        schema: {
+          type: "object",
+        },
+        type: "json_schema",
+      },
+    })
+  })
+
+  test("converts adaptive thinking for non-adaptive models", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-haiku-4.5",
+      max_tokens: 128,
+      messages: [{ role: "user", content: "hello" }],
+      thinking: {
+        type: "adaptive",
+      },
+    }
+
+    prepareMessagesApiPayload(payload, {
+      capabilities: {
+        supports: {
+          max_thinking_budget: 2048,
+        },
+      },
+    } as never)
+
+    expect(payload.thinking).toEqual({
+      type: "enabled",
+      budget_tokens: 2047,
+    })
+  })
+
   test("strips top-level cache_control sent by Zed (minimal-mode shape)", () => {
     const payload: AnthropicMessagesPayload = {
       model: "claude-haiku-4.5",

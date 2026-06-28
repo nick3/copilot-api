@@ -23,11 +23,18 @@ export interface AnthropicMessagesPayload {
   service_tier?: "auto" | "standard_only"
   output_config?: {
     effort?: "low" | "medium" | "high" | "xhigh" | "max"
+    format?: BetaJSONOutputFormat | null
   }
   metadata?: {
     user_id?: string
   }
   temperature?: number
+}
+
+export interface BetaJSONOutputFormat {
+  schema: { [key: string]: unknown }
+
+  type: "json_schema"
 }
 
 export interface AnthropicCacheControl {
@@ -189,6 +196,10 @@ export interface AnthropicUsage {
   }
 }
 
+export interface CopilotUsage {
+  total_nano_aiu?: number | null
+}
+
 export type AnthropicResponseContentBlock =
   | AnthropicAssistantContentBlock
   | AnthropicWebSearchContentBlock
@@ -201,6 +212,7 @@ export interface AnthropicResponse<
   type: "message"
   role: "assistant"
   content: Array<TContentBlock>
+  copilot_usage?: CopilotUsage | null
   model: string
   stop_reason:
     | "end_turn"
@@ -257,6 +269,7 @@ export interface AnthropicContentBlockStopEvent {
 
 export interface AnthropicMessageDeltaEvent {
   type: "message_delta"
+  copilot_usage?: CopilotUsage | null
   delta: {
     stop_reason?: AnthropicResponse["stop_reason"]
     stop_sequence?: string | null

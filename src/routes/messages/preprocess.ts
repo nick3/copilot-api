@@ -959,4 +959,29 @@ export const prepareMessagesApiPayload = (
       effort: effort,
     }
   }
+
+  const modelSupports = selectedModel?.capabilities.supports
+  if (!modelSupports?.adaptive_thinking) {
+    const reasoningEfforts = modelSupports?.reasoning_effort
+    if (!reasoningEfforts || reasoningEfforts.length === 0) {
+      if (payload.output_config?.effort) {
+        delete payload.output_config.effort
+        if (Object.keys(payload.output_config).length === 0) {
+          delete payload.output_config
+        }
+      }
+    }
+
+    if (disableThink) {
+      delete payload.thinking
+    } else {
+      const budgetTokens = modelSupports?.max_thinking_budget ?? 4096
+      if (payload.thinking?.type === "adaptive") {
+        payload.thinking = {
+          type: "enabled",
+          budget_tokens: budgetTokens - 1,
+        }
+      }
+    }
+  }
 }

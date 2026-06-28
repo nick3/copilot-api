@@ -14,6 +14,7 @@ import {
 import { getSmallModel } from "~/lib/config"
 import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
+import { closeUsageStore, getTokenUsageEventsPage } from "~/lib/token-usage"
 import { getUUID } from "~/lib/utils"
 import { messageRoutes } from "~/routes/messages/route"
 
@@ -26,6 +27,7 @@ type FetchOptions = {
   body?: unknown
 }
 
+const DB_PATH_ENV = "COPILOT_API_SQLITE_DB_PATH"
 const fetchHolder = globalThis as unknown as { fetch: typeof fetch }
 const originalFetch = fetchHolder.fetch
 const originalSelect =
@@ -187,7 +189,10 @@ function createPayload(
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  process.env[DB_PATH_ENV] = ":memory:"
+  await closeUsageStore()
+
   state.manualApprove = false
   state.verbose = false
 
@@ -199,11 +204,13 @@ beforeEach(() => {
   accountsManager.markAccountFailed = () => {}
 })
 
-afterEach(() => {
+afterEach(async () => {
   fetchHolder.fetch = originalFetch
   accountsManager.selectAccountForRequest = originalSelect
   accountsManager.finalizeQuota = originalFinalize
   accountsManager.markAccountFailed = originalMarkFailed
+  await closeUsageStore()
+  Reflect.deleteProperty(process.env, DB_PATH_ENV)
 })
 
 describe("messages handler sanitization", () => {
@@ -571,6 +578,163 @@ describe("messages handler routing", () => {
     expect(body.content[0].text).toBe("messages")
     expect(selection.confirmAffinity).toHaveBeenCalledTimes(1)
     expect(selection.confirmOwnership).toHaveBeenCalledTimes(1)
+  })
+
+  test("records Copilot AIU from non-streaming Messages API responses", async () => {
+    const selection = buildSelection("/v1/messages", "messages-model")
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    const fetchMock = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ...buildAnthropicResponse("messages-model", "messages"),
+            copilot_usage: {
+              total_nano_aiu: 1_000_000_000,
+            },
+            usage: {
+              cache_creation_input_tokens: 200,
+              cache_read_input_tokens: 30,
+              input_tokens: 12,
+              output_tokens: 8,
+            },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      ),
+    )
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(createPayload()),
+      }),
+    )
+    await response.text()
+
+    const usageEvents = await getTokenUsageEventsPage({
+      page: 1,
+      pageSize: 10,
+      period: "day",
+    })
+
+    expect(response.status).toBe(200)
+    expect(usageEvents.items).toHaveLength(1)
+    expect(usageEvents.items[0]).toMatchObject({
+      cache_creation_input_tokens: 200,
+      cache_read_input_tokens: 30,
+      cost: {
+        amount: 0.01,
+        currency: "USD",
+        source: "copilot_aiu",
+        total_cost_nanos: 10_000_000,
+      },
+      endpoint: "messages",
+      input_tokens: 12,
+      model: "messages-model",
+      output_tokens: 8,
+      source: "copilot",
+      total_nano_aiu: 1_000_000_000,
+      total_tokens: 250,
+    })
+  })
+
+  test("records Copilot AIU from streaming Messages API events", async () => {
+    const selection = buildSelection("/v1/messages", "messages-model")
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    const fetchMock = mock(() =>
+      Promise.resolve(
+        new Response(
+          [
+            "event: message_start",
+            `data: ${JSON.stringify({
+              message: {
+                ...buildAnthropicResponse("messages-model", ""),
+                content: [],
+                stop_reason: null,
+                stop_sequence: null,
+                usage: {
+                  input_tokens: 3,
+                  output_tokens: 0,
+                },
+              },
+              type: "message_start",
+            })}`,
+            "",
+            "event: message_delta",
+            `data: ${JSON.stringify({
+              copilot_usage: {
+                total_nano_aiu: 4_119_900_000,
+              },
+              delta: {
+                stop_reason: "end_turn",
+                stop_sequence: null,
+              },
+              type: "message_delta",
+              usage: {
+                cache_creation_input_tokens: 10_612,
+                cache_read_input_tokens: 0,
+                output_tokens: 93,
+              },
+            })}`,
+            "",
+            "event: message_stop",
+            `data: ${JSON.stringify({ type: "message_stop" })}`,
+            "",
+          ].join("\n"),
+          {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          },
+        ),
+      ),
+    )
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(createPayload({ stream: true })),
+      }),
+    )
+    await response.text()
+
+    const usageEvents = await getTokenUsageEventsPage({
+      page: 1,
+      pageSize: 10,
+      period: "day",
+    })
+
+    expect(response.status).toBe(200)
+    expect(usageEvents.items).toHaveLength(1)
+    expect(usageEvents.items[0]).toMatchObject({
+      cache_creation_input_tokens: 10_612,
+      cache_read_input_tokens: 0,
+      cost: {
+        amount: 0.041199,
+        currency: "USD",
+        source: "copilot_aiu",
+        total_cost_nanos: 41_199_000,
+      },
+      endpoint: "messages",
+      input_tokens: 3,
+      model: "messages-model",
+      output_tokens: 93,
+      source: "copilot",
+      total_nano_aiu: 4_119_900_000,
+      total_tokens: 10_708,
+    })
   })
 
   test("routes to the Responses API when selection chooses /responses", async () => {

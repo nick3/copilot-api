@@ -60,7 +60,13 @@ import {
   extractResponsesResultOwnerKeys,
   extractResponsesStreamEventOwnerKeys,
 } from "~/routes/messages/responses-item-ownership"
-import { type UsageTokens } from "~/lib/token-usage"
+import {
+  createCopilotTokenUsageRecorder,
+  mergeAnthropicUsage,
+  normalizeAnthropicUsage,
+  normalizeOptionalToken,
+  type UsageTokens,
+} from "~/lib/token-usage"
 import {
   handleProviderMessagesForProvider,
   type ProviderMessagesInstrumentation,
@@ -101,6 +107,7 @@ import {
 } from "~/services/copilot/create-responses"
 
 import {
+  type CopilotUsage,
   type AnthropicMessagesPayload,
   type AnthropicResponse,
   type AnthropicStreamEventData,
@@ -238,6 +245,37 @@ function normalizeProviderAliasUsage(usage: UsageTokens): NormalizedUsage {
       cache_creation_input_tokens: cacheCreationTokens,
       cache_read_input_tokens: tokensCachedInput,
     }),
+  }
+}
+
+function mergeRequestHistoryUsage(
+  current: NormalizedUsage,
+  next: NormalizedUsage,
+): NormalizedUsage {
+  return {
+    tokensCachedInput: next.tokensCachedInput ?? current.tokensCachedInput,
+    tokensInput: next.tokensInput ?? current.tokensInput,
+    tokensOutput: next.tokensOutput ?? current.tokensOutput,
+    tokensTotal: next.tokensTotal ?? current.tokensTotal,
+    usageJson: next.usageJson ?? current.usageJson,
+  }
+}
+
+function normalizeCopilotUsage(
+  usage: CopilotUsage | null | undefined,
+): UsageTokens {
+  return {
+    total_nano_aiu: normalizeOptionalToken(usage?.total_nano_aiu),
+  }
+}
+
+function normalizeMessagesTokenUsage(
+  usage: Parameters<typeof normalizeAnthropicUsage>[0],
+  copilotUsage: CopilotUsage | null | undefined,
+): UsageTokens {
+  return {
+    ...normalizeAnthropicUsage(usage),
+    ...normalizeCopilotUsage(copilotUsage),
   }
 }
 
@@ -1889,11 +1927,16 @@ async function handleMessagesNonStreaming(params: {
   c: Context
   response: AnthropicResponse
   instr: InstrumentationContext
+  recordTokenUsage: (usage: UsageTokens) => void
 }): Promise<Response> {
-  const { c, response, instr } = params
+  const { c, response, instr, recordTokenUsage } = params
 
   let httpStatus = 200
   const usage = normalizeMessagesUsage(response.usage)
+  const tokenUsage = normalizeMessagesTokenUsage(
+    response.usage,
+    response.copilot_usage,
+  )
 
   let errorName: string | undefined
   let errorStatus: number | undefined
@@ -1907,6 +1950,7 @@ async function handleMessagesNonStreaming(params: {
       "Non-streaming Messages result:",
       JSON.stringify(response).slice(-400),
     )
+    recordTokenUsage(tokenUsage)
     return c.json(response)
   } catch (error) {
     const details = await extractErrorObservability(error)
@@ -1946,7 +1990,14 @@ async function handleMessagesNonStreaming(params: {
   }
 }
 
-const parseMessagesStreamUsage = (data: string): NormalizedUsage | null => {
+interface ParsedMessagesStreamUsage {
+  requestHistoryUsage: NormalizedUsage
+  tokenUsage: UsageTokens
+}
+
+const parseMessagesStreamUsage = (
+  data: string,
+): ParsedMessagesStreamUsage | null => {
   if (!data || data === "[DONE]") return null
 
   try {
@@ -1954,11 +2005,26 @@ const parseMessagesStreamUsage = (data: string): NormalizedUsage | null => {
     if (parsed.type === "error") {
       throw new Error(parsed.error.message)
     }
-    if (parsed.type !== "message_delta" || !parsed.usage) {
-      return null
+    if (parsed.type === "message_start") {
+      return {
+        requestHistoryUsage: normalizeMessagesUsage(parsed.message.usage),
+        tokenUsage: normalizeMessagesTokenUsage(
+          parsed.message.usage,
+          parsed.message.copilot_usage,
+        ),
+      }
+    }
+    if (parsed.type === "message_delta") {
+      return {
+        requestHistoryUsage: normalizeMessagesUsage(parsed.usage),
+        tokenUsage: normalizeMessagesTokenUsage(
+          parsed.usage,
+          parsed.copilot_usage,
+        ),
+      }
     }
 
-    return normalizeMessagesUsage(parsed.usage)
+    return null
   } catch (error) {
     logger.warn("Failed to parse messages stream event", error)
     throw new Error("Failed to parse messages stream event", { cause: error })
@@ -1969,11 +2035,13 @@ async function streamMessagesAndLog(params: {
   stream: StreamSseStream
   response: AsyncIterable<unknown>
   instr: InstrumentationContext
+  recordTokenUsage: (usage: UsageTokens) => void
 }): Promise<void> {
-  const { stream, response, instr } = params
+  const { stream, response, instr, recordTokenUsage } = params
 
   let ttfbMs: number | undefined
   let lastUsage: NormalizedUsage = {}
+  let tokenUsage: UsageTokens = {}
 
   let errorName: string | undefined
   let errorStatus: number | undefined
@@ -1996,7 +2064,11 @@ async function streamMessagesAndLog(params: {
 
       const usage = parseMessagesStreamUsage(data)
       if (usage) {
-        lastUsage = usage
+        lastUsage = mergeRequestHistoryUsage(
+          lastUsage,
+          usage.requestHistoryUsage,
+        )
+        tokenUsage = mergeAnthropicUsage(tokenUsage, usage.tokenUsage)
       }
 
       await stream.writeSSE({
@@ -2027,6 +2099,8 @@ async function streamMessagesAndLog(params: {
       premiumUnlimitedAfter,
       premiumRemainingDiff,
     } = await finalizeQuotaAndGetPremiumSnapshot(instr)
+
+    recordTokenUsage(tokenUsage)
 
     insertRequestLog(instr, {
       finishedAtMs,
@@ -2080,6 +2154,14 @@ const handleWithMessagesApi = async (params: {
   })
 
   instr.initiator = effectiveInitiator
+  const recordTokenUsage = createCopilotTokenUsageRecorder({
+    endpoint: "messages",
+    fallbackSessionId: sessionId,
+    model: anthropicPayload.model,
+    sessionId:
+      parseUserIdMetadata(anthropicPayload.metadata?.user_id).sessionId
+      ?? undefined,
+  })
 
   let response: MessagesResult
 
@@ -2110,6 +2192,7 @@ const handleWithMessagesApi = async (params: {
         stream,
         response,
         instr,
+        recordTokenUsage,
       }),
     )
   }
@@ -2118,6 +2201,7 @@ const handleWithMessagesApi = async (params: {
     c,
     response,
     instr,
+    recordTokenUsage,
   })
 }
 

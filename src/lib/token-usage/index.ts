@@ -304,6 +304,7 @@ export function mergeAnthropicUsage(
       next.cache_read_input_tokens ?? current.cache_read_input_tokens,
     input_tokens: next.input_tokens ?? current.input_tokens,
     output_tokens: next.output_tokens ?? current.output_tokens,
+    total_nano_aiu: next.total_nano_aiu ?? current.total_nano_aiu,
     total_tokens: next.total_tokens ?? current.total_tokens,
   }
 }
