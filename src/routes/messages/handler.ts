@@ -65,6 +65,7 @@ import {
   mergeCopilotAiuUsage,
   mergeAnthropicUsage,
   normalizeAnthropicUsage,
+  normalizeCopilotAiuUsage,
   normalizeOpenAIUsage,
   normalizeOptionalToken,
   normalizeResponsesUsage,
@@ -1286,7 +1287,7 @@ async function streamChatCompletionsAndLog(params: {
 
   let ttfbMs: number | undefined
   let lastUsage: NormalizedUsage = {}
-  let tokenUsage: UsageTokens = {}
+  let tokenUsage: UsageTokens | undefined
 
   let errorName: string | undefined
   let errorStatus: number | undefined
@@ -1313,10 +1314,7 @@ async function streamChatCompletionsAndLog(params: {
 
       logger.debug("Copilot raw stream event:", JSON.stringify(rawEvent))
 
-      const { data: rawData } = rawEvent as {
-        data?: string | Promise<string>
-      }
-      const data = typeof rawData === "string" ? rawData : await rawData
+      const data = await resolveStreamChunkData(rawEvent)
 
       if (data === "[DONE]") {
         break
@@ -1329,12 +1327,15 @@ async function streamChatCompletionsAndLog(params: {
       const chunk = JSON.parse(data) as ChatCompletionChunk
       if (chunk.usage) {
         lastUsage = normalizeChatCompletionsUsage(chunk.usage)
-      }
-      if (chunk.usage || chunk.copilot_usage) {
         tokenUsage = mergeCopilotAiuUsage(
           normalizeOpenAIUsage(chunk.usage),
           chunk.copilot_usage,
         )
+      } else if (chunk.copilot_usage) {
+        tokenUsage = {
+          ...(tokenUsage ?? {}),
+          ...normalizeCopilotAiuUsage(chunk.copilot_usage),
+        }
       }
 
       const events = translateChunkToAnthropicEvents(chunk, streamState)
@@ -1371,7 +1372,9 @@ async function streamChatCompletionsAndLog(params: {
       premiumRemainingDiff,
     } = await finalizeQuotaAndGetPremiumSnapshot(instr)
 
-    recordTokenUsage(tokenUsage)
+    if (tokenUsage) {
+      recordTokenUsage(tokenUsage)
+    }
 
     insertRequestLog(instr, {
       finishedAtMs,
@@ -1477,7 +1480,7 @@ async function streamWebSearchResponsesAndLog(params: {
 
   let ttfbMs: number | undefined
   let lastUsage: NormalizedUsage = {}
-  let tokenUsage: UsageTokens = {}
+  let tokenUsage: UsageTokens | undefined
 
   let errorName: string | undefined
   let errorStatus: number | undefined
@@ -1536,7 +1539,9 @@ async function streamWebSearchResponsesAndLog(params: {
       premiumRemainingDiff,
     } = await finalizeQuotaAndGetPremiumSnapshot(instr)
 
-    recordTokenUsage(tokenUsage)
+    if (tokenUsage) {
+      recordTokenUsage(tokenUsage)
+    }
 
     insertRequestLog(instr, {
       finishedAtMs,
@@ -1762,6 +1767,13 @@ async function writeAnthropicStreamError(
   }
 }
 
+async function resolveStreamChunkData(chunk: {
+  data?: string | Promise<string>
+}): Promise<string | undefined> {
+  const rawData = chunk.data
+  return typeof rawData === "string" ? rawData : await rawData
+}
+
 function collectResponsesStreamOwnerKeys(
   event: ResponseStreamEvent,
   responseOwnerKeys: Set<string>,
@@ -1843,9 +1855,14 @@ function getResponsesStreamTokenUsage(
     return undefined
   }
 
+  const response = event.response
+  if (!response) {
+    return undefined
+  }
+
   return mergeCopilotAiuUsage(
-    normalizeResponsesUsage(event.response.usage),
-    event.copilot_usage ?? event.response.copilot_usage,
+    normalizeResponsesUsage(response.usage),
+    event.copilot_usage ?? response.copilot_usage,
   )
 }
 
@@ -1875,7 +1892,7 @@ async function streamResponsesAndLog(params: {
 
   let ttfbMs: number | undefined
   let lastUsage: NormalizedUsage = {}
-  let tokenUsage: UsageTokens = {}
+  let tokenUsage: UsageTokens | undefined
   let tokenUsageRecorded = false
 
   let errorName: string | undefined
@@ -1898,8 +1915,9 @@ async function streamResponsesAndLog(params: {
         continue
       }
 
-      const rawData = (chunk as { data?: string | Promise<string> }).data
-      const data = typeof rawData === "string" ? rawData : await rawData
+      const data = await resolveStreamChunkData(
+        chunk as { data?: string | Promise<string> },
+      )
       if (!data) {
         continue
       }
@@ -1972,7 +1990,7 @@ async function streamResponsesAndLog(params: {
       premiumRemainingDiff,
     } = await finalizeQuotaAndGetPremiumSnapshot(instr)
 
-    if (!tokenUsageRecorded) {
+    if (!tokenUsageRecorded && tokenUsage) {
       recordTokenUsage(tokenUsage)
     }
 

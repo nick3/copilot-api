@@ -284,6 +284,13 @@ export function mergeCopilotAiuUsage(
   usage: UsageTokens,
   copilotUsage: CopilotAiuUsage | null | undefined,
 ): UsageTokens {
+  if (
+    copilotUsage?.total_nano_aiu === undefined
+    || copilotUsage.total_nano_aiu === null
+  ) {
+    return usage
+  }
+
   return {
     ...usage,
     ...normalizeCopilotAiuUsage(copilotUsage),

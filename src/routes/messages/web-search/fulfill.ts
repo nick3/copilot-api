@@ -301,11 +301,14 @@ export const collectWebSearchResponsesStreamResult = async ({
       continue
     }
 
-    if (!chunk.data || chunk.data === "[DONE]") {
+    const data = await Promise.resolve(
+      (chunk as unknown as { data?: string | Promise<string> }).data,
+    )
+    if (!data || data === "[DONE]") {
       continue
     }
 
-    const parsed = parseEvent(chunk.data)
+    const parsed = parseEvent(data)
     if (!parsed) {
       continue
     }

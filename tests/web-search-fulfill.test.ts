@@ -290,6 +290,15 @@ async function* makeResponsesStream(result: ResponsesResult) {
   }
 }
 
+async function* makeResponsesStreamWithPromiseData(result: ResponsesResult) {
+  for await (const chunk of makeResponsesStream(result)) {
+    yield {
+      ...chunk,
+      data: Promise.resolve(chunk.data),
+    }
+  }
+}
+
 const originalDeps = { ...webSearchFlowDependencies }
 
 afterEach(() => {
@@ -436,6 +445,20 @@ describe("handleWebSearchViaResponses", () => {
       upstreamResponse: makeResponsesStream(makeResponsesResult()),
     })
 
+    expect(result.copilot_usage?.total_nano_aiu).toBe(987_000_000)
+  })
+
+  it("collects terminal Responses events when stream data is promise-backed", async () => {
+    const result = await collectWebSearchResponsesStreamResult({
+      logger: consola,
+      upstreamResponse: makeResponsesStreamWithPromiseData(
+        makeResponsesResult(),
+      ) as never,
+    })
+
+    expect(JSON.stringify(result.output)).toContain(
+      "Node.js 24 is the latest LTS.",
+    )
     expect(result.copilot_usage?.total_nano_aiu).toBe(987_000_000)
   })
 

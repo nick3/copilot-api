@@ -68,6 +68,7 @@ const originalModelCompactThreshold =
   responsesUtilsDependencies.getModelResponsesApiCompactThreshold
 const DB_PATH_ENV = "COPILOT_API_SQLITE_DB_PATH"
 let configBeforeTest: string | null | undefined
+let dbPathBeforeTest: string | undefined
 
 const readConfigText = async (): Promise<string | null> =>
   await fs.readFile(PATHS.CONFIG_PATH, "utf8").catch(() => null)
@@ -180,6 +181,7 @@ function buildResponsesResult(model: string, text: string) {
 }
 
 beforeEach(async () => {
+  dbPathBeforeTest = process.env[DB_PATH_ENV]
   process.env[DB_PATH_ENV] = ":memory:"
   await closeUsageStore()
   configBeforeTest = await readConfigText()
@@ -204,7 +206,12 @@ afterEach(async () => {
   accountsManager.finalizeQuota = originalFinalize
   accountsManager.markAccountFailed = originalMarkFailed
   await closeUsageStore()
-  Reflect.deleteProperty(process.env, DB_PATH_ENV)
+  if (dbPathBeforeTest === undefined) {
+    Reflect.deleteProperty(process.env, DB_PATH_ENV)
+  } else {
+    process.env[DB_PATH_ENV] = dbPathBeforeTest
+  }
+  dbPathBeforeTest = undefined
 
   responsesUtilsDependencies.isResponsesApiContextManagementEnabled =
     originalContextManagementEnabled

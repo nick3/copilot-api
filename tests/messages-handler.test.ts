@@ -35,6 +35,7 @@ const originalSelect =
 const originalFinalize = accountsManager.finalizeQuota.bind(accountsManager)
 const originalMarkFailed =
   accountsManager.markAccountFailed.bind(accountsManager)
+let dbPathBeforeTest: string | undefined
 
 function parseFetchBody(body: unknown): Record<string, unknown> {
   if (typeof body !== "string") {
@@ -200,6 +201,7 @@ async function readSingleTokenUsageEvent() {
 }
 
 beforeEach(async () => {
+  dbPathBeforeTest = process.env[DB_PATH_ENV]
   process.env[DB_PATH_ENV] = ":memory:"
   await closeUsageStore()
 
@@ -220,7 +222,12 @@ afterEach(async () => {
   accountsManager.finalizeQuota = originalFinalize
   accountsManager.markAccountFailed = originalMarkFailed
   await closeUsageStore()
-  Reflect.deleteProperty(process.env, DB_PATH_ENV)
+  if (dbPathBeforeTest === undefined) {
+    Reflect.deleteProperty(process.env, DB_PATH_ENV)
+  } else {
+    process.env[DB_PATH_ENV] = dbPathBeforeTest
+  }
+  dbPathBeforeTest = undefined
 })
 
 describe("messages handler sanitization", () => {
@@ -921,6 +928,76 @@ describe("messages handler routing", () => {
     })
   })
 
+  test("records Copilot AIU when Messages web search routes through Responses", async () => {
+    const selection = buildSelection("/responses", "search-model")
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    let upstreamBody: Record<string, unknown> | undefined
+    const fetchMock = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = parseFetchBody(opts?.body)
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ...buildResponsesResult("search-model", "search result"),
+            copilot_usage: {
+              total_nano_aiu: 1_750_000_000,
+            },
+            usage: {
+              input_tokens: 13,
+              input_tokens_details: {
+                cached_tokens: 6,
+              },
+              output_tokens: 4,
+              total_tokens: 17,
+            },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          createPayload({
+            tools: [
+              { type: "web_search_20250305", name: "web_search" },
+            ] as never,
+          }),
+        ),
+      }),
+    )
+    await response.text()
+
+    expect(response.status).toBe(200)
+    expect(upstreamBody?.model).toBe("search-model")
+    expect(await readSingleTokenUsageEvent()).toMatchObject({
+      cache_read_input_tokens: 6,
+      cost: {
+        amount: 0.0175,
+        currency: "USD",
+        source: "copilot_aiu",
+        total_cost_nanos: 17_500_000,
+      },
+      endpoint: "responses",
+      input_tokens: 7,
+      model: "search-model",
+      output_tokens: 4,
+      source: "copilot",
+      total_nano_aiu: 1_750_000_000,
+      total_tokens: 17,
+    })
+  })
+
   test("falls back to Chat Completions when selection chooses /chat/completions", async () => {
     let requestedUrl = ""
     let upstreamBody: Record<string, unknown> | undefined
@@ -1048,9 +1125,6 @@ describe("messages handler routing", () => {
                     logprobs: null,
                   },
                 ],
-                copilot_usage: {
-                  total_nano_aiu: 4_000_000_000,
-                },
                 usage: {
                   prompt_tokens: 15,
                   completion_tokens: 6,
@@ -1058,6 +1132,18 @@ describe("messages handler routing", () => {
                   prompt_tokens_details: {
                     cached_tokens: 8,
                   },
+                },
+              }),
+            "",
+            "data: "
+              + JSON.stringify({
+                id: "chatcmpl_1",
+                object: "chat.completion.chunk",
+                created: 0,
+                model: "chat-model",
+                choices: [],
+                copilot_usage: {
+                  total_nano_aiu: 4_000_000_000,
                 },
               }),
             "",

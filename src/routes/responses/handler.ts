@@ -533,9 +533,13 @@ function extractTokenUsageFromChunkData(
     ) {
       return undefined
     }
+    const response = event.response
+    if (!response) {
+      return undefined
+    }
     return mergeCopilotAiuUsage(
-      normalizeResponsesUsage(event.response.usage),
-      event.copilot_usage ?? event.response.copilot_usage,
+      normalizeResponsesUsage(response.usage),
+      event.copilot_usage ?? response.copilot_usage,
     )
   } catch {
     return undefined
@@ -824,7 +828,7 @@ async function streamResponsesAndLog(params: {
   const idTracker = createStreamIdTracker()
   let ttfbMs: number | undefined
   let lastUsage: NormalizedUsage = {}
-  let tokenUsage: UsageTokens = {}
+  let tokenUsage: UsageTokens | undefined
   let tokenUsageRecorded = false
   let errorName: string | undefined
   let errorStatus: number | undefined
@@ -890,7 +894,7 @@ async function streamResponsesAndLog(params: {
     const premiumRemainingAfter = account.premiumRemaining
     const premiumUnlimitedAfter = account.unlimited
 
-    if (!tokenUsageRecorded) {
+    if (!tokenUsageRecorded && tokenUsage) {
       recordTokenUsage(tokenUsage)
     }
 

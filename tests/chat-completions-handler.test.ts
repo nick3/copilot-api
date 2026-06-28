@@ -41,6 +41,7 @@ const originalState = {
   vsCodeVersion: state.vsCodeVersion,
 }
 const DB_PATH_ENV = "COPILOT_API_SQLITE_DB_PATH"
+let dbPathBeforeTest: string | undefined
 
 function buildAccount(): AccountRuntime {
   return {
@@ -121,6 +122,7 @@ const createApp = () => {
 }
 
 beforeEach(async () => {
+  dbPathBeforeTest = process.env[DB_PATH_ENV]
   process.env[DB_PATH_ENV] = ":memory:"
   await closeUsageStore()
 
@@ -156,7 +158,12 @@ afterEach(async () => {
   accountsManager.finalizeQuota = originalFinalize
   accountsManager.markAccountFailed = originalMarkFailed
   await closeUsageStore()
-  Reflect.deleteProperty(process.env, DB_PATH_ENV)
+  if (dbPathBeforeTest === undefined) {
+    Reflect.deleteProperty(process.env, DB_PATH_ENV)
+  } else {
+    process.env[DB_PATH_ENV] = dbPathBeforeTest
+  }
+  dbPathBeforeTest = undefined
   ;(globalThis as unknown as { fetch: typeof fetch }).fetch = originalFetch
 })
 
@@ -267,9 +274,6 @@ describe("chat completions handler", () => {
                 created: 0,
                 model: "gpt-test",
                 choices: [],
-                copilot_usage: {
-                  total_nano_aiu: 3_000_000_000,
-                },
                 usage: {
                   prompt_tokens: 10,
                   completion_tokens: 4,
@@ -277,6 +281,18 @@ describe("chat completions handler", () => {
                   prompt_tokens_details: {
                     cached_tokens: 3,
                   },
+                },
+              }),
+            "",
+            "data: "
+              + JSON.stringify({
+                id: "chatcmpl-test",
+                object: "chat.completion.chunk",
+                created: 0,
+                model: "gpt-test",
+                choices: [],
+                copilot_usage: {
+                  total_nano_aiu: 3_000_000_000,
                 },
               }),
             "",

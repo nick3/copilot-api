@@ -30,6 +30,7 @@ import { getTokenCount } from "~/lib/tokenizer"
 import {
   createCopilotTokenUsageRecorder,
   mergeCopilotAiuUsage,
+  normalizeCopilotAiuUsage,
   normalizeOpenAIUsage,
   type UsageTokens,
 } from "~/lib/token-usage"
@@ -654,7 +655,7 @@ async function streamChatCompletionsAndLog(params: {
 
   let ttfbMs: number | undefined
   let lastUsage: NormalizedUsage = {}
-  let tokenUsage: UsageTokens = {}
+  let tokenUsage: UsageTokens | undefined
   let errorName: string | undefined
   let errorStatus: number | undefined
   let errorMessage: string | undefined
@@ -671,9 +672,12 @@ async function streamChatCompletionsAndLog(params: {
       const usage = await extractUsageFromChunk(chunk)
       if (usage?.requestHistoryUsage) {
         lastUsage = usage.requestHistoryUsage
-      }
-      if (usage?.tokenUsage) {
         tokenUsage = usage.tokenUsage
+      } else if (usage?.tokenUsage) {
+        tokenUsage = {
+          ...(tokenUsage ?? {}),
+          ...usage.tokenUsage,
+        }
       }
 
       debugJson(logger, "Streaming chunk:", chunk)
@@ -704,7 +708,9 @@ async function streamChatCompletionsAndLog(params: {
     const premiumRemainingAfter = account.premiumRemaining
     const premiumUnlimitedAfter = account.unlimited
 
-    recordTokenUsage(tokenUsage)
+    if (tokenUsage) {
+      recordTokenUsage(tokenUsage)
+    }
 
     insertRequestLog(store, request, {
       finishedAtMs,
@@ -759,9 +765,14 @@ async function extractUsageFromChunk(
   try {
     const parsed = JSON.parse(data) as ChatCompletionChunk
     if (!parsed.usage && !parsed.copilot_usage) return undefined
+    if (!parsed.usage) {
+      return {
+        tokenUsage: normalizeCopilotAiuUsage(parsed.copilot_usage),
+      }
+    }
+
     return {
-      requestHistoryUsage:
-        parsed.usage ? normalizeChatCompletionsUsage(parsed.usage) : undefined,
+      requestHistoryUsage: normalizeChatCompletionsUsage(parsed.usage),
       tokenUsage: mergeCopilotAiuUsage(
         normalizeOpenAIUsage(parsed.usage),
         parsed.copilot_usage,
