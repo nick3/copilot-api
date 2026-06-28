@@ -222,6 +222,7 @@ const CONFIG_KEYS = new Set<keyof AppConfig>([
   "modelReasoningEfforts",
   "modelResponsesApiCompactThresholds",
   "modelAliases",
+  "modelMappings",
   "allowOriginalModelNamesForAliases",
   "forceAgent",
   "compactUseSmallModel",
@@ -1173,6 +1174,47 @@ function parseModelAliases(
   return { value: record }
 }
 
+function parseModelMappings(
+  value: unknown,
+): ParseFieldResult<Record<string, string>> {
+  if (value === null || value === undefined) return { clear: true }
+  if (!isPlainObject(value)) {
+    return { error: "modelMappings must be an object" }
+  }
+
+  const record = Object.create(null) as Record<string, string>
+  for (const [rawSource, rawTarget] of Object.entries(value)) {
+    if (BLOCKED_KEYS.has(rawSource)) {
+      return { error: `modelMappings.${rawSource} is not allowed` }
+    }
+
+    const source = rawSource.trim()
+    if (!source) {
+      return { error: "modelMappings keys must be non-empty strings" }
+    }
+    if (BLOCKED_KEYS.has(source)) {
+      return { error: `modelMappings.${source} is not allowed` }
+    }
+    if (Object.hasOwn(record, source)) {
+      return {
+        error: `modelMappings.${rawSource} conflicts with normalized key "${source}"`,
+      }
+    }
+    if (typeof rawTarget !== "string") {
+      return { error: `modelMappings.${rawSource} must be a string` }
+    }
+
+    const target = rawTarget.trim()
+    if (!target) {
+      return { error: `modelMappings.${rawSource} must be a non-empty string` }
+    }
+
+    record[source] = target
+  }
+
+  return { value: record }
+}
+
 function applyOptionalString(
   next: AppConfig,
   key: "smallModel" | "apiKey" | "anthropicApiKey" | "messageApiWebSearchModel",
@@ -1352,6 +1394,20 @@ function applyModelAliases(
   return undefined
 }
 
+function applyModelMappings(
+  next: AppConfig,
+  value: unknown,
+): string | undefined {
+  const parsed = parseModelMappings(value)
+  if ("error" in parsed) return parsed.error
+  if ("clear" in parsed) {
+    delete next.modelMappings
+    return undefined
+  }
+  next.modelMappings = parsed.value
+  return undefined
+}
+
 function applyResponsesApiContextManagementModels(
   next: AppConfig,
   value: unknown,
@@ -1525,6 +1581,7 @@ const CONFIG_PATCH_HANDLERS: Partial<Record<string, ConfigPatchHandler>> = {
   modelReasoningEfforts: applyReasoningEfforts,
   modelResponsesApiCompactThresholds: applyModelResponsesApiCompactThresholds,
   modelAliases: applyModelAliases,
+  modelMappings: applyModelMappings,
   allowOriginalModelNamesForAliases: (next, value) =>
     applyOptionalBoolean(next, "allowOriginalModelNamesForAliases", value),
   forceAgent: (next, value) => applyOptionalBoolean(next, "forceAgent", value),
@@ -1604,10 +1661,12 @@ adminApiRoutes.get("/meta", (c) => {
 })
 
 function applyAdminConfigResponseDefaults(config: AppConfig): AppConfig {
-  if (typeof config.useResponsesApiContextManagement === "boolean") {
-    return config
+  return {
+    ...config,
+    modelMappings: config.modelMappings ?? {},
+    useResponsesApiContextManagement:
+      config.useResponsesApiContextManagement ?? true,
   }
-  return { ...config, useResponsesApiContextManagement: true }
 }
 
 adminApiRoutes.get("/config", (c) => {

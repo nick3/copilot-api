@@ -93,6 +93,19 @@ async function loadNodeSqliteModule(): Promise<{
     throw new UnsupportedNodeSqliteRuntimeError(nodeVersion)
   }
 
+  const emitWarning = process.emitWarning.bind(process) as (
+    ...args: unknown[]
+  ) => void
+  process.emitWarning = (warning: unknown, ...args: unknown[]) => {
+    if (
+      typeof warning === "string"
+      && warning.includes("SQLite is an experimental feature")
+    ) {
+      return
+    }
+    return emitWarning(warning, ...args)
+  }
+
   const specifier = ["node", "sqlite"].join(":")
   try {
     return (await import(specifier)) as {
@@ -100,6 +113,8 @@ async function loadNodeSqliteModule(): Promise<{
     }
   } catch (error) {
     throw new UnsupportedNodeSqliteRuntimeError(nodeVersion, error)
+  } finally {
+    process.emitWarning = emitWarning
   }
 }
 

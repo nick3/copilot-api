@@ -382,6 +382,7 @@ export type AdminConfig = {
   modelReasoningEfforts?: Record<string, ReasoningEffort>
   modelResponsesApiCompactThresholds?: Record<string, number>
   modelAliases?: Record<string, ModelAliasSpec | string>
+  modelMappings?: Record<string, string>
   allowOriginalModelNamesForAliases?: boolean
   forceAgent?: boolean
   compactUseSmallModel?: boolean
@@ -757,6 +758,7 @@ const ADMIN_CONFIG_KEYS = new Set<keyof AdminConfig>([
   "modelReasoningEfforts",
   "modelResponsesApiCompactThresholds",
   "modelAliases",
+  "modelMappings",
   "allowOriginalModelNamesForAliases",
   "forceAgent",
   "compactUseSmallModel",

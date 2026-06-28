@@ -5,6 +5,7 @@ import path from "node:path"
 import {
   getLogLevel,
   getMessageApiWebSearchModel,
+  getModelMappings,
   mergeConfigWithDefaults,
 } from "~/lib/config"
 import { PATHS } from "~/lib/paths"
@@ -426,6 +427,125 @@ test("POST /api/admin/config updates modelResponsesApiCompactThresholds", async 
       "gpt-5.5": 217600,
     })
   })
+})
+
+test("POST /api/admin/config updates modelMappings", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          modelMappings: {
+            " gpt-client ": " provider/gpt-target ",
+          },
+        }),
+      }),
+    )
+
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as {
+      modelMappings?: Record<string, string>
+    }
+    expect(body.modelMappings).toEqual({
+      "gpt-client": "provider/gpt-target",
+    })
+
+    const getRes = await server.fetch(
+      new Request("http://localhost/api/admin/config"),
+    )
+    const getBody = (await getRes.json()) as {
+      modelMappings?: Record<string, string>
+    }
+    expect(getBody.modelMappings).toEqual({
+      "gpt-client": "provider/gpt-target",
+    })
+    expect(getModelMappings()).toEqual({
+      "gpt-client": "provider/gpt-target",
+    })
+  })
+})
+
+test("POST /api/admin/config clears modelMappings", async () => {
+  await withConfig(
+    { modelMappings: { "gpt-client": "provider/gpt-target" } },
+    async () => {
+      const { server } = await import("../src/server")
+
+      const res = await server.fetch(
+        new Request("http://localhost/api/admin/config", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ modelMappings: null }),
+        }),
+      )
+
+      expect(res.status).toBe(200)
+
+      const body = (await res.json()) as {
+        modelMappings?: Record<string, string>
+      }
+      expect(body.modelMappings).toEqual({})
+      expect(getModelMappings()).toEqual({})
+    },
+  )
+})
+
+test("POST /api/admin/config rejects invalid modelMappings", async () => {
+  const cases = [
+    {
+      value: [],
+      message: "modelMappings must be an object",
+    },
+    {
+      value: { "": "target" },
+      message: "modelMappings keys must be non-empty strings",
+    },
+    {
+      value: Object.fromEntries([["__proto__", "target"]]),
+      message: "modelMappings.__proto__ is not allowed",
+    },
+    {
+      value: { source: "" },
+      message: "modelMappings.source must be a non-empty string",
+    },
+    {
+      value: { source: 123 },
+      message: "modelMappings.source must be a string",
+    },
+    {
+      value: { source: "target", " source ": "other-target" },
+      message: 'modelMappings. source  conflicts with normalized key "source"',
+    },
+  ]
+
+  for (const testCase of cases) {
+    await withConfig({}, async () => {
+      const { server } = await import("../src/server")
+
+      const res = await server.fetch(
+        new Request("http://localhost/api/admin/config", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ modelMappings: testCase.value }),
+        }),
+      )
+
+      expect(res.status).toBe(400)
+
+      const body = (await res.json()) as { error?: { message?: string } }
+      expect(body.error?.message).toContain(testCase.message)
+    })
+  }
 })
 
 test("POST /api/admin/config clears modelResponsesApiCompactThresholds", async () => {

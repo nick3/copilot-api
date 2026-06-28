@@ -64,6 +64,7 @@ const SETTINGS_SECTION_IDS = [
   "reasoning",
   "responsesApi",
   "aliases",
+  "mappings",
   "prompts",
   "advanced",
   "providers",
@@ -178,6 +179,12 @@ type ModelAliasItem = {
 type ModelAliasRecord = Record<string, ModelAliasSpec>
 
 type ModelAliasRecordInput = Record<string, ModelAliasSpec | string>
+
+type ModelMappingItem = {
+  id: string
+  source: string
+  target: string
+}
 
 type ProviderModelItem = {
   id: string
@@ -412,6 +419,17 @@ function aliasItemsFromRecord(
   })
 }
 
+function modelMappingItemsFromRecord(
+  record: Record<string, string> | undefined,
+): Array<ModelMappingItem> {
+  if (!record) return []
+  return Object.entries(record).map(([source, target]) => ({
+    id: createItemId(),
+    source,
+    target,
+  }))
+}
+
 function extraPromptRecordFromItems(
   items: Array<ExtraPromptItem>
 ): Record<string, string> {
@@ -477,6 +495,28 @@ function aliasRecordFromItems(items: Array<ModelAliasItem>): ModelAliasRecord {
       item.allowOriginal === undefined
         ? { target }
         : { target, allowOriginal: item.allowOriginal }
+  }
+
+  return record
+}
+
+function modelMappingRecordFromItems(
+  items: Array<ModelMappingItem>,
+): Record<string, string> {
+  const record: Record<string, string> = Object.create(null) as Record<string, string>
+  const seen = new Set<string>()
+
+  for (const item of items) {
+    const source = item.source.trim()
+    const target = item.target.trim()
+    if (!source || !target) continue
+
+    const normalizedSource = source.toLowerCase()
+    if (BLOCKED_ALIAS_KEYS.has(normalizedSource)) continue
+    if (seen.has(normalizedSource)) continue
+
+    seen.add(normalizedSource)
+    record[source] = target
   }
 
   return record
@@ -1267,6 +1307,57 @@ function parseModelAliasesJson(
   }
 }
 
+export function parseModelMappingsJson(
+  value: string,
+): ParseResult<Record<string, string>> {
+  if (!value.trim()) return { record: {} }
+
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (!isPlainObject(parsed)) {
+      return { error: "modelMappings JSON must be an object." }
+    }
+
+    const record: Record<string, string> = Object.create(null) as Record<
+      string,
+      string
+    >
+    const seen = new Set<string>()
+
+    for (const [rawSource, rawTarget] of Object.entries(parsed)) {
+      const source = rawSource.trim()
+      if (!source) {
+        return { error: "modelMappings keys must be non-empty strings." }
+      }
+
+      const normalizedSource = source.toLowerCase()
+      if (BLOCKED_ALIAS_KEYS.has(normalizedSource)) {
+        return { error: `modelMappings.${rawSource} is not allowed.` }
+      }
+      if (seen.has(normalizedSource)) {
+        return {
+          error: `modelMappings.${rawSource} conflicts with another mapping.`,
+        }
+      }
+      if (typeof rawTarget !== "string") {
+        return { error: `modelMappings.${rawSource} must be a string.` }
+      }
+
+      const target = rawTarget.trim()
+      if (!target) {
+        return { error: `modelMappings.${rawSource} must be a non-empty string.` }
+      }
+
+      seen.add(normalizedSource)
+      record[source] = target
+    }
+
+    return { record }
+  } catch {
+    return { error: "modelMappings JSON is not valid." }
+  }
+}
+
 type ExtraPromptEditor = {
   mode: JsonMode
   items: Array<ExtraPromptItem>
@@ -1317,6 +1408,19 @@ type ModelAliasEditor = {
   onRemoveItem: (id: string) => void
   onUpdateItem: (id: string, patch: Partial<ModelAliasItem>) => void
   setFromRecord: (record?: ModelAliasRecordInput) => void
+}
+
+type ModelMappingEditor = {
+  mode: JsonMode
+  items: Array<ModelMappingItem>
+  json: string
+  jsonIssue: string | null
+  onToggleMode: (next: boolean) => void
+  onJsonChange: (value: string) => void
+  onAddItem: () => void
+  onRemoveItem: (id: string) => void
+  onUpdateItem: (id: string, patch: Partial<ModelMappingItem>) => void
+  setFromRecord: (record?: Record<string, string>) => void
 }
 
 function useExtraPromptEditor(
@@ -1657,6 +1761,96 @@ function useModelAliasEditor(
   const onUpdateItem = useCallback(
     (id: string, patch: Partial<ModelAliasItem>) => {
       const next = items.map((item) => (item.id === id ? { ...item, ...patch } : item))
+      updateItems(next)
+    },
+    [items, updateItems],
+  )
+
+  return {
+    mode,
+    items,
+    json,
+    jsonIssue,
+    onToggleMode,
+    onJsonChange,
+    onAddItem,
+    onRemoveItem,
+    onUpdateItem,
+    setFromRecord,
+  }
+}
+
+function useModelMappingEditor(
+  onRecordChange: (record: Record<string, string>) => void,
+): ModelMappingEditor {
+  const [mode, setMode] = useState<JsonMode>("form")
+  const [items, setItems] = useState<Array<ModelMappingItem>>([])
+  const [json, setJson] = useState("")
+  const [jsonError, setJsonError] = useState<string | null>(null)
+
+  const jsonIssue = useMemo(
+    () => (jsonError ? `modelMappings: ${jsonError}` : null),
+    [jsonError],
+  )
+
+  const setFromRecord = useCallback((record?: Record<string, string>) => {
+    const nextItems = modelMappingItemsFromRecord(record)
+    const normalizedRecord = modelMappingRecordFromItems(nextItems)
+    setItems(nextItems)
+    setJson(JSON.stringify(normalizedRecord, null, 2))
+    setJsonError(null)
+  }, [])
+
+  const updateItems = useCallback(
+    (nextItems: Array<ModelMappingItem>) => {
+      setItems(nextItems)
+      onRecordChange(modelMappingRecordFromItems(nextItems))
+    },
+    [onRecordChange],
+  )
+
+  const onJsonChange = useCallback(
+    (value: string) => {
+      updateJsonRecord({
+        value,
+        parse: parseModelMappingsJson,
+        setJson,
+        setError: setJsonError,
+        onRecord: (record) => updateItems(modelMappingItemsFromRecord(record)),
+      })
+    },
+    [updateItems],
+  )
+
+  const onToggleMode = useCallback(
+    (next: boolean) => {
+      toggleJsonMode({
+        next,
+        record: modelMappingRecordFromItems(items),
+        setJson,
+        setError: setJsonError,
+        setMode,
+      })
+    },
+    [items],
+  )
+
+  const onAddItem = useCallback(() => {
+    updateItems(items.concat({ id: createItemId(), source: "", target: "" }))
+  }, [items, updateItems])
+
+  const onRemoveItem = useCallback(
+    (id: string) => {
+      updateItems(items.filter((item) => item.id !== id))
+    },
+    [items, updateItems],
+  )
+
+  const onUpdateItem = useCallback(
+    (id: string, patch: Partial<ModelMappingItem>) => {
+      const next = items.map((item) =>
+        item.id === id ? { ...item, ...patch } : item,
+      )
       updateItems(next)
     },
     [items, updateItems],
@@ -2593,6 +2787,128 @@ function ModelAliasesCard({
             onRemoveItem={onRemoveItem}
             onUpdateItem={onUpdateItem}
           />
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+type ModelMappingsCardProps = {
+  mode: JsonMode
+  json: string
+  jsonIssue: string | null
+  items: Array<ModelMappingItem>
+  onToggleMode: (next: boolean) => void
+  onJsonChange: (value: string) => void
+  onAddItem: () => void
+  onRemoveItem: (id: string) => void
+  onUpdateItem: (id: string, patch: Partial<ModelMappingItem>) => void
+}
+
+export function ModelMappingsCard({
+  mode,
+  json,
+  jsonIssue,
+  items,
+  onToggleMode,
+  onJsonChange,
+  onAddItem,
+  onRemoveItem,
+  onUpdateItem,
+}: ModelMappingsCardProps): React.JSX.Element {
+  const { t } = useTranslation()
+
+  return (
+    <Card className="gap-4 py-4">
+      <CardHeader className="px-4">
+        <CardTitle>{t("settingsPage.mappings.title")}</CardTitle>
+        <CardDescription className="hidden sm:block">
+          {t("settingsPage.mappings.description")}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3 px-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-muted-foreground text-xs">
+            {t("settingsPage.mappings.hint")}
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch checked={mode === "json"} onCheckedChange={onToggleMode} />
+            <Label className="text-muted-foreground text-xs">
+              {t("settingsPage.common.jsonMode")}
+            </Label>
+          </div>
+        </div>
+
+        {mode === "json" ? (
+          <div className="space-y-2">
+            <Textarea
+              value={json}
+              onChange={(e) => onJsonChange(e.target.value)}
+              className="min-h-[160px] lg:min-h-[120px] max-h-[36vh] overflow-auto font-mono text-xs"
+              placeholder={t("settingsPage.mappings.jsonPlaceholder")}
+            />
+            {jsonIssue ? (
+              <InlineAlert
+                variant="warning"
+                title={t("settingsPage.common.invalidJsonTitle")}
+                description={jsonIssue}
+              />
+            ) : null}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {items.length === 0 ? (
+              <div className="text-muted-foreground text-sm">
+                {t("settingsPage.mappings.emptyState")}
+              </div>
+            ) : (
+              items.map((item) => (
+                <div
+                  key={item.id}
+                  className="grid gap-2 rounded-lg border p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
+                >
+                  <label className="grid gap-1">
+                    <span className="text-muted-foreground text-xs">
+                      {t("settingsPage.mappings.sourceLabel")}
+                    </span>
+                    <Input
+                      value={item.source}
+                      placeholder={t("settingsPage.mappings.sourcePlaceholder")}
+                      onChange={(e) =>
+                        onUpdateItem(item.id, { source: e.target.value })
+                      }
+                    />
+                  </label>
+                  <label className="grid gap-1">
+                    <span className="text-muted-foreground text-xs">
+                      {t("settingsPage.mappings.targetLabel")}
+                    </span>
+                    <Input
+                      value={item.target}
+                      placeholder={t("settingsPage.mappings.targetPlaceholder")}
+                      onChange={(e) =>
+                        onUpdateItem(item.id, { target: e.target.value })
+                      }
+                    />
+                  </label>
+                  <div className="flex items-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onRemoveItem(item.id)}
+                    >
+                      {t("settingsPage.common.remove")}
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+
+            <Button type="button" variant="outline" size="sm" onClick={onAddItem}>
+              {t("settingsPage.mappings.addButton")}
+            </Button>
+          </div>
         )}
       </CardContent>
     </Card>
@@ -3819,6 +4135,15 @@ type SettingsPageViewProps = {
   onAliasAddItem: () => void
   onAliasRemoveItem: (id: string) => void
   onAliasUpdateItem: (id: string, value: Partial<ModelAliasItem>) => void
+  mappingMode: JsonMode
+  mappingJson: string
+  mappingJsonIssue: string | null
+  mappingItems: Array<ModelMappingItem>
+  onMappingToggleMode: (next: boolean) => void
+  onMappingJsonChange: (value: string) => void
+  onMappingAddItem: () => void
+  onMappingRemoveItem: (id: string) => void
+  onMappingUpdateItem: (id: string, value: Partial<ModelMappingItem>) => void
   allowOriginalModelNamesForAliases: boolean
   forceAgent: boolean
   compactUseSmallModel: boolean
@@ -3902,6 +4227,10 @@ function useSettingsPageState(): SettingsPageViewProps {
     setDraft((prev) => ({ ...prev, modelAliases: record })),
   )
 
+  const mappingEditor = useModelMappingEditor((record) =>
+    setDraft((prev) => ({ ...prev, modelMappings: record })),
+  )
+
   const providersEditor = useProvidersEditor((record) =>
     setDraft((prev) => ({ ...prev, providers: record })),
   )
@@ -3959,6 +4288,19 @@ function useSettingsPageState(): SettingsPageViewProps {
   } = aliasEditor
 
   const {
+    mode: mappingMode,
+    items: mappingItems,
+    json: mappingJson,
+    jsonIssue: mappingJsonIssue,
+    onToggleMode: onMappingToggleMode,
+    onJsonChange: onMappingJsonChange,
+    onAddItem: onMappingAddItem,
+    onRemoveItem: onMappingRemoveItem,
+    onUpdateItem: onMappingUpdateItem,
+    setFromRecord: setMappingFromRecord,
+  } = mappingEditor
+
+  const {
     items: providersItems,
     issue: providersIssue,
     onAddProvider: onProvidersAddProvider,
@@ -3976,6 +4318,8 @@ function useSettingsPageState(): SettingsPageViewProps {
       const { _configPath, ...configData } = config
       const aliasItems = aliasItemsFromRecord(configData.modelAliases)
       const normalizedAliases = aliasRecordFromItems(aliasItems)
+      const mappingItems = modelMappingItemsFromRecord(configData.modelMappings)
+      const normalizedMappings = modelMappingRecordFromItems(mappingItems)
       const normalizedAuthApiKeys = getAuthApiKeysFromConfig(configData)
 
       setConfigPath(_configPath ?? null)
@@ -3983,6 +4327,7 @@ function useSettingsPageState(): SettingsPageViewProps {
         ...configData,
         auth: { apiKeys: normalizedAuthApiKeys },
         modelAliases: normalizedAliases,
+        modelMappings: normalizedMappings,
       }
       setDraft(normalizedDraft)
       setInitialDraftJson(toComparableDraftJson(normalizedDraft))
@@ -3992,6 +4337,7 @@ function useSettingsPageState(): SettingsPageViewProps {
         configData.modelResponsesApiCompactThresholds,
       )
       setAliasFromRecord(normalizedAliases)
+      setMappingFromRecord(normalizedMappings)
       setProvidersFromRecord(configData.providers)
       setModelRefreshIntervalInput(
         toNumberInputValue(configData.modelRefreshIntervalHours),
@@ -4010,6 +4356,7 @@ function useSettingsPageState(): SettingsPageViewProps {
       setReasoningFromRecord,
       setCompactThresholdsFromRecord,
       setAliasFromRecord,
+      setMappingFromRecord,
       setProvidersFromRecord,
       setModelRefreshIntervalInput,
       setModelRefreshIntervalIssue,
@@ -4259,6 +4606,7 @@ function useSettingsPageState(): SettingsPageViewProps {
       compactThresholdsMode === "json" && compactThresholdsJsonIssue
     )
     && !(aliasMode === "json" && aliasJsonIssue)
+    && !(mappingMode === "json" && mappingJsonIssue)
     && !modelRefreshIntervalIssue
     && !sessionAffinityRetentionIssue
     && !providersIssue
@@ -4418,6 +4766,15 @@ function useSettingsPageState(): SettingsPageViewProps {
     onAliasAddItem,
     onAliasRemoveItem,
     onAliasUpdateItem,
+    mappingMode,
+    mappingJson,
+    mappingJsonIssue,
+    mappingItems,
+    onMappingToggleMode,
+    onMappingJsonChange,
+    onMappingAddItem,
+    onMappingRemoveItem,
+    onMappingUpdateItem,
     forceAgent,
     compactUseSmallModel,
     messageStartInputTokensFallback,
@@ -4522,6 +4879,15 @@ function SettingsPageView({
   onAliasAddItem,
   onAliasRemoveItem,
   onAliasUpdateItem,
+  mappingMode,
+  mappingJson,
+  mappingJsonIssue,
+  mappingItems,
+  onMappingToggleMode,
+  onMappingJsonChange,
+  onMappingAddItem,
+  onMappingRemoveItem,
+  onMappingUpdateItem,
   allowOriginalModelNamesForAliases,
   forceAgent,
   compactUseSmallModel,
@@ -4560,6 +4926,7 @@ function SettingsPageView({
       { id: "reasoning", label: t("settingsPage.sections.reasoning") },
       { id: "responsesApi", label: t("settingsPage.sections.responsesApi") },
       { id: "aliases", label: t("settingsPage.sections.aliases") },
+      { id: "mappings", label: t("settingsPage.sections.mappings") },
       { id: "prompts", label: t("settingsPage.sections.prompts") },
       { id: "advanced", label: t("settingsPage.sections.advanced") },
       { id: "providers", label: t("settingsPage.sections.providers") },
@@ -4769,6 +5136,26 @@ function SettingsPageView({
               onAddItem={onAliasAddItem}
               onRemoveItem={onAliasRemoveItem}
               onUpdateItem={onAliasUpdateItem}
+            />
+          </SettingsSectionCard>
+
+          {/* Model Mappings */}
+          <SettingsSectionCard
+            id="mappings"
+            isActive={activeSection === "mappings"}
+            ref={(el) => registerSection("mappings", el)}
+            style={{ animationDelay: "150ms" }}
+          >
+            <ModelMappingsCard
+              mode={mappingMode}
+              json={mappingJson}
+              jsonIssue={mappingJsonIssue}
+              items={mappingItems}
+              onToggleMode={onMappingToggleMode}
+              onJsonChange={onMappingJsonChange}
+              onAddItem={onMappingAddItem}
+              onRemoveItem={onMappingRemoveItem}
+              onUpdateItem={onMappingUpdateItem}
             />
           </SettingsSectionCard>
 

@@ -559,6 +559,7 @@
       "accountAffinity": "Account Affinity",
       "reasoning": "Reasoning",
       "aliases": "Aliases",
+      "mappings": "Mappings",
       "prompts": "Prompts",
       "advanced": "Advanced",
       "responsesApi": "Responses API",
@@ -661,6 +662,18 @@
       "blockOriginal": "Block original model ID",
       "emptyState": "No model aliases configured.",
       "addButton": "Add alias"
+    },
+    "mappings": {
+      "title": "Model mappings",
+      "description": "Rewrite exact client model names before provider alias parsing.",
+      "hint": "Mappings are shared by /v1/messages, /v1/messages/count_tokens, /v1/responses, and /v1/chat/completions.",
+      "jsonPlaceholder": "{ \"gpt-5.5\": \"copilot/gpt-5.5\" }",
+      "emptyState": "No model mappings configured.",
+      "sourceLabel": "Client model",
+      "targetLabel": "Target model",
+      "sourcePlaceholder": "gpt-5.5",
+      "targetPlaceholder": "gpt-5.5 or provider/model",
+      "addButton": "Add mapping"
     },
     "responsesApi": {
       "title": "Responses API",

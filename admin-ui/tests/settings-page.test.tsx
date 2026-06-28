@@ -2,12 +2,14 @@ import { expect, test } from "bun:test"
 import { renderToStaticMarkup } from "react-dom/server"
 
 import {
+  ModelMappingsCard,
   ResponsesApiSettingsCard,
   compactThresholdRecordFromItems,
   createQuickProviderItem,
   deriveProviderModelSuggestions,
   getUniqueProviderName,
   parseCompactThresholdsJson,
+  parseModelMappingsJson,
 } from "../src/pages/settings-page"
 
 test("Responses API settings exposes transport toggles and context management", () => {
@@ -244,6 +246,42 @@ test("compact threshold form record skips decimals", () => {
   ])
 
   expect(record).toEqual({ "gpt-5.5": 2 })
+})
+
+test("model mappings card renders mappings editor", () => {
+  const html = renderToStaticMarkup(
+    <ModelMappingsCard
+      mode="form"
+      json="{}"
+      jsonIssue={null}
+      items={[
+        {
+          id: "mapping-1",
+          source: "gpt-client",
+          target: "provider/gpt-target",
+        },
+      ]}
+      onAddItem={() => {}}
+      onJsonChange={() => {}}
+      onRemoveItem={() => {}}
+      onToggleMode={() => {}}
+      onUpdateItem={() => {}}
+    />,
+  )
+
+  expect(html).toContain("Model mappings")
+  expect(html).toContain("gpt-client")
+  expect(html).toContain("provider/gpt-target")
+  expect(html).toContain("Add mapping")
+})
+
+test("model mappings JSON validation rejects invalid shapes", () => {
+  expect(parseModelMappingsJson("[]")).toEqual({
+    error: "modelMappings JSON must be an object.",
+  })
+  expect(parseModelMappingsJson('{ "gpt-client": "" }')).toEqual({
+    error: "modelMappings.gpt-client must be a non-empty string.",
+  })
 })
 
 test("provider quick add generates unique provider names", () => {
