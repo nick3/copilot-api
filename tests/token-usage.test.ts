@@ -13,6 +13,7 @@ import { state } from "~/lib/state"
 import {
   closeUsageStore,
   createCopilotTokenUsageRecorder,
+  mergeCopilotAiuUsage,
   normalizeOpenAIUsage,
   recordTokenUsageEvent,
   type TokenUsageDailySummary,
@@ -24,8 +25,10 @@ import { adminApiRoutes } from "~/routes/admin-api/route"
 import { tokenUsageRoute } from "~/routes/token-usage/route"
 
 const DB_PATH_ENV = "COPILOT_API_SQLITE_DB_PATH"
+let dbPathBeforeTest: string | undefined
 
 beforeEach(async () => {
+  dbPathBeforeTest = process.env[DB_PATH_ENV]
   process.env[DB_PATH_ENV] = ":memory:"
   state.userName = "copilot-login"
   await closeUsageStore()
@@ -35,7 +38,12 @@ afterEach(async () => {
   await closeUsageStore()
   setSystemTime()
   state.userName = undefined
-  Reflect.deleteProperty(process.env, DB_PATH_ENV)
+  if (dbPathBeforeTest === undefined) {
+    Reflect.deleteProperty(process.env, DB_PATH_ENV)
+  } else {
+    process.env[DB_PATH_ENV] = dbPathBeforeTest
+  }
+  dbPathBeforeTest = undefined
 })
 
 function createTokenUsageApp(): Hono {
@@ -89,6 +97,32 @@ describe("token usage storage", () => {
       input_tokens: 68,
       output_tokens: 10,
       total_tokens: 110,
+    })
+  })
+
+  test("keeps existing AIU when merged Copilot usage is absent", () => {
+    expect(
+      mergeCopilotAiuUsage(
+        {
+          input_tokens: 100,
+          total_nano_aiu: 500,
+        },
+        null,
+      ),
+    ).toEqual({
+      input_tokens: 100,
+      total_nano_aiu: 500,
+    })
+
+    expect(
+      mergeCopilotAiuUsage(
+        {
+          input_tokens: 100,
+        },
+        undefined,
+      ),
+    ).toEqual({
+      input_tokens: 100,
     })
   })
 

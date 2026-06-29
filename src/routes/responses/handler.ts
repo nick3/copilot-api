@@ -34,6 +34,12 @@ import {
 } from "~/lib/request-history"
 import { state } from "~/lib/state"
 import {
+  createCopilotTokenUsageRecorder,
+  mergeCopilotAiuUsage,
+  normalizeResponsesUsage,
+  type UsageTokens,
+} from "~/lib/token-usage"
+import {
   generateRequestIdFromPayload,
   getUUID,
   parseUserIdMetadata,
@@ -231,6 +237,12 @@ export const handleResponses = async (c: Context) => {
   )
   request.upstreamRequestId = upstreamRequestId
   request.upstreamSessionId = upstreamSessionId
+  const recordTokenUsage = createCopilotTokenUsageRecorder({
+    endpoint: "responses",
+    fallbackSessionId: upstreamSessionId,
+    model: selectedModel.id,
+    sessionId: normalizedPromptCacheKey ?? headerSessionId ?? undefined,
+  })
 
   // Set by the Responses websocket bridge (src/routes/responses/websocket.ts) so
   // the upstream pool can close the originating bridge socket when its GitHub
@@ -253,6 +265,7 @@ export const handleResponses = async (c: Context) => {
       premiumUnlimitedBefore,
       transport,
       bridgeId,
+      recordTokenUsage,
     })
   }
 
@@ -271,6 +284,7 @@ export const handleResponses = async (c: Context) => {
     premiumUnlimitedBefore,
     transport,
     bridgeId,
+    recordTokenUsage,
   })
 }
 
@@ -505,6 +519,33 @@ function extractUsageFromChunkData(
   }
 }
 
+function extractTokenUsageFromChunkData(
+  data: string | undefined,
+): UsageTokens | undefined {
+  if (!data) return undefined
+
+  try {
+    const event = JSON.parse(data) as ResponseStreamEvent
+    if (
+      event.type !== "response.completed"
+      && event.type !== "response.incomplete"
+      && event.type !== "response.failed"
+    ) {
+      return undefined
+    }
+    const response = event.response
+    if (!response) {
+      return undefined
+    }
+    return mergeCopilotAiuUsage(
+      normalizeResponsesUsage(response.usage),
+      event.copilot_usage ?? response.copilot_usage,
+    )
+  } catch {
+    return undefined
+  }
+}
+
 async function handleStreamingResponses(params: {
   c: Context
   store: Store
@@ -520,6 +561,7 @@ async function handleStreamingResponses(params: {
   premiumUnlimitedBefore: boolean | undefined
   transport: ResponsesTransport
   bridgeId: string | undefined
+  recordTokenUsage: (usage: UsageTokens) => void
 }): Promise<Response> {
   const {
     c,
@@ -536,6 +578,7 @@ async function handleStreamingResponses(params: {
     premiumUnlimitedBefore,
     transport,
     bridgeId,
+    recordTokenUsage,
   } = params
 
   let response: Awaited<ReturnType<typeof createResponses>>
@@ -581,6 +624,7 @@ async function handleStreamingResponses(params: {
         clientModel,
         premiumRemainingBefore,
         premiumUnlimitedBefore,
+        recordTokenUsage,
       }),
     )
   }
@@ -594,6 +638,7 @@ async function handleStreamingResponses(params: {
     premiumRemainingBefore,
     premiumUnlimitedBefore,
     result: response,
+    recordTokenUsage,
   })
 }
 
@@ -675,6 +720,7 @@ async function handleNonStreamingUpstreamResult(params: {
   premiumRemainingBefore: number | undefined
   premiumUnlimitedBefore: boolean | undefined
   result: ResponsesResult
+  recordTokenUsage: (usage: UsageTokens) => void
 }): Promise<Response> {
   const {
     c,
@@ -685,12 +731,17 @@ async function handleNonStreamingUpstreamResult(params: {
     premiumRemainingBefore,
     premiumUnlimitedBefore,
     result,
+    recordTokenUsage,
   } = params
 
   const { account, reservation, selectedModel, endpoint, costUnits } = selection
 
   let httpStatus = 200
   const usage: NormalizedUsage = extractResponsesUsageFromResult(result)
+  const tokenUsage = mergeCopilotAiuUsage(
+    normalizeResponsesUsage(result.usage),
+    result.copilot_usage,
+  )
   let errorName: string | undefined
   let errorStatus: number | undefined
   let errorMessage: string | undefined
@@ -703,6 +754,7 @@ async function handleNonStreamingUpstreamResult(params: {
       value: result,
       tailLength: 400,
     })
+    recordTokenUsage(tokenUsage)
     return c.json(result)
   } catch (error) {
     const details = await extractErrorObservability(error)
@@ -757,6 +809,7 @@ async function streamResponsesAndLog(params: {
   clientModel: string
   premiumRemainingBefore: number | undefined
   premiumUnlimitedBefore: boolean | undefined
+  recordTokenUsage: (usage: UsageTokens) => void
 }): Promise<void> {
   const {
     stream,
@@ -767,6 +820,7 @@ async function streamResponsesAndLog(params: {
     clientModel,
     premiumRemainingBefore,
     premiumUnlimitedBefore,
+    recordTokenUsage,
   } = params
 
   const { account, reservation, selectedModel, endpoint, costUnits } = selection
@@ -774,6 +828,8 @@ async function streamResponsesAndLog(params: {
   const idTracker = createStreamIdTracker()
   let ttfbMs: number | undefined
   let lastUsage: NormalizedUsage = {}
+  let tokenUsage: UsageTokens | undefined
+  let tokenUsageRecorded = false
   let errorName: string | undefined
   let errorStatus: number | undefined
   let errorMessage: string | undefined
@@ -785,12 +841,19 @@ async function streamResponsesAndLog(params: {
         ttfbMs = Date.now() - request.startedAtMs
       }
 
-      const { id, event, data } = getStreamChunkFields(chunk)
+      const { id, event, data: rawData } = getStreamChunkFields(chunk)
+      const data = typeof rawData === "string" ? rawData : await rawData
       const processedData = fixStreamIds(data ?? "", event, idTracker)
 
       const usage = extractUsageFromChunkData(processedData)
       if (usage) {
         lastUsage = usage
+      }
+      const usageForTokenStore = extractTokenUsageFromChunkData(processedData)
+      if (usageForTokenStore) {
+        tokenUsage = usageForTokenStore
+        recordTokenUsage(tokenUsage)
+        tokenUsageRecorded = true
       }
 
       debugJson(logger, "Responses stream chunk:", chunk)
@@ -830,6 +893,10 @@ async function streamResponsesAndLog(params: {
 
     const premiumRemainingAfter = account.premiumRemaining
     const premiumUnlimitedAfter = account.unlimited
+
+    if (!tokenUsageRecorded && tokenUsage) {
+      recordTokenUsage(tokenUsage)
+    }
 
     insertRequestLog(store, request, {
       finishedAtMs,
@@ -875,6 +942,7 @@ async function handleNonStreamingResponses(params: {
   premiumUnlimitedBefore: boolean | undefined
   transport: ResponsesTransport
   bridgeId: string | undefined
+  recordTokenUsage: (usage: UsageTokens) => void
 }): Promise<Response> {
   const {
     c,
@@ -891,9 +959,11 @@ async function handleNonStreamingResponses(params: {
     premiumUnlimitedBefore,
     transport,
     bridgeId,
+    recordTokenUsage,
   } = params
   const { account, reservation, selectedModel, endpoint, costUnits } = selection
   let usage: NormalizedUsage = {}
+  let tokenUsage: UsageTokens = {}
   let errorState: ObservedErrorState = { httpStatus: 200 }
   let finishedAtMs: number | undefined
   try {
@@ -918,10 +988,15 @@ async function handleNonStreamingResponses(params: {
     finishedAtMs = Date.now()
     const result = response
     usage = extractResponsesUsageFromResult(result)
+    tokenUsage = mergeCopilotAiuUsage(
+      normalizeResponsesUsage(result.usage),
+      result.copilot_usage,
+    )
     debugJsonTail(logger, "Forwarding native Responses result:", {
       value: result,
       tailLength: 400,
     })
+    recordTokenUsage(tokenUsage)
     return c.json(result)
   } catch (error) {
     finishedAtMs = Date.now()

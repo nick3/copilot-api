@@ -75,6 +75,10 @@ type ProviderTokenUsageRecorderOptions = Omit<
   "source"
 >
 
+export interface CopilotAiuUsage {
+  total_nano_aiu?: number | null
+}
+
 interface TokenUsageEventMap {
   "token_usage.recorded": PersistedTokenUsageEvent
 }
@@ -265,6 +269,31 @@ export function normalizeResponsesUsage(
     input_tokens: Math.max(0, inputTokens - cachedTokens),
     output_tokens: normalizeToken(usage?.output_tokens),
     total_tokens: normalizeOptionalToken(usage?.total_tokens),
+  }
+}
+
+export function normalizeCopilotAiuUsage(
+  usage: CopilotAiuUsage | null | undefined,
+): UsageTokens {
+  return {
+    total_nano_aiu: normalizeOptionalToken(usage?.total_nano_aiu),
+  }
+}
+
+export function mergeCopilotAiuUsage(
+  usage: UsageTokens,
+  copilotUsage: CopilotAiuUsage | null | undefined,
+): UsageTokens {
+  if (
+    copilotUsage?.total_nano_aiu === undefined
+    || copilotUsage.total_nano_aiu === null
+  ) {
+    return usage
+  }
+
+  return {
+    ...usage,
+    ...normalizeCopilotAiuUsage(copilotUsage),
   }
 }
 

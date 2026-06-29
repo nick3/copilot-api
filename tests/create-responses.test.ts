@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 
 import type { AccountContext } from "~/lib/types/account"
 import type {
+  ResponseIncludable,
+  ResponseStreamEvent,
   ResponsesPayload,
   ResponsesResult,
 } from "~/services/copilot/create-responses"
@@ -62,6 +64,79 @@ const createResponsesResult = (model: string): ResponsesResult => ({
   usage: null,
 })
 
+const supportedResponseIncludables: Array<ResponseIncludable> = [
+  "web_search_call.results",
+  "web_search_call.action.sources",
+  "message.output_text.logprobs",
+]
+
+const responseStreamEventsWithCopilotUsage: Array<ResponseStreamEvent> = [
+  {
+    copilot_usage: {
+      total_nano_aiu: 1_000_000_000,
+    },
+    response: {
+      ...createResponsesResult("gpt-test"),
+      output: [
+        {
+          action: {
+            query: "node lts",
+            sources: [{ type: "url", url: "https://nodejs.org" }],
+          },
+          id: "search-1",
+          status: "completed",
+          type: "web_search_call",
+        },
+      ],
+    },
+    sequence_number: 1,
+    type: "response.completed",
+  },
+  {
+    response: createResponsesResult("gpt-test"),
+    sequence_number: 2,
+    type: "response.in_progress",
+  },
+  {
+    content_index: 0,
+    item_id: "msg-1",
+    output_index: 0,
+    part: {
+      annotations: [],
+      text: "",
+      type: "output_text",
+    },
+    sequence_number: 3,
+    type: "response.content_part.added",
+  },
+  {
+    annotation: {
+      title: "Node.js",
+      type: "url_citation",
+      url: "https://nodejs.org",
+    },
+    content_index: 0,
+    item_id: "msg-1",
+    output_index: 0,
+    sequence_number: 4,
+    type: "response.output_text.annotation.added",
+  },
+  {
+    item_id: "search-1",
+    output_index: 0,
+    sequence_number: 5,
+    type: "response.web_search_call.searching",
+  },
+  {
+    item_id: "reasoning-1",
+    output_index: 0,
+    part: { text: "Searching", type: "summary_text" },
+    sequence_number: 6,
+    summary_index: 0,
+    type: "response.reasoning_summary_part.done",
+  },
+]
+
 const fetchMock = mock((_url: string | URL | Request, _init?: RequestInit) =>
   Promise.resolve(
     new Response(JSON.stringify(createResponsesResult("gpt-test")), {
@@ -119,6 +194,13 @@ afterEach(() => {
 })
 
 describe("createResponses HTTP headers", () => {
+  test("types include Copilot AIU and current Responses stream events", () => {
+    expect(supportedResponseIncludables).toHaveLength(3)
+    expect(
+      responseStreamEventsWithCopilotUsage.map((event) => event.type),
+    ).toContain("response.web_search_call.searching")
+  })
+
   test("keeps x-initiator as user for ordinary responses requests", async () => {
     await createResponses(
       basePayload([{ role: "user", content: "hello" }]),

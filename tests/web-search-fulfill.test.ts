@@ -12,6 +12,7 @@ import type {
 
 import {
   buildSyntheticStreamEvents,
+  collectWebSearchResponsesStreamResult,
   handleWebSearchViaResponses,
   hasWebSearchServerTool,
   isWebSearchOnlyRequest,
@@ -275,6 +276,9 @@ async function* makeResponsesStream(result: ResponsesResult) {
   yield {
     event: "response.completed",
     data: JSON.stringify({
+      copilot_usage: {
+        total_nano_aiu: 987_000_000,
+      },
       response: {
         ...result,
         output: [],
@@ -283,6 +287,15 @@ async function* makeResponsesStream(result: ResponsesResult) {
       sequence_number: 17,
       type: "response.completed",
     }),
+  }
+}
+
+async function* makeResponsesStreamWithPromiseData(result: ResponsesResult) {
+  for await (const chunk of makeResponsesStream(result)) {
+    yield {
+      ...chunk,
+      data: Promise.resolve(chunk.data),
+    }
   }
 }
 
@@ -426,6 +439,29 @@ describe("resolveWebSearchRoute", () => {
 })
 
 describe("handleWebSearchViaResponses", () => {
+  it("preserves Copilot AIU from terminal Responses stream events", async () => {
+    const result = await collectWebSearchResponsesStreamResult({
+      logger: consola,
+      upstreamResponse: makeResponsesStream(makeResponsesResult()),
+    })
+
+    expect(result.copilot_usage?.total_nano_aiu).toBe(987_000_000)
+  })
+
+  it("collects terminal Responses events when stream data is promise-backed", async () => {
+    const result = await collectWebSearchResponsesStreamResult({
+      logger: consola,
+      upstreamResponse: makeResponsesStreamWithPromiseData(
+        makeResponsesResult(),
+      ) as never,
+    })
+
+    expect(JSON.stringify(result.output)).toContain(
+      "Node.js 24 is the latest LTS.",
+    )
+    expect(result.copilot_usage?.total_nano_aiu).toBe(987_000_000)
+  })
+
   it("switches model, runs Responses web_search, and reconstructs blocks", async () => {
     let sentPayload: ResponsesPayload | undefined
     webSearchFlowDependencies.createResponses = (payload: ResponsesPayload) => {

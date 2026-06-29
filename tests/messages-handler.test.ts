@@ -35,6 +35,7 @@ const originalSelect =
 const originalFinalize = accountsManager.finalizeQuota.bind(accountsManager)
 const originalMarkFailed =
   accountsManager.markAccountFailed.bind(accountsManager)
+let dbPathBeforeTest: string | undefined
 
 function parseFetchBody(body: unknown): Record<string, unknown> {
   if (typeof body !== "string") {
@@ -189,7 +190,18 @@ function createPayload(
   }
 }
 
+async function readSingleTokenUsageEvent() {
+  const usageEvents = await getTokenUsageEventsPage({
+    page: 1,
+    pageSize: 10,
+    period: "day",
+  })
+  expect(usageEvents.items).toHaveLength(1)
+  return usageEvents.items[0]
+}
+
 beforeEach(async () => {
+  dbPathBeforeTest = process.env[DB_PATH_ENV]
   process.env[DB_PATH_ENV] = ":memory:"
   await closeUsageStore()
 
@@ -210,7 +222,12 @@ afterEach(async () => {
   accountsManager.finalizeQuota = originalFinalize
   accountsManager.markAccountFailed = originalMarkFailed
   await closeUsageStore()
-  Reflect.deleteProperty(process.env, DB_PATH_ENV)
+  if (dbPathBeforeTest === undefined) {
+    Reflect.deleteProperty(process.env, DB_PATH_ENV)
+  } else {
+    process.env[DB_PATH_ENV] = dbPathBeforeTest
+  }
+  dbPathBeforeTest = undefined
 })
 
 describe("messages handler sanitization", () => {
@@ -782,6 +799,205 @@ describe("messages handler routing", () => {
     expect(selection.confirmOwnership).toHaveBeenCalledTimes(1)
   })
 
+  test("records Copilot AIU when Messages routes to non-streaming Responses", async () => {
+    const selection = buildSelection("/responses", "responses-model")
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    const fetchMock = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ...buildResponsesResult("responses-model", "responses"),
+            copilot_usage: {
+              total_nano_aiu: 1_500_000_000,
+            },
+            usage: {
+              input_tokens: 9,
+              input_tokens_details: {
+                cached_tokens: 2,
+              },
+              output_tokens: 3,
+              total_tokens: 12,
+            },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      ),
+    )
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(createPayload()),
+      }),
+    )
+    await response.text()
+
+    expect(response.status).toBe(200)
+    expect(await readSingleTokenUsageEvent()).toMatchObject({
+      cache_read_input_tokens: 2,
+      cost: {
+        amount: 0.015,
+        currency: "USD",
+        source: "copilot_aiu",
+        total_cost_nanos: 15_000_000,
+      },
+      endpoint: "responses",
+      input_tokens: 7,
+      model: "responses-model",
+      output_tokens: 3,
+      source: "copilot",
+      total_nano_aiu: 1_500_000_000,
+      total_tokens: 12,
+    })
+  })
+
+  test("records Copilot AIU when Messages routes to streaming Responses", async () => {
+    const selection = buildSelection("/responses", "responses-model")
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    const fetchMock = mock(() =>
+      Promise.resolve(
+        new Response(
+          [
+            "event: response.completed",
+            `data: ${JSON.stringify({
+              copilot_usage: {
+                total_nano_aiu: 2_250_000_000,
+              },
+              response: {
+                ...buildResponsesResult("responses-model", "responses"),
+                usage: {
+                  input_tokens: 11,
+                  input_tokens_details: {
+                    cached_tokens: 4,
+                  },
+                  output_tokens: 5,
+                  total_tokens: 16,
+                },
+              },
+              sequence_number: 1,
+              type: "response.completed",
+            })}`,
+            "",
+            "",
+          ].join("\n"),
+          {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          },
+        ),
+      ),
+    )
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(createPayload({ stream: true })),
+      }),
+    )
+    await response.text()
+
+    expect(response.status).toBe(200)
+    expect(await readSingleTokenUsageEvent()).toMatchObject({
+      cache_read_input_tokens: 4,
+      cost: {
+        amount: 0.0225,
+        currency: "USD",
+        source: "copilot_aiu",
+        total_cost_nanos: 22_500_000,
+      },
+      endpoint: "responses",
+      input_tokens: 7,
+      model: "responses-model",
+      output_tokens: 5,
+      source: "copilot",
+      total_nano_aiu: 2_250_000_000,
+      total_tokens: 16,
+    })
+  })
+
+  test("records Copilot AIU when Messages web search routes through Responses", async () => {
+    const selection = buildSelection("/responses", "search-model")
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    let upstreamBody: Record<string, unknown> | undefined
+    const fetchMock = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = parseFetchBody(opts?.body)
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ...buildResponsesResult("search-model", "search result"),
+            copilot_usage: {
+              total_nano_aiu: 1_750_000_000,
+            },
+            usage: {
+              input_tokens: 13,
+              input_tokens_details: {
+                cached_tokens: 6,
+              },
+              output_tokens: 4,
+              total_tokens: 17,
+            },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          createPayload({
+            tools: [
+              { type: "web_search_20250305", name: "web_search" },
+            ] as never,
+          }),
+        ),
+      }),
+    )
+    await response.text()
+
+    expect(response.status).toBe(200)
+    expect(upstreamBody?.model).toBe("search-model")
+    expect(await readSingleTokenUsageEvent()).toMatchObject({
+      cache_read_input_tokens: 6,
+      cost: {
+        amount: 0.0175,
+        currency: "USD",
+        source: "copilot_aiu",
+        total_cost_nanos: 17_500_000,
+      },
+      endpoint: "responses",
+      input_tokens: 7,
+      model: "search-model",
+      output_tokens: 4,
+      source: "copilot",
+      total_nano_aiu: 1_750_000_000,
+      total_tokens: 17,
+    })
+  })
+
   test("falls back to Chat Completions when selection chooses /chat/completions", async () => {
     let requestedUrl = ""
     let upstreamBody: Record<string, unknown> | undefined
@@ -825,6 +1041,168 @@ describe("messages handler routing", () => {
     expect(body.content[0].text).toBe("chat")
     expect(selection.confirmAffinity).toHaveBeenCalledTimes(1)
     expect(selection.confirmOwnership).toHaveBeenCalledTimes(1)
+  })
+
+  test("records Copilot AIU when Messages routes to non-streaming Chat Completions", async () => {
+    const selection = buildSelection("/chat/completions", "chat-model")
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    const fetchMock = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ...buildChatCompletionResponse("chat-model", "chat"),
+            copilot_usage: {
+              total_nano_aiu: 3_500_000_000,
+            },
+            usage: {
+              prompt_tokens: 12,
+              completion_tokens: 4,
+              total_tokens: 16,
+              prompt_tokens_details: {
+                cached_tokens: 5,
+              },
+            },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      ),
+    )
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(createPayload()),
+      }),
+    )
+    await response.text()
+
+    expect(response.status).toBe(200)
+    expect(await readSingleTokenUsageEvent()).toMatchObject({
+      cache_read_input_tokens: 5,
+      cost: {
+        amount: 0.035,
+        currency: "USD",
+        source: "copilot_aiu",
+        total_cost_nanos: 35_000_000,
+      },
+      endpoint: "chat_completions",
+      input_tokens: 7,
+      model: "chat-model",
+      output_tokens: 4,
+      source: "copilot",
+      total_nano_aiu: 3_500_000_000,
+      total_tokens: 16,
+    })
+  })
+
+  test("records Copilot AIU when Messages routes to streaming Chat Completions", async () => {
+    const selection = buildSelection("/chat/completions", "chat-model")
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    const fetchMock = mock(() =>
+      Promise.resolve(
+        new Response(
+          [
+            "data: "
+              + JSON.stringify({
+                id: "chatcmpl_1",
+                object: "chat.completion.chunk",
+                created: 0,
+                model: "chat-model",
+                choices: [
+                  {
+                    index: 0,
+                    delta: { role: "assistant", content: "chat" },
+                    finish_reason: null,
+                    logprobs: null,
+                  },
+                ],
+                usage: {
+                  prompt_tokens: 15,
+                  completion_tokens: 6,
+                  total_tokens: 21,
+                  prompt_tokens_details: {
+                    cached_tokens: 8,
+                  },
+                },
+              }),
+            "",
+            "data: "
+              + JSON.stringify({
+                id: "chatcmpl_1",
+                object: "chat.completion.chunk",
+                created: 0,
+                model: "chat-model",
+                choices: [],
+                copilot_usage: {
+                  total_nano_aiu: 4_000_000_000,
+                },
+              }),
+            "",
+            "data: "
+              + JSON.stringify({
+                id: "chatcmpl_1",
+                object: "chat.completion.chunk",
+                created: 0,
+                model: "chat-model",
+                choices: [
+                  {
+                    index: 0,
+                    delta: {},
+                    finish_reason: "stop",
+                    logprobs: null,
+                  },
+                ],
+              }),
+            "",
+            "data: [DONE]",
+            "",
+          ].join("\n"),
+          {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          },
+        ),
+      ),
+    )
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(createPayload({ stream: true })),
+      }),
+    )
+    await response.text()
+
+    expect(response.status).toBe(200)
+    expect(await readSingleTokenUsageEvent()).toMatchObject({
+      cache_read_input_tokens: 8,
+      cost: {
+        amount: 0.04,
+        currency: "USD",
+        source: "copilot_aiu",
+        total_cost_nanos: 40_000_000,
+      },
+      endpoint: "chat_completions",
+      input_tokens: 7,
+      model: "chat-model",
+      output_tokens: 6,
+      source: "copilot",
+      total_nano_aiu: 4_000_000_000,
+      total_tokens: 21,
+    })
   })
 })
 

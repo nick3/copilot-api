@@ -28,6 +28,13 @@ import {
 import { state } from "~/lib/state"
 import { getTokenCount } from "~/lib/tokenizer"
 import {
+  createCopilotTokenUsageRecorder,
+  mergeCopilotAiuUsage,
+  normalizeCopilotAiuUsage,
+  normalizeOpenAIUsage,
+  type UsageTokens,
+} from "~/lib/token-usage"
+import {
   generateRequestIdFromPayload,
   getUUID,
   isNullish,
@@ -207,6 +214,12 @@ export async function handleCompletion(c: Context) {
   )
   request.upstreamRequestId = upstreamRequestId
   request.upstreamSessionId = upstreamSessionId
+  const recordTokenUsage = createCopilotTokenUsageRecorder({
+    endpoint: "chat_completions",
+    fallbackSessionId: upstreamSessionId,
+    model: selectedModel.id,
+    sessionId: normalizedPromptCacheKey ?? headerSessionId ?? undefined,
+  })
 
   if (streamRequested) {
     return handleStreamingRequest({
@@ -219,6 +232,7 @@ export async function handleCompletion(c: Context) {
       clientModel,
       premiumRemainingBefore,
       premiumUnlimitedBefore,
+      recordTokenUsage,
     })
   }
 
@@ -232,6 +246,7 @@ export async function handleCompletion(c: Context) {
     clientModel,
     premiumRemainingBefore,
     premiumUnlimitedBefore,
+    recordTokenUsage,
   })
 }
 
@@ -399,6 +414,7 @@ async function handleStreamingRequest(params: {
   clientModel: string
   premiumRemainingBefore: number | undefined
   premiumUnlimitedBefore: boolean | undefined
+  recordTokenUsage: (usage: UsageTokens) => void
 }): Promise<Response> {
   const {
     c,
@@ -410,6 +426,7 @@ async function handleStreamingRequest(params: {
     clientModel,
     premiumRemainingBefore,
     premiumUnlimitedBefore,
+    recordTokenUsage,
   } = params
 
   let response: ChatCompletionsResult
@@ -444,6 +461,7 @@ async function handleStreamingRequest(params: {
       premiumRemainingBefore,
       premiumUnlimitedBefore,
       response,
+      recordTokenUsage,
     })
   }
 
@@ -459,6 +477,7 @@ async function handleStreamingRequest(params: {
       clientModel,
       premiumRemainingBefore,
       premiumUnlimitedBefore,
+      recordTokenUsage,
     }),
   )
 }
@@ -533,6 +552,7 @@ async function handleNonStreamingUpstreamResponse(params: {
   premiumRemainingBefore: number | undefined
   premiumUnlimitedBefore: boolean | undefined
   response: ChatCompletionResponse
+  recordTokenUsage: (usage: UsageTokens) => void
 }): Promise<Response> {
   const {
     c,
@@ -543,12 +563,17 @@ async function handleNonStreamingUpstreamResponse(params: {
     premiumRemainingBefore,
     premiumUnlimitedBefore,
     response,
+    recordTokenUsage,
   } = params
 
   const { account, reservation, selectedModel, endpoint, costUnits } = selection
 
   let httpStatus = 200
   const usage: NormalizedUsage = normalizeChatCompletionsUsage(response.usage)
+  const tokenUsage = mergeCopilotAiuUsage(
+    normalizeOpenAIUsage(response.usage),
+    response.copilot_usage,
+  )
   let errorName: string | undefined
   let errorStatus: number | undefined
   let errorMessage: string | undefined
@@ -558,6 +583,7 @@ async function handleNonStreamingUpstreamResponse(params: {
 
   try {
     debugJson(logger, "Non-streaming response:", response)
+    recordTokenUsage(tokenUsage)
     return c.json(response)
   } catch (error) {
     const details = await extractErrorObservability(error)
@@ -611,6 +637,7 @@ async function streamChatCompletionsAndLog(params: {
   clientModel: string
   premiumRemainingBefore: number | undefined
   premiumUnlimitedBefore: boolean | undefined
+  recordTokenUsage: (usage: UsageTokens) => void
 }): Promise<void> {
   const {
     stream,
@@ -621,12 +648,14 @@ async function streamChatCompletionsAndLog(params: {
     clientModel,
     premiumRemainingBefore,
     premiumUnlimitedBefore,
+    recordTokenUsage,
   } = params
 
   const { account, reservation, selectedModel, endpoint, costUnits } = selection
 
   let ttfbMs: number | undefined
   let lastUsage: NormalizedUsage = {}
+  let tokenUsage: UsageTokens | undefined
   let errorName: string | undefined
   let errorStatus: number | undefined
   let errorMessage: string | undefined
@@ -641,8 +670,14 @@ async function streamChatCompletionsAndLog(params: {
       }
 
       const usage = await extractUsageFromChunk(chunk)
-      if (usage) {
-        lastUsage = usage
+      if (usage?.requestHistoryUsage) {
+        lastUsage = usage.requestHistoryUsage
+        tokenUsage = usage.tokenUsage
+      } else if (usage?.tokenUsage) {
+        tokenUsage = {
+          ...(tokenUsage ?? {}),
+          ...usage.tokenUsage,
+        }
       }
 
       debugJson(logger, "Streaming chunk:", chunk)
@@ -673,6 +708,10 @@ async function streamChatCompletionsAndLog(params: {
     const premiumRemainingAfter = account.premiumRemaining
     const premiumUnlimitedAfter = account.unlimited
 
+    if (tokenUsage) {
+      recordTokenUsage(tokenUsage)
+    }
+
     insertRequestLog(store, request, {
       finishedAtMs,
       durationMs: finishedAtMs - request.startedAtMs,
@@ -702,9 +741,14 @@ async function streamChatCompletionsAndLog(params: {
   }
 }
 
+interface ParsedChatCompletionsChunkUsage {
+  requestHistoryUsage?: NormalizedUsage
+  tokenUsage?: UsageTokens
+}
+
 async function extractUsageFromChunk(
   chunk: SSEMessage,
-): Promise<NormalizedUsage | undefined> {
+): Promise<ParsedChatCompletionsChunkUsage | undefined> {
   let data: string | undefined
 
   try {
@@ -720,8 +764,20 @@ async function extractUsageFromChunk(
 
   try {
     const parsed = JSON.parse(data) as ChatCompletionChunk
-    if (!parsed.usage) return undefined
-    return normalizeChatCompletionsUsage(parsed.usage)
+    if (!parsed.usage && !parsed.copilot_usage) return undefined
+    if (!parsed.usage) {
+      return {
+        tokenUsage: normalizeCopilotAiuUsage(parsed.copilot_usage),
+      }
+    }
+
+    return {
+      requestHistoryUsage: normalizeChatCompletionsUsage(parsed.usage),
+      tokenUsage: mergeCopilotAiuUsage(
+        normalizeOpenAIUsage(parsed.usage),
+        parsed.copilot_usage,
+      ),
+    }
   } catch (error) {
     logger.warn("Failed to parse chat completions usage chunk:", {
       error,
@@ -741,6 +797,7 @@ async function handleNonStreamingRequest(params: {
   clientModel: string
   premiumRemainingBefore: number | undefined
   premiumUnlimitedBefore: boolean | undefined
+  recordTokenUsage: (usage: UsageTokens) => void
 }): Promise<Response> {
   const {
     c,
@@ -752,6 +809,7 @@ async function handleNonStreamingRequest(params: {
     clientModel,
     premiumRemainingBefore,
     premiumUnlimitedBefore,
+    recordTokenUsage,
   } = params
 
   const { account, reservation, selectedModel, endpoint, costUnits } = selection
@@ -776,6 +834,12 @@ async function handleNonStreamingRequest(params: {
     selection.confirmAffinity?.()
     finishedAtMs = Date.now()
     usage = normalizeChatCompletionsUsage(response.usage)
+    recordTokenUsage(
+      mergeCopilotAiuUsage(
+        normalizeOpenAIUsage(response.usage),
+        response.copilot_usage,
+      ),
+    )
 
     debugJson(logger, "Non-streaming response:", response)
     return c.json(response)

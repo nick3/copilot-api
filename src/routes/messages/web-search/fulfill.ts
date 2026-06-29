@@ -15,6 +15,7 @@ import {
 } from "~/lib/provider-model"
 import {
   createCopilotTokenUsageRecorder,
+  mergeCopilotAiuUsage,
   normalizeResponsesUsage,
   type UsageTokens,
 } from "~/lib/token-usage"
@@ -300,11 +301,14 @@ export const collectWebSearchResponsesStreamResult = async ({
       continue
     }
 
-    if (!chunk.data || chunk.data === "[DONE]") {
+    const data = await Promise.resolve(
+      (chunk as unknown as { data?: string | Promise<string> }).data,
+    )
+    if (!data || data === "[DONE]") {
       continue
     }
 
-    const parsed = parseEvent(chunk.data)
+    const parsed = parseEvent(data)
     if (!parsed) {
       continue
     }
@@ -371,7 +375,13 @@ const collectWebSearchResponsesStreamEvent = (
   }
 
   if (isResponsesTerminalEvent(event)) {
-    state.terminalResponse = event.response
+    const eventCopilotUsage = (
+      event as { copilot_usage?: ResponsesResult["copilot_usage"] }
+    ).copilot_usage
+    state.terminalResponse = {
+      ...event.response,
+      copilot_usage: event.response.copilot_usage ?? eventCopilotUsage,
+    }
     return
   }
 
@@ -684,7 +694,12 @@ export const handleWebSearchViaResponses = async (
     options.sessionId,
     webSearchModel,
   )
-  recordUsage(normalizeResponsesUsage(result.usage))
+  recordUsage(
+    mergeCopilotAiuUsage(
+      normalizeResponsesUsage(result.usage),
+      result.copilot_usage,
+    ),
+  )
 
   if (!wantsStream) {
     return c.json(response)
