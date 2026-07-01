@@ -450,6 +450,44 @@ describe("responses handler reasoning effort normalization", () => {
     expect((upstreamBody?.reasoning as { effort?: string }).effort).toBe("high")
   })
 
+  test("uses selected target model configured fallback when request model has none", async () => {
+    await writeConfig({
+      modelReasoningEfforts: {},
+      modelMappings: {},
+    })
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(
+        buildSelection("/responses", "gpt-5-mini", ["low", "medium", "high"]),
+      )
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchHolder.fetch = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(JSON.stringify(buildResponsesResult("gpt-5-mini", "ok")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+    }) as unknown as typeof fetch
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "unconfigured-responses-request",
+          input: "hello",
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(upstreamBody?.model).toBe("gpt-5-mini")
+    expect((upstreamBody?.reasoning as { effort?: string }).effort).toBe("low")
+  })
+
   test("omits reasoning effort but preserves other reasoning fields without configured default", async () => {
     await writeConfig({
       modelReasoningEfforts: {},

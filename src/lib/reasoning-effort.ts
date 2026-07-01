@@ -92,12 +92,18 @@ export function resolveReasoningEffortForTarget(params: {
   explicitEffort: unknown
   requestModel: string
   targetModel: Pick<Model, "capabilities"> | undefined
+  targetModelId?: string
   defaultEffortResolver?: (model: string) => ReasoningEffort | undefined
 }): ReasoningEffort | undefined {
   const explicit = parseReasoningEffort(params.explicitEffort)
   const defaultEffortResolver =
     params.defaultEffortResolver ?? getConfiguredReasoningEffortForModel
-  const intent = explicit ?? defaultEffortResolver(params.requestModel)
+  const requestDefault = defaultEffortResolver(params.requestModel)
+  const targetDefault =
+    params.targetModelId && params.targetModelId !== params.requestModel ?
+      defaultEffortResolver(params.targetModelId)
+    : undefined
+  const intent = explicit ?? requestDefault ?? targetDefault
 
   return normalizeReasoningEffortForSupport(
     intent,

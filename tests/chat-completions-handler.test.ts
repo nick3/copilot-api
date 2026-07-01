@@ -523,6 +523,47 @@ describe("chat completions handler", () => {
     expect(upstreamBody?.reasoning_effort).toBe("high")
   })
 
+  test("uses selected target model configured fallback when request model has none", async () => {
+    await writeConfig({
+      modelReasoningEfforts: {},
+      modelMappings: {},
+    })
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("gpt-5-mini", ["low", "medium", "high"]))
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchMock.mockImplementationOnce((_url, opts) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "chatcmpl-test",
+            object: "chat.completion",
+            created: 0,
+            model: "gpt-5-mini",
+            choices: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+    })
+
+    const app = createApp()
+    const response = await app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "unconfigured-chat-request",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(upstreamBody?.model).toBe("gpt-5-mini")
+    expect(upstreamBody?.reasoning_effort).toBe("low")
+  })
+
   test("omits reasoning_effort when no explicit or configured default exists", async () => {
     await writeConfig({
       modelReasoningEfforts: {},

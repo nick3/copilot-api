@@ -204,6 +204,7 @@ export async function handleCompletion(c: Context) {
     explicitEffort: payload.reasoning_effort,
     requestModel: requestedModel,
     targetModel: selectedModel,
+    targetModelId: selectedModel.id,
   })
   if (reasoningEffort) {
     upstreamPayload.reasoning_effort = reasoningEffort

@@ -205,6 +205,7 @@ export const handleResponses = async (c: Context) => {
     explicitEffort: payload.reasoning?.effort,
     requestModel: requestedModel,
     targetModel: selectedModel,
+    targetModelId: selectedModel.id,
   })
   if (reasoningEffort) {
     upstreamPayload.reasoning = {

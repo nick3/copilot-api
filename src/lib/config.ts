@@ -797,6 +797,27 @@ function getAliasFallbackValue<T extends string>(
   return undefined
 }
 
+function getRecordValueForModel<T extends string>(
+  record: Record<string, T> | undefined,
+  modelId: string,
+): T | undefined {
+  if (!record) return undefined
+
+  const direct = record[modelId]
+  if (direct !== undefined) return direct
+
+  const normalizedModel = normalizeAliasKey(modelId)
+  if (!normalizedModel) return undefined
+
+  for (const [key, value] of Object.entries(record)) {
+    if (normalizeAliasKey(key) === normalizedModel) {
+      return value
+    }
+  }
+
+  return undefined
+}
+
 export function getExtraPromptForModel(model: string): string {
   const config = getConfig()
   const direct = config.extraPrompts?.[model]
@@ -951,11 +972,26 @@ export function getConfiguredReasoningEffortForModel(
   model: string,
 ): ConfiguredReasoningEffort | undefined {
   const config = getConfig()
-  const direct = config.modelReasoningEfforts?.[model]
+  const efforts = config.modelReasoningEfforts
+  const direct = getRecordValueForModel(efforts, model)
   if (direct !== undefined) return direct
 
   const aliases = getModelAliases()
-  return getAliasFallbackValue(config.modelReasoningEfforts, model, aliases)
+  const normalizedModel = normalizeAliasKey(model)
+  const aliasTarget = normalizedModel ? aliases[normalizedModel] : undefined
+  if (aliasTarget) {
+    const targetDirect = getRecordValueForModel(efforts, aliasTarget)
+    if (targetDirect !== undefined) return targetDirect
+  }
+
+  const aliasFallback = getAliasFallbackValue(efforts, model, aliases)
+  if (aliasFallback !== undefined) return aliasFallback
+
+  if (normalizedModel?.startsWith("gpt-5-mini-")) {
+    return getRecordValueForModel(efforts, "gpt-5-mini")
+  }
+
+  return undefined
 }
 
 export function getReasoningEffortForModel(
