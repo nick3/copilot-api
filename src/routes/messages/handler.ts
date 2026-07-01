@@ -848,8 +848,15 @@ const handleWithWebSearchResponsesApi = async (params: {
     instr,
     compactType,
   } = params
+  const reasoningEffort = resolveReasoningEffortForTarget({
+    explicitEffort: anthropicPayload.output_config?.effort,
+    requestModel: instr.requestModel,
+    targetModel: selectedModel,
+    targetModelId: selectedModel.id,
+  })
   const responsesPayload = prepareWebSearchResponsesPayload(anthropicPayload, {
     model: selectedModel.id,
+    reasoningEffort,
     subagentAgentId: subagentMarker?.agent_id,
   })
 

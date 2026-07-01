@@ -59,6 +59,7 @@ import {
   translateResponsesResultToAnthropic,
 } from "~/routes/messages/responses-translation"
 import { normalizeSystemMessages } from "~/routes/messages/preprocess"
+import { resolveReasoningEffortForTarget } from "~/lib/reasoning-effort"
 import {
   assertWebSearchResponsesResultSucceeded,
   collectWebSearchResponsesStreamResult,
@@ -284,7 +285,15 @@ const handleOpenAIResponsesProviderWebSearchMessages = async (
     providerConfig.name === "codex" ?
       getCodexModels().data.find((model) => model.id === payload.model)
     : undefined
-  const responsesPayload = prepareWebSearchResponsesPayload(payload)
+  const reasoningEffort = resolveReasoningEffortForTarget({
+    explicitEffort: payload.output_config?.effort,
+    requestModel: payload.model,
+    targetModel: selectedModel,
+    targetModelId: selectedModel?.id,
+  })
+  const responsesPayload = prepareWebSearchResponsesPayload(payload, {
+    reasoningEffort,
+  })
   responsesPayload.stream = true
 
   applyResponsesApiContextManagement(
@@ -387,7 +396,18 @@ const handleOpenAIResponsesProviderMessages = async (
     providerConfig.name === "codex" ?
       getCodexModels().data.find((model) => model.id === payload.model)
     : undefined
-  const responsesPayload = translateAnthropicMessagesToResponsesPayload(payload)
+  const reasoningEffort = resolveReasoningEffortForTarget({
+    explicitEffort: payload.output_config?.effort,
+    requestModel: payload.model,
+    targetModel: selectedModel,
+    targetModelId: selectedModel?.id,
+  })
+  const responsesPayload = translateAnthropicMessagesToResponsesPayload(
+    payload,
+    {
+      reasoningEffort,
+    },
+  )
 
   applyResponsesApiContextManagement(
     responsesPayload,

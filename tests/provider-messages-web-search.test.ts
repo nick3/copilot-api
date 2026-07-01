@@ -692,7 +692,7 @@ describe("provider messages web_search", () => {
         apiKey: "unused",
         authType: "authorization",
         models: {
-          "gpt-search": {
+          "gpt-5.4": {
             toolContentSupportType: [],
           },
         },
@@ -708,7 +708,10 @@ describe("provider messages web_search", () => {
       body: JSON.stringify({
         max_tokens: 128,
         messages: [{ role: "user", content: "What is the Node.js LTS?" }],
-        model: "gpt-search",
+        model: "gpt-5.4",
+        output_config: {
+          effort: "max",
+        },
         tools: [webSearchTool],
       }),
     })
@@ -720,9 +723,11 @@ describe("provider messages web_search", () => {
     expect(url).toBe("https://codex.example/backend-api/codex/responses")
 
     const upstreamBody = JSON.parse((init as RequestInit).body as string) as {
+      reasoning?: { effort?: string }
       stream?: boolean
     }
     expect(upstreamBody.stream).toBe(true)
+    expect(upstreamBody.reasoning?.effort).toBe("xhigh")
 
     const upstreamHeaders = new Headers((init as RequestInit).headers)
     expect(upstreamHeaders.get("accept")).toBe("text/event-stream")
@@ -733,6 +738,51 @@ describe("provider messages web_search", () => {
       "web_search_tool_result",
       "text",
     ])
+  })
+
+  test("normalizes reasoning for codex Responses provider messages", async () => {
+    writeProviderConfig({
+      search: searchProviderConfig(),
+      codex: {
+        name: "codex",
+        type: "openai-responses",
+        baseUrl: "https://codex.example/backend-api",
+        apiKey: "unused",
+        authType: "authorization",
+        models: {
+          "gpt-5.4": {
+            toolContentSupportType: [],
+          },
+        },
+      },
+    })
+
+    const app = createApp()
+    const response = await app.request("/codex/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        max_tokens: 128,
+        messages: [{ role: "user", content: "hello" }],
+        model: "gpt-5.4",
+        output_config: {
+          effort: "max",
+        },
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe("https://codex.example/backend-api/codex/responses")
+
+    const upstreamBody = JSON.parse((init as RequestInit).body as string) as {
+      reasoning?: { effort?: string }
+    }
+    expect(upstreamBody.reasoning?.effort).toBe("xhigh")
   })
 
   test("streams synthetic Anthropic events after parsing upstream Responses stream", async () => {

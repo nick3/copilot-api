@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import fs from "node:fs/promises"
 import path from "node:path"
 
+import "./shared-admin-db-test-home"
+
 import type { AccountRuntime } from "~/lib/types/account"
 import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
 import type { Model } from "~/services/copilot/get-models"
@@ -1112,7 +1114,10 @@ describe("messages handler routing", () => {
   })
 
   test("records Copilot AIU when Messages web search routes through Responses", async () => {
-    const selection = buildSelection("/responses", "search-model")
+    const selection = buildSelection("/responses", "search-model", [
+      "low",
+      "high",
+    ])
     accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
 
     let upstreamBody: Record<string, unknown> | undefined
@@ -1152,6 +1157,9 @@ describe("messages handler routing", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(
           createPayload({
+            output_config: {
+              effort: "medium",
+            },
             tools: [
               { type: "web_search_20250305", name: "web_search" },
             ] as never,
@@ -1163,6 +1171,7 @@ describe("messages handler routing", () => {
 
     expect(response.status).toBe(200)
     expect(upstreamBody?.model).toBe("search-model")
+    expect((upstreamBody?.reasoning as { effort?: string }).effort).toBe("low")
     expect(await readSingleTokenUsageEvent()).toMatchObject({
       cache_read_input_tokens: 6,
       cost: {
