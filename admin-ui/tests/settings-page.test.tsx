@@ -297,6 +297,7 @@ test("provider quick add generates unique provider names", () => {
 test("provider quick add maps presets to safe defaults", () => {
   const deepseek = createQuickProviderItem("deepseek", [])
   const dashscope = createQuickProviderItem("dashscope", [])
+  const openCodeGo = createQuickProviderItem("opencode-go", [])
   const openrouter = createQuickProviderItem("openrouter", [])
   const custom = createQuickProviderItem("custom", [])
 
@@ -316,6 +317,14 @@ test("provider quick add maps presets to safe defaults", () => {
     type: "openai-compatible",
     baseUrl: "https://dashscope.aliyuncs.com/compatible-mode",
     pricingCurrency: "CNY",
+    authType: "x-api-key",
+    enabled: true,
+  })
+  expect(openCodeGo).toMatchObject({
+    name: "opencode-go",
+    type: "openai-compatible",
+    baseUrl: "https://opencode.ai/zen/go",
+    pricingCurrency: "USD",
     authType: "x-api-key",
     enabled: true,
   })

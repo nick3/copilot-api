@@ -11,4 +11,13 @@ describe("quick provider configs", () => {
       type: "anthropic",
     })
   })
+
+  test("uses OpenAI-compatible defaults for OpenCode Go", () => {
+    expect(QUICK_PROVIDER_CONFIGS["opencode-go"]).toEqual({
+      baseUrl: "https://opencode.ai/zen/go",
+      editableType: false,
+      pricingCurrency: "USD",
+      type: "openai-compatible",
+    })
+  })
 })

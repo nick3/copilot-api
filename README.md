@@ -393,10 +393,13 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
   - `pricingCurrency` (optional): Currency code used when token-usage cost is calculated for this provider, for example `USD` or `CNY`.
   - `adjustInputTokens` (optional): When `true`, the proxy will adjust the `input_tokens` in the usage response by subtracting `cache_read_input_tokens` and `cache_creation_input_tokens`.
   - `models` (optional): Per-model configuration map. Each key is a model ID (matching the model name in requests), and the value is:
+    - `type` (optional): Override the provider type for this specific model. Supports `anthropic`, `openai-compatible`, and `openai-responses`, and is useful when one upstream exposes different models through different API shapes.
     - `temperature` (optional): Default temperature value used when the request does not specify one.
     - `topP` (optional): Default top_p value used when the request does not specify one.
     - `topK` (optional): Default top_k value used when the request does not specify one.
     - `pricing` (optional): Per-million-token pricing used by `/token-usage` cost calculation. Supports `input`, `output`, `cachedInput`, `cacheCreationInput`, `explicitCachedInput`, and tiered `tiers` entries with `maxInputTokens`.
+    - `extraBody` (optional): Dynamic fields merged into the upstream request body for that model. Request body fields with the same name take precedence. For DashScope/OpenAI-compatible providers, `thinking_budget` is translated from Anthropic `thinking.budget_tokens`; if configured in `extraBody`, it is forced after translation and overrides the request-derived budget. DashScope providers default `preserve_thinking` to `true` unless `extraBody` sets it explicitly.
+    - `contextCache` (optional): Explicit context cache control. When omitted, it defaults to `true` only for DashScope/Alibaba Cloud Model Studio OpenAI-compatible providers and to `false` for other upstreams.
 
   Example provider config:
 
@@ -412,6 +415,7 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
         "adjustInputTokens": false,
         "models": {
           "kimi-k2.5": {
+            "type": "anthropic",
             "temperature": 1,
             "topP": 0.95
           }
@@ -486,8 +490,9 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
     - `topP` (optional): Default top_p value used when the request does not specify one.
     - `topK` (optional): Default top_k value used when the request does not specify one.
     - `pricing` (optional): Per-million-token pricing used by `/token-usage` cost calculation. Supports `input`, `output`, `cachedInput`, `cacheCreationInput`, `explicitCachedInput`, and tiered `tiers` entries with `maxInputTokens`.
-    - `extraBody` (optional): Dynamic fields merged into the upstream request body for that model. Request body fields with the same name take precedence. OpenAI-compatible providers can use this for fields such as `enable_thinking`, `preserve_thinking`, `reasoning_effort`. `thinking_budget` is a special OpenAI-compatible provider override: when configured in `extraBody`, it is forced after Anthropic `thinking.budget_tokens` translation and overrides the request-derived budget.
-    - `contextCache` (optional): Defaults to `true` for OpenAI-compatible providers. This enables Alibaba Cloud Model Studio/DashScope explicit context cache by injecting `cache_control: { "type": "ephemeral" }` on up to 4 content blocks using the Context Cache format. The cache breakpoint strategy matches opencode's main provider flow: the first 2 system messages plus the last 2 non-system messages. Marked string content is converted to text content part arrays for `system` / `user` / `assistant` / `tool` messages; existing array content is marked on the last part. Set this to `false` when the model already supports implicit caching, or when the upstream does not accept this explicit-cache extension field.
+    - `type` (optional): Override the provider type for this specific model. Supports `anthropic`, `openai-compatible`, and `openai-responses`, and is useful when one upstream exposes different models through different API shapes.
+    - `extraBody` (optional): Dynamic fields merged into the upstream request body for that model. Request body fields with the same name take precedence. OpenAI-compatible providers can use this for fields such as `enable_thinking`, `preserve_thinking`, `reasoning_effort`. For DashScope/Alibaba Cloud Model Studio providers, `thinking_budget` is translated from Anthropic `thinking.budget_tokens`; if configured in `extraBody`, it is forced after translation and overrides the request-derived budget. DashScope providers default `preserve_thinking` to `true` unless `extraBody` sets it explicitly. For non-DashScope providers, request-derived `thinking_budget` is not forwarded unless it is explicitly configured in `extraBody`.
+    - `contextCache` (optional): Explicit context cache control. When omitted, it defaults to `true` only for DashScope/Alibaba Cloud Model Studio OpenAI-compatible providers and to `false` for other upstreams. When enabled, it injects `cache_control: { "type": "ephemeral" }` on up to 4 content blocks using the DashScope Context Cache format. The cache breakpoint strategy matches opencode's main provider flow: the first 2 system messages plus the last 2 non-system messages. Marked string content is converted to text content part arrays for `system` / `user` / `assistant` / `tool` messages; existing array content is marked on the last part. Set this to `false` when the model already supports implicit caching, or when the upstream does not accept this explicit-cache extension field.
     - `supportPdf` (optional): Controls whether the model supports PDF/document content. Defaults to `false`; unsupported PDFs are converted to a text notice. Set it to `true` to send PDF/document blocks as OpenAI Chat Completions file parts.
     - `toolContentSupportType` (optional): Tool result content capabilities for that model, as an array of `array`, `image`, and `pdf`. Provider routes default to string-only tool content when omitted. If `supportPdf` is `true` but this list does not include `pdf`, file parts in tool results are moved to user role messages. This provider default does not change the Copilot main flow, which continues to support array + image and not PDF.
 - **responsesApiContextManagementModels:** Deprecated legacy list of GPT model IDs that should receive Responses API `context_management` compaction instructions. Prefer `useResponsesApiContextManagement`, which now defaults to `true`.
@@ -666,6 +671,7 @@ bunx --bun @nick3/copilot-api@latest auth --verbose
 # Configure quick upstream providers in config.json
 bunx --bun @nick3/copilot-api@latest auth login --provider deepseek
 bunx --bun @nick3/copilot-api@latest auth login --provider dashscope
+bunx --bun @nick3/copilot-api@latest auth login --provider opencode-go
 bunx --bun @nick3/copilot-api@latest auth login --provider openrouter
 
 # Configure a custom upstream provider in config.json

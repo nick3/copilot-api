@@ -4,7 +4,7 @@ import { events } from "fetch-event-stream"
 import { streamSSE } from "hono/streaming"
 
 import { logCodexRateLimitsEvent } from "~/lib/codex-rate-limit"
-import type { ModelConfig } from "~/lib/config"
+import { type ModelConfig, resolveEffectiveProviderConfig } from "~/lib/config"
 import { HTTPError } from "~/lib/error"
 import { createHandlerLogger, debugJson } from "~/lib/logger"
 import { resolveProviderConfig } from "~/lib/provider-resolver"
@@ -46,7 +46,23 @@ export async function handleProviderResponsesForProvider(
     provider,
   })
   const providerConfig = await resolveProviderConfig(provider)
-  if (providerConfig?.type !== "openai-responses") {
+  if (!providerConfig) {
+    return c.json(
+      {
+        error: {
+          message: `Provider '${provider}' does not support the /v1/responses endpoint`,
+          type: "invalid_request_error",
+        },
+      },
+      400,
+    )
+  }
+
+  const effectiveProviderConfig = resolveEffectiveProviderConfig(
+    providerConfig,
+    payload.model,
+  )
+  if (effectiveProviderConfig.type !== "openai-responses") {
     return c.json(
       {
         error: {
@@ -59,7 +75,7 @@ export async function handleProviderResponsesForProvider(
   }
 
   const model =
-    providerConfig.name === "codex" ?
+    effectiveProviderConfig.name === "codex" ?
       getCodexModels().data.find((model) => model.id === payload.model)
     : undefined
 
@@ -75,11 +91,11 @@ export async function handleProviderResponsesForProvider(
 
   compactInputByLatestCompaction(payload)
 
-  if (providerConfig.name === "codex") {
+  if (effectiveProviderConfig.name === "codex") {
     const upstreamResponse = await forwardCodexResponses(
       payload,
       c.req.raw.headers,
-      providerConfig.baseUrl,
+      effectiveProviderConfig.baseUrl,
     )
     const recordUsage = createProviderResponsesUsageRecorder(
       payload,
@@ -102,7 +118,7 @@ export async function handleProviderResponsesForProvider(
   }
 
   const upstreamResponse = await forwardProviderResponses(
-    providerConfig,
+    effectiveProviderConfig,
     payload,
     c.req.raw.headers,
   )

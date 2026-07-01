@@ -408,6 +408,7 @@ const PROVIDER_MODEL_CONFIG_FIELDS = [
   "temperature",
   "topP",
   "topK",
+  "type",
   "extraBody",
   "contextCache",
   "pricing",
@@ -527,6 +528,27 @@ function applyProviderModelTopK(
   const parsed = parseOptionalNonNegativeNumber(value.topK, `${field}.topK`)
   if ("error" in parsed) return parsed.error
   if ("value" in parsed) config.topK = parsed.value
+  return undefined
+}
+
+function applyProviderModelType(
+  config: ModelConfig,
+  value: Record<string, unknown>,
+  field: string,
+): string | undefined {
+  if (!Object.hasOwn(value, "type")) return undefined
+
+  const parsed = parseOptionalString(value.type, `${field}.type`)
+  if ("error" in parsed) return parsed.error
+  if (!("value" in parsed)) return undefined
+
+  const type = parsed.value.trim()
+  if (!type) return undefined
+  if (!isSupportedProviderType(type)) {
+    return `${field}.type must be one of: ${SUPPORTED_PROVIDER_TYPES.join(", ")}`
+  }
+
+  config.type = type
   return undefined
 }
 
@@ -763,6 +785,9 @@ function parseProviderModelConfig(
 
   const topKError = applyProviderModelTopK(config, value, field)
   if (topKError) return { error: topKError }
+
+  const typeError = applyProviderModelType(config, value, field)
+  if (typeError) return { error: typeError }
 
   const contextCacheError = applyProviderModelContextCache(config, value, field)
   if (contextCacheError) return { error: contextCacheError }

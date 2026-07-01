@@ -90,7 +90,7 @@ describe("auth login validation", () => {
     )
 
     expect(output).toBe(
-      "Unknown provider 'unknown'. Expected one of: copilot, codex, deepseek, dashscope, openrouter, custom",
+      "Unknown provider 'unknown'. Expected one of: copilot, codex, opencode-go, deepseek, dashscope, openrouter, custom",
     )
   })
 
@@ -327,6 +327,60 @@ describe("auth login validation", () => {
       enabled: true,
       pricingCurrency: "USD",
       type: "anthropic",
+    })
+  })
+
+  test("configures opencode-go as a fixed openai-compatible quick provider", () => {
+    const tempDir = createTempDir()
+    writeConfigFile(tempDir, {})
+
+    runScript(
+      tempDir,
+      `
+      const consolaModule = await import("consola");
+      const consola = consolaModule.default ?? consolaModule;
+      const answers = ["opencode-key", ""];
+      consola.prompt = async () => answers.shift();
+      consola.info = () => {};
+      consola.success = () => {};
+      const { runAuthLogin } = await import("./src/auth");
+      await runAuthLogin({ provider: "opencode-go", verbose: false, showToken: false });
+      `,
+    )
+
+    expect(readConfigFile(tempDir).providers?.["opencode-go"]).toEqual({
+      apiKey: "opencode-key",
+      baseUrl: "https://opencode.ai/zen/go",
+      enabled: true,
+      pricingCurrency: "USD",
+      type: "openai-compatible",
+    })
+  })
+
+  test("configures opencode-go with a custom baseUrl but fixed openai-compatible type", () => {
+    const tempDir = createTempDir()
+    writeConfigFile(tempDir, {})
+
+    runScript(
+      tempDir,
+      `
+      const consolaModule = await import("consola");
+      const consola = consolaModule.default ?? consolaModule;
+      const answers = ["opencode-key", "https://opencode.example/zen/go///"];
+      consola.prompt = async () => answers.shift();
+      consola.info = () => {};
+      consola.success = () => {};
+      const { runAuthLogin } = await import("./src/auth");
+      await runAuthLogin({ provider: "opencode-go", verbose: false, showToken: false });
+      `,
+    )
+
+    expect(readConfigFile(tempDir).providers?.["opencode-go"]).toEqual({
+      apiKey: "opencode-key",
+      baseUrl: "https://opencode.example/zen/go",
+      enabled: true,
+      pricingCurrency: "USD",
+      type: "openai-compatible",
     })
   })
 

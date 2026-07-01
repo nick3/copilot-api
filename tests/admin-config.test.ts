@@ -688,6 +688,7 @@ test("POST /api/admin/config updates providers", async () => {
                   temperature: 1,
                   topP: 0.95,
                   topK: 40,
+                  type: "openai-responses",
                   contextCache: true,
                   supportPdf: true,
                   toolContentSupportType: ["array", "image", "pdf", "image"],
@@ -737,6 +738,7 @@ test("POST /api/admin/config updates providers", async () => {
               temperature: number
               topP: number
               topK: number
+              type: string
               contextCache: boolean
               supportPdf: boolean
               toolContentSupportType: Array<string>
@@ -778,6 +780,7 @@ test("POST /api/admin/config updates providers", async () => {
     expect(model.temperature).toBe(1)
     expect(model.topP).toBe(0.95)
     expect(model.topK).toBe(40)
+    expect(model.type).toBe("openai-responses")
     expect(model.contextCache).toBe(true)
     expect(model.supportPdf).toBe(true)
     expect(model.toolContentSupportType).toEqual(["array", "image", "pdf"])
@@ -938,6 +941,11 @@ test("POST /api/admin/config rejects invalid provider model advanced fields", as
     {
       config: { contextCache: "yes" },
       message: "providers.custom.models.model.contextCache must be a boolean",
+    },
+    {
+      config: { type: "unsupported" },
+      message:
+        "providers.custom.models.model.type must be one of: anthropic, openai-compatible, openai-responses",
     },
     {
       config: { supportPdf: "yes" },

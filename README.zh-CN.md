@@ -402,10 +402,13 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
   - `pricingCurrency`（可选）：为该 provider 计算 token usage 成本时使用的货币代码，例如 `USD` 或 `CNY`。
   - `adjustInputTokens`（可选）：当为 `true` 时，代理会在 usage 响应里用 `input_tokens` 减去 `cache_read_input_tokens` 和 `cache_creation_input_tokens`。
   - `models`（可选）：按模型 ID 配置的映射。每个键都是请求中的模型名，值支持：
+    - `type`（可选）：覆盖该模型使用的 provider 类型。支持 `anthropic`、`openai-compatible` 和 `openai-responses`，适合一个上游同时暴露不同 API 形态模型的场景。
     - `temperature`（可选）：请求未指定时使用的默认温度。
     - `topP`（可选）：请求未指定时使用的默认 `top_p`。
     - `topK`（可选）：请求未指定时使用的默认 `top_k`。
     - `pricing`（可选）：供 `/token-usage` 成本计算使用的每百万 token 价格。支持 `input`、`output`、`cachedInput`、`cacheCreationInput`、`explicitCachedInput`，以及带 `maxInputTokens` 的阶梯 `tiers`。
+    - `extraBody`（可选）：按模型合入上游请求体的动态字段；请求体显式同名字段优先。DashScope/OpenAI 兼容 provider 会从 Anthropic `thinking.budget_tokens` 翻译出 `thinking_budget`；若在 `extraBody` 中配置，则会在翻译后强制写入并覆盖请求派生出的预算值。DashScope provider 会默认把 `preserve_thinking` 设为 `true`，除非 `extraBody` 已显式配置。
+    - `contextCache`（可选）：显式 context cache 控制。省略时仅 DashScope/阿里云百炼 OpenAI 兼容 provider 默认 `true`，其他上游默认 `false`。
 
   provider 配置示例：
 
@@ -421,6 +424,7 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
         "adjustInputTokens": false,
         "models": {
           "kimi-k2.5": {
+            "type": "anthropic",
             "temperature": 1,
             "topP": 0.95
           }
@@ -495,8 +499,9 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
     - `topP`：可选，当请求未指定时使用的默认 `top_p`。
     - `topK`：可选，当请求未指定时使用的默认 `top_k`。
     - `pricing`：可选，供 `/token-usage` 成本计算使用的每百万 token 价格。支持 `input`、`output`、`cachedInput`、`cacheCreationInput`、`explicitCachedInput`，以及带 `maxInputTokens` 的阶梯 `tiers`。
-    - `extraBody`：可选，按模型合入上游请求体的动态字段；请求体显式同名字段优先。OpenAI 兼容 provider 可用它配置 `enable_thinking`、`preserve_thinking`、`reasoning_effort` 等字段。`thinking_budget` 是 OpenAI 兼容 provider 的特殊覆盖项：配置在 `extraBody` 后，会在 Anthropic `thinking.budget_tokens` 翻译之后强制写入，并覆盖请求派生出的预算值。
-    - `contextCache`：可选，OpenAI 兼容 provider 默认 `true`，用于启用阿里云百炼/DashScope 的显式缓存（explicit context cache），会按其 Context Cache 格式在最多 4 个 content block 上注入 `cache_control: { "type": "ephemeral" }`。缓存断点策略与 opencode 主链路保持一致：前 2 条 system 消息 + 最后 2 条非 system 消息。标记字符串 content 时会把 `system` / `user` / `assistant` / `tool` 消息转换为 text content part 数组；已有数组 content 则标记最后一个 part。如果模型本身已经支持隐式缓存，或上游不支持该显式缓存扩展字段，可在模型配置中设为 `false`。
+    - `type`：可选，覆盖该模型使用的 provider 类型。支持 `anthropic`、`openai-compatible` 和 `openai-responses`，适合一个上游同时暴露不同 API 形态模型的场景。
+    - `extraBody`：可选，按模型合入上游请求体的动态字段；请求体显式同名字段优先。OpenAI 兼容 provider 可用它配置 `enable_thinking`、`preserve_thinking`、`reasoning_effort` 等字段。DashScope/阿里云百炼 provider 会从 Anthropic `thinking.budget_tokens` 翻译出 `thinking_budget`；若在 `extraBody` 中配置，则会在翻译后强制写入并覆盖请求派生出的预算值。DashScope provider 会默认把 `preserve_thinking` 设为 `true`，除非 `extraBody` 已显式配置。非 DashScope provider 不会转发请求派生出的 `thinking_budget`，除非它在 `extraBody` 中被显式配置。
+    - `contextCache`：可选，显式 context cache 控制。省略时仅 DashScope/阿里云百炼 OpenAI 兼容 provider 默认 `true`，其他上游默认 `false`。启用后会按 DashScope Context Cache 格式，在最多 4 个 content block 上注入 `cache_control: { "type": "ephemeral" }`。缓存断点策略与 opencode 主链路保持一致：前 2 条 system 消息 + 最后 2 条非 system 消息。标记字符串 content 时会把 `system` / `user` / `assistant` / `tool` 消息转换为 text content part 数组；已有数组 content 则标记最后一个 part。如果模型本身已经支持隐式缓存，或上游不支持该显式缓存扩展字段，可在模型配置中设为 `false`。
     - `supportPdf`：可选，控制该模型是否支持 PDF/document content。默认 `false`，不支持时会把 PDF 转成提示文本；设为 `true` 时会把 PDF/document 转成 OpenAI Chat Completions 的 file part。
     - `toolContentSupportType`：可选，配置该模型的 tool result content 支持能力，值为 `array`、`image`、`pdf` 的数组。provider 侧未配置时默认只发送 string tool content。若 `supportPdf` 为 `true` 但这里不包含 `pdf`，tool result 里的 file part 会被转成 user role 消息。Copilot 主链路不使用这个 provider 默认，仍按 array + image 且不支持 PDF 的能力处理。
 - **responsesApiContextManagementModels：** 已弃用的旧配置，用于列出需要启用 Responses API `context_management` 压缩指令的 GPT 模型 ID。请优先使用 `useResponsesApiContextManagement`，该配置现在默认开启。
@@ -676,6 +681,7 @@ bunx --bun @nick3/copilot-api@latest auth --verbose
 # 将快速上游 provider 写入 config.json
 bunx --bun @nick3/copilot-api@latest auth login --provider deepseek
 bunx --bun @nick3/copilot-api@latest auth login --provider dashscope
+bunx --bun @nick3/copilot-api@latest auth login --provider opencode-go
 bunx --bun @nick3/copilot-api@latest auth login --provider openrouter
 
 # 将自定义上游 provider 写入 config.json

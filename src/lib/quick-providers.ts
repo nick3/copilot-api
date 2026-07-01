@@ -8,6 +8,12 @@ interface QuickProviderConfig {
 }
 
 export const QUICK_PROVIDER_CONFIGS = {
+  "opencode-go": {
+    type: "openai-compatible",
+    baseUrl: "https://opencode.ai/zen/go",
+    pricingCurrency: "USD",
+    editableType: false,
+  },
   deepseek: {
     type: "anthropic",
     baseUrl: "https://api.deepseek.com/anthropic",

@@ -252,6 +252,7 @@ export type ProviderModelConfig = {
   temperature?: number
   topP?: number
   topK?: number
+  type?: ProviderType
   extraBody?: Record<string, unknown>
   contextCache?: boolean
   pricing?: TokenUsagePricingConfig

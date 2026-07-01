@@ -13,16 +13,20 @@ import type {
   ChatCompletionChunk,
   ChatCompletionResponse,
   ChatCompletionsPayload,
-  ContentPart,
-  Message,
 } from "~/services/copilot/create-chat-completions"
 
 import {
   getProviderConfig,
   type ModelConfig,
   type ResolvedProviderConfig,
+  resolveEffectiveProviderConfig,
 } from "~/lib/config"
 import { logCodexRateLimitsEvent } from "~/lib/codex-rate-limit"
+import {
+  applyDashScopePreserveThinkingDefault,
+  applyOpenAICompatibleContextCache,
+  isDashScopeAliyunProvider,
+} from "~/lib/dashscope"
 import { HTTPError } from "~/lib/error"
 import {
   extractErrorObservability,
@@ -101,17 +105,6 @@ const resolveProviderConfig = (
   return (resolver ?? getProviderConfig)(provider)
 }
 
-const OPENAI_COMPATIBLE_CONTEXT_CACHE_MARKER_LIMIT = 4
-const OPENAI_COMPATIBLE_CONTEXT_CACHE_CONTROL = {
-  type: "ephemeral",
-} as const
-const OPENAI_COMPATIBLE_CONTEXT_CACHE_ROLES = new Set<Message["role"]>([
-  "system",
-  "user",
-  "assistant",
-  "tool",
-])
-
 export type ProviderStreamError = {
   errorMessage: string
   errorName: string
@@ -184,19 +177,24 @@ export async function handleProviderMessagesForProvider(
 
   try {
     const modelConfig = providerConfig.models?.[payload.model]
+    const effectiveProviderConfig = resolveEffectiveProviderConfig(
+      providerConfig,
+      payload.model,
+    )
+    const effectiveType = effectiveProviderConfig.type
     debugJson(logger, "provider.messages.request", { payload, provider })
 
     normalizeSystemMessages(payload)
     applyModelDefaults(payload, modelConfig)
 
-    if (providerConfig.type === "openai-responses") {
+    if (effectiveType === "openai-responses") {
       if (hasWebSearchServerTool(payload)) {
         if (isWebSearchOnlyRequest(payload)) {
           return await handleOpenAIResponsesProviderWebSearchMessages(c, {
             instrumentation,
             payload,
             provider,
-            providerConfig,
+            providerConfig: effectiveProviderConfig,
           })
         }
 
@@ -208,11 +206,11 @@ export async function handleProviderMessagesForProvider(
         modelConfig,
         payload,
         provider,
-        providerConfig,
+        providerConfig: effectiveProviderConfig,
       })
     }
 
-    if (providerConfig.type === "openai-compatible") {
+    if (effectiveType === "openai-compatible") {
       stripWebSearchServerTool(payload)
 
       return await handleOpenAICompatibleProviderMessages(c, {
@@ -220,7 +218,7 @@ export async function handleProviderMessagesForProvider(
         modelConfig,
         payload,
         provider,
-        providerConfig,
+        providerConfig: effectiveProviderConfig,
       })
     }
 
@@ -229,7 +227,7 @@ export async function handleProviderMessagesForProvider(
     })
 
     const upstreamResponse = await forwardProviderMessages(
-      providerConfig,
+      effectiveProviderConfig,
       payload,
       c.req.raw.headers,
       getProviderFetch(c),
@@ -250,7 +248,7 @@ export async function handleProviderMessagesForProvider(
         instrumentation,
         payload,
         provider,
-        providerConfig,
+        providerConfig: effectiveProviderConfig,
         upstreamResponse,
       })
     }
@@ -261,7 +259,7 @@ export async function handleProviderMessagesForProvider(
       instrumentation,
       payload,
       provider,
-      providerConfig,
+      providerConfig: effectiveProviderConfig,
     })
   } catch (error) {
     logger.error("provider.messages.error", {
@@ -530,7 +528,11 @@ const handleOpenAICompatibleProviderMessages = async (
 ): Promise<Response> => {
   const { instrumentation, modelConfig, payload, provider, providerConfig } =
     options
-  const openAIPayload = createOpenAICompatiblePayload(payload, modelConfig)
+  const openAIPayload = createOpenAICompatiblePayload(
+    payload,
+    modelConfig,
+    providerConfig,
+  )
   debugJson(logger, "provider.messages.openai_compatible.request", {
     payload: openAIPayload,
     provider,
@@ -580,12 +582,20 @@ const handleOpenAICompatibleProviderMessages = async (
 const createOpenAICompatiblePayload = (
   payload: AnthropicMessagesPayload,
   modelConfig: ModelConfig | undefined,
+  providerConfig: ResolvedProviderConfig,
 ): ChatCompletionsPayload => {
   const openAIPayload = translateToOpenAI(payload, {
     supportPdf: modelConfig?.supportPdf,
     toolContentSupportType: modelConfig?.toolContentSupportType ?? [],
   })
-  applyOpenAICompatibleThinkingBudget(openAIPayload, payload)
+
+  const isDashScopeProvider = isDashScopeAliyunProvider(providerConfig)
+
+  if (isDashScopeProvider) {
+    applyOpenAICompatibleThinkingBudget(openAIPayload, payload)
+  } else {
+    delete openAIPayload.thinking_budget
+  }
 
   if (payload.top_k !== undefined) {
     openAIPayload.top_k = payload.top_k
@@ -612,11 +622,14 @@ const createOpenAICompatiblePayload = (
     extraBody: modelConfig?.extraBody,
   })
 
+  applyDashScopePreserveThinkingDefault(openAIPayload, providerConfig)
+
   if (!Object.hasOwn(openAIPayload, "parallel_tool_calls")) {
     openAIPayload.parallel_tool_calls = true
   }
 
-  if (modelConfig?.contextCache !== false) {
+  const contextCacheEnabled = modelConfig?.contextCache ?? isDashScopeProvider
+  if (contextCacheEnabled) {
     applyOpenAICompatibleContextCache(openAIPayload)
   }
 
@@ -656,78 +669,6 @@ const applyOpenAICompatibleRequestOverrides = (
       payload[key] = options.source[key]
     }
   }
-}
-
-const applyOpenAICompatibleContextCache = (
-  payload: ChatCompletionsPayload,
-): void => {
-  const messageIndexes = selectContextCacheMessageIndexes(payload.messages)
-  for (const messageIndex of messageIndexes) {
-    applyContextCacheControl(payload.messages[messageIndex])
-  }
-}
-
-const selectContextCacheMessageIndexes = (
-  messages: Array<Message>,
-): Array<number> => {
-  const cacheableIndexes = messages.flatMap((message, index) =>
-    isContextCacheMarkerEligible(message) ? [index] : [],
-  )
-  const systemIndexes = cacheableIndexes
-    .filter((index) => messages[index]?.role === "system")
-    .slice(0, 2)
-  const finalIndexes = cacheableIndexes
-    .filter((index) => messages[index]?.role !== "system")
-    .slice(-2)
-  return uniqueIndexes([...systemIndexes, ...finalIndexes]).sort(
-    (a, b) => a - b,
-  )
-}
-
-const uniqueIndexes = (indexes: Array<number>): Array<number> =>
-  [...new Set(indexes)].slice(0, OPENAI_COMPATIBLE_CONTEXT_CACHE_MARKER_LIMIT)
-
-const isContextCacheMarkerEligible = (message: Message): boolean => {
-  if (!OPENAI_COMPATIBLE_CONTEXT_CACHE_ROLES.has(message.role)) {
-    return false
-  }
-
-  if (typeof message.content === "string") {
-    return message.content.length > 0
-  }
-
-  return Array.isArray(message.content) && message.content.length > 0
-}
-
-const applyContextCacheControl = (message: Message | undefined): void => {
-  if (!message) {
-    return
-  }
-
-  if (typeof message.content === "string") {
-    message.content = [
-      {
-        type: "text",
-        text: message.content,
-        cache_control: { ...OPENAI_COMPATIBLE_CONTEXT_CACHE_CONTROL },
-      },
-    ]
-    return
-  }
-
-  if (!Array.isArray(message.content)) {
-    return
-  }
-
-  const lastPart = message.content.at(-1)
-  if (!lastPart) {
-    return
-  }
-  setContextCacheControl(lastPart)
-}
-
-const setContextCacheControl = (part: ContentPart): void => {
-  part.cache_control = { ...OPENAI_COMPATIBLE_CONTEXT_CACHE_CONTROL }
 }
 
 const streamProviderMessages = ({

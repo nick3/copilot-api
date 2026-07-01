@@ -3,7 +3,16 @@ import type { Context } from "hono"
 
 import { streamSSE } from "hono/streaming"
 
-import type { ModelConfig, ResolvedProviderConfig } from "~/lib/config"
+import {
+  type ModelConfig,
+  type ResolvedProviderConfig,
+  resolveEffectiveProviderConfig,
+} from "~/lib/config"
+import {
+  applyDashScopePreserveThinkingDefault,
+  applyOpenAICompatibleContextCache,
+  isDashScopeAliyunProvider,
+} from "~/lib/dashscope"
 import { HTTPError } from "~/lib/error"
 import { createHandlerLogger, debugJson } from "~/lib/logger"
 import { resolveProviderConfig } from "~/lib/provider-resolver"
@@ -39,7 +48,23 @@ export async function handleProviderChatCompletionsForProvider(
     (c.get("providerConfigResolver" as never) as ProviderResolver | undefined)
     ?? resolveProviderConfig
   const providerConfig = await resolverFn(provider)
-  if (providerConfig?.type !== "openai-compatible") {
+  if (!providerConfig) {
+    return c.json(
+      {
+        error: {
+          message: `Provider '${provider}' does not support the /v1/chat/completions endpoint`,
+          type: "invalid_request_error",
+        },
+      },
+      400,
+    )
+  }
+
+  const effectiveProviderConfig = resolveEffectiveProviderConfig(
+    providerConfig,
+    payload.model,
+  )
+  if (effectiveProviderConfig.type !== "openai-compatible") {
     return c.json(
       {
         error: {
@@ -57,6 +82,8 @@ export async function handleProviderChatCompletionsForProvider(
     extraBody: modelConfig?.extraBody,
   })
   applyProviderStreamOptions(payload)
+  applyDashScopePreserveThinkingDefault(payload, effectiveProviderConfig)
+  applyProviderContextCache(payload, modelConfig, effectiveProviderConfig)
 
   debugJson(logger, "provider.chat_completions.request", {
     payload,
@@ -64,7 +91,7 @@ export async function handleProviderChatCompletionsForProvider(
   })
 
   const upstreamResponse = await forwardProviderChatCompletions(
-    providerConfig,
+    effectiveProviderConfig,
     payload,
     c.req.raw.headers,
   )
@@ -134,6 +161,18 @@ const applyProviderStreamOptions = (payload: ChatCompletionsPayload): void => {
   payload.stream_options = {
     ...(payload.stream_options ?? {}),
     include_usage: true,
+  }
+}
+
+const applyProviderContextCache = (
+  payload: ChatCompletionsPayload,
+  modelConfig: ModelConfig | undefined,
+  providerConfig: ResolvedProviderConfig,
+): void => {
+  const isDashScopeProvider = isDashScopeAliyunProvider(providerConfig)
+  const contextCacheEnabled = modelConfig?.contextCache ?? isDashScopeProvider
+  if (contextCacheEnabled) {
+    applyOpenAICompatibleContextCache(payload)
   }
 }
 

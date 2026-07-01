@@ -37,6 +37,7 @@ const BUILTIN_PROVIDER_CURRENCIES: Record<string, string> = {
   codex: "USD",
   dashscope: "CNY",
   deepseek: "CNY",
+  "opencode-go": "USD",
 }
 
 const BUILTIN_PROVIDER_PRICING: Record<
@@ -131,6 +132,83 @@ const BUILTIN_PROVIDER_PRICING: Record<
       cachedInput: 0.025,
       input: 3,
       output: 6,
+    },
+  },
+  "opencode-go": {
+    "glm-5.2": {
+      cachedInput: 0.26,
+      input: 1.4,
+      output: 4.4,
+    },
+    "deepseek-v4-flash": {
+      cachedInput: 0.0028,
+      input: 0.14,
+      output: 0.28,
+    },
+    "deepseek-v4-pro": {
+      cachedInput: 0.0145,
+      input: 1.74,
+      output: 3.48,
+    },
+    "kimi-k2.7-code": {
+      cachedInput: 0.19,
+      input: 0.95,
+      output: 4,
+    },
+    "mimo-v2.5": {
+      cachedInput: 0.0028,
+      input: 0.14,
+      output: 0.28,
+    },
+    "mimo-v2.5-pro": {
+      cachedInput: 0.0145,
+      input: 1.74,
+      output: 3.48,
+    },
+    "qwen3.7-plus": {
+      tiers: [
+        {
+          cacheCreationInput: 0.5,
+          cachedInput: 0.04,
+          input: 0.4,
+          maxInputTokens: 200_000,
+          output: 1.6,
+        },
+        {
+          cacheCreationInput: 1.5,
+          cachedInput: 0.12,
+          input: 1.2,
+          maxInputTokens: 256_000,
+          output: 4.8,
+        },
+      ],
+    },
+    "qwen3.7-max": {
+      cacheCreationInput: 3.125,
+      cachedInput: 0.5,
+      input: 2.5,
+      output: 7.5,
+    },
+    "minimax-m2.5": {
+      cachedInput: 0.03,
+      input: 0.3,
+      output: 1.2,
+    },
+    "minimax-m3": {
+      tiers: [
+        {
+          cachedInput: 0.02,
+          input: 0.1,
+          maxInputTokens: 200_000,
+          output: 0.4,
+        },
+        {
+          cachedInput: 0.04,
+          input: 0.2,
+          maxInputTokens: 512_000,
+          output: 0.8,
+        },
+      ],
     },
   },
 }

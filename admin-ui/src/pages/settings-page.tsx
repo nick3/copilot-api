@@ -114,7 +114,12 @@ const TOKEN_USAGE_PRICING_FIELDS = [
 
 const TOKEN_USAGE_PRICING_KEYS = new Set<string>(TOKEN_USAGE_PRICING_FIELDS)
 
-export type QuickProviderName = "deepseek" | "dashscope" | "openrouter" | "custom"
+export type QuickProviderName =
+  | "opencode-go"
+  | "deepseek"
+  | "dashscope"
+  | "openrouter"
+  | "custom"
 
 type QuickProviderTemplate = {
   name: string
@@ -124,6 +129,12 @@ type QuickProviderTemplate = {
 }
 
 const QUICK_PROVIDER_TEMPLATES = {
+  "opencode-go": {
+    name: "opencode-go",
+    type: "openai-compatible",
+    baseUrl: "https://opencode.ai/zen/go",
+    pricingCurrency: "USD",
+  },
   deepseek: {
     name: "deepseek",
     type: "anthropic",
@@ -192,6 +203,8 @@ type ProviderModelItem = {
   temperature: string
   topP: string
   topK: string
+  modelType: string
+  modelTypeConfigured: boolean
   contextCache: boolean
   contextCacheConfigured: boolean
   supportPdf: boolean
@@ -650,6 +663,8 @@ function providerItemsFromRecord(record: ProviderRecord | undefined): Array<Prov
       temperature: config.temperature === undefined ? "" : String(config.temperature),
       topP: config.topP === undefined ? "" : String(config.topP),
       topK: config.topK === undefined ? "" : String(config.topK),
+      modelType: config.type ?? "inherit",
+      modelTypeConfigured: Object.hasOwn(config, "type"),
       contextCache: config.contextCache ?? false,
       contextCacheConfigured: Object.hasOwn(config, "contextCache"),
       supportPdf: config.supportPdf ?? false,
@@ -675,6 +690,7 @@ function providerHasMeaningfulContent(item: ProviderItem): boolean {
       || Boolean(model.temperature.trim())
       || Boolean(model.topP.trim())
       || Boolean(model.topK.trim())
+      || model.modelTypeConfigured
       || model.contextCacheConfigured
       || model.supportPdfConfigured
       || model.toolContentSupportType.length > 0
@@ -838,6 +854,7 @@ function parseSingleModelItem(
   const temperatureInput = modelItem.temperature.trim()
   const topPInput = modelItem.topP.trim()
   const topKInput = modelItem.topK.trim()
+  const modelTypeInput = modelItem.modelType.trim()
   const pricing = parseOptionalPricingJson(
     modelItem.pricingJson,
     `Provider '${providerName}' model pricing`,
@@ -852,7 +869,8 @@ function parseSingleModelItem(
 
   const hasNumericOverride = Boolean(temperatureInput || topPInput || topKInput)
   const hasAdvancedOverride = Boolean(
-    modelItem.contextCacheConfigured
+    modelItem.modelTypeConfigured
+    || modelItem.contextCacheConfigured
     || modelItem.supportPdfConfigured
     || modelItem.toolContentSupportType.length > 0
     || pricing.record
@@ -906,6 +924,15 @@ function parseSingleModelItem(
       }
     }
     config.topK = parsed
+  }
+
+  if (modelItem.modelTypeConfigured) {
+    if (!isProviderType(modelTypeInput)) {
+      return {
+        error: `Provider '${providerName}' model '${modelId}': type must be one of: ${PROVIDER_TYPES.join(", ")}.`,
+      }
+    }
+    config.type = modelTypeInput
   }
 
   if (modelItem.contextCacheConfigured) {
@@ -1084,6 +1111,8 @@ function useProvidersEditor(
             temperature: "",
             topP: "",
             topK: "",
+            modelType: "inherit",
+            modelTypeConfigured: false,
             contextCache: false,
             contextCacheConfigured: false,
             supportPdf: false,
@@ -3551,6 +3580,42 @@ function ProviderModelRow({
       <div className="grid gap-3 md:grid-cols-2">
         <div className="grid gap-2 rounded-md bg-muted/40 px-3 py-2">
           <Label className="text-sm font-medium">
+            {t("settingsPage.advanced.providersModelTypeLabel")}
+          </Label>
+          <Select
+            value={item.modelTypeConfigured ? item.modelType : "inherit"}
+            onValueChange={(value) =>
+              onUpdateModel(providerId, item.id, {
+                modelType: value,
+                modelTypeConfigured: value !== "inherit",
+              })
+            }
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="inherit">
+                {t("settingsPage.advanced.providersModelTypeInherit")}
+              </SelectItem>
+              <SelectItem value="anthropic">
+                {t("settingsPage.advanced.providersTypeAnthropic")}
+              </SelectItem>
+              <SelectItem value="openai-compatible">
+                {t("settingsPage.advanced.providersTypeOpenAICompatible")}
+              </SelectItem>
+              <SelectItem value="openai-responses">
+                {t("settingsPage.advanced.providersTypeOpenAIResponses")}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="text-muted-foreground text-xs">
+            {t("settingsPage.advanced.providersModelTypeHint")}
+          </div>
+        </div>
+
+        <div className="grid gap-2 rounded-md bg-muted/40 px-3 py-2">
+          <Label className="text-sm font-medium">
             {t("settingsPage.advanced.providersContextCacheLabel")}
           </Label>
           <Select
@@ -3962,6 +4027,14 @@ function ProvidersSettingsCard({
           <span className="text-muted-foreground text-xs">
             {t("settingsPage.advanced.providersQuickAddLabel")}
           </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onQuickAddProvider("opencode-go")}
+          >
+            {t("settingsPage.advanced.providersQuickAddOpenCodeGo")}
+          </Button>
           <Button
             type="button"
             variant="outline"
