@@ -14,8 +14,10 @@ import type {
   ChatCompletionResponse,
   ChatCompletionsPayload,
 } from "~/services/copilot/create-chat-completions"
+import type { Model } from "~/services/copilot/get-models"
 
 import {
+  getConfiguredReasoningEffortForModel,
   getProviderConfig,
   type ModelConfig,
   type ResolvedProviderConfig,
@@ -59,7 +61,11 @@ import {
   translateResponsesResultToAnthropic,
 } from "~/routes/messages/responses-translation"
 import { normalizeSystemMessages } from "~/routes/messages/preprocess"
-import { resolveReasoningEffortForTarget } from "~/lib/reasoning-effort"
+import {
+  parseReasoningEffort,
+  type ReasoningEffort,
+  resolveReasoningEffortForTarget,
+} from "~/lib/reasoning-effort"
 import {
   assertWebSearchResponsesResultSucceeded,
   collectWebSearchResponsesStreamResult,
@@ -88,6 +94,25 @@ import {
 } from "~/services/providers/provider-proxy"
 
 const logger = createHandlerLogger("provider-messages-handler")
+
+const resolveProviderResponsesReasoningEffort = (
+  payload: AnthropicMessagesPayload,
+  selectedModel: Pick<Model, "id" | "capabilities"> | undefined,
+): ReasoningEffort | undefined => {
+  if (selectedModel) {
+    return resolveReasoningEffortForTarget({
+      explicitEffort: payload.output_config?.effort,
+      requestModel: payload.model,
+      targetModel: selectedModel,
+      targetModelId: selectedModel.id,
+    })
+  }
+
+  return (
+    parseReasoningEffort(payload.output_config?.effort)
+    ?? getConfiguredReasoningEffortForModel(payload.model)
+  )
+}
 
 type ProviderConfigResolver = (
   provider: string,
@@ -285,12 +310,10 @@ const handleOpenAIResponsesProviderWebSearchMessages = async (
     providerConfig.name === "codex" ?
       getCodexModels().data.find((model) => model.id === payload.model)
     : undefined
-  const reasoningEffort = resolveReasoningEffortForTarget({
-    explicitEffort: payload.output_config?.effort,
-    requestModel: payload.model,
-    targetModel: selectedModel,
-    targetModelId: selectedModel?.id,
-  })
+  const reasoningEffort = resolveProviderResponsesReasoningEffort(
+    payload,
+    selectedModel,
+  )
   const responsesPayload = prepareWebSearchResponsesPayload(payload, {
     reasoningEffort,
   })
@@ -396,12 +419,10 @@ const handleOpenAIResponsesProviderMessages = async (
     providerConfig.name === "codex" ?
       getCodexModels().data.find((model) => model.id === payload.model)
     : undefined
-  const reasoningEffort = resolveReasoningEffortForTarget({
-    explicitEffort: payload.output_config?.effort,
-    requestModel: payload.model,
-    targetModel: selectedModel,
-    targetModelId: selectedModel?.id,
-  })
+  const reasoningEffort = resolveProviderResponsesReasoningEffort(
+    payload,
+    selectedModel,
+  )
   const responsesPayload = translateAnthropicMessagesToResponsesPayload(
     payload,
     {

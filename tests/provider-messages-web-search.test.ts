@@ -565,6 +565,9 @@ describe("provider messages web_search", () => {
         max_tokens: 128,
         messages: [{ role: "user", content: "What is the Node.js LTS?" }],
         model: "gpt-search",
+        output_config: {
+          effort: "medium",
+        },
         tools: [webSearchTool],
       }),
     })
@@ -577,11 +580,13 @@ describe("provider messages web_search", () => {
 
     const upstreamBody = JSON.parse((init as RequestInit).body as string) as {
       model: string
+      reasoning?: { effort?: string }
       stream?: boolean
       tool_choice?: unknown
       tools?: Array<Record<string, unknown>>
     }
     expect(upstreamBody.model).toBe("gpt-search")
+    expect(upstreamBody.reasoning?.effort).toBe("medium")
     expect(upstreamBody.stream).toBe(true)
     expect(upstreamBody.tool_choice).toBeUndefined()
     expect(upstreamBody.tools).toEqual([
@@ -783,6 +788,35 @@ describe("provider messages web_search", () => {
       reasoning?: { effort?: string }
     }
     expect(upstreamBody.reasoning?.effort).toBe("xhigh")
+  })
+
+  test("passes explicit reasoning for openai-responses provider messages without Copilot metadata", async () => {
+    const app = createApp()
+    const response = await app.request("/search/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        max_tokens: 128,
+        messages: [{ role: "user", content: "hello" }],
+        model: "gpt-search",
+        output_config: {
+          effort: "max",
+        },
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe("https://provider.example/v1/responses")
+
+    const upstreamBody = JSON.parse((init as RequestInit).body as string) as {
+      reasoning?: { effort?: string }
+    }
+    expect(upstreamBody.reasoning?.effort).toBe("max")
   })
 
   test("streams synthetic Anthropic events after parsing upstream Responses stream", async () => {
