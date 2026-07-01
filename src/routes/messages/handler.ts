@@ -36,6 +36,7 @@ import { createHandlerLogger, debugJson } from "~/lib/logger"
 import { findEndpointModel } from "~/lib/models"
 import { resolveExistingProviderModelAlias } from "~/lib/provider-model"
 import { checkRateLimit } from "~/lib/rate-limit"
+import { resolveReasoningEffortForTarget } from "~/lib/reasoning-effort"
 import {
   extractResponsesUsageFromResult,
   extractResponsesUsageFromStreamEvent,
@@ -211,6 +212,7 @@ type InstrumentationContext = {
   responsesItemOwnerLookupKeys?: ReadonlyArray<string>
   responsesItemOwnerRecordedKeys?: ReadonlyArray<string>
 
+  requestModel: string
   clientModel: string
 
   account: AccountRuntime
@@ -380,6 +382,7 @@ async function handleProviderAliasCompletion(
       instrumentation,
       payload,
       provider,
+      requestModel: originalModel,
     })
   } catch (error) {
     const observableError = await extractErrorObservability(error)
@@ -479,10 +482,12 @@ export async function handleCompletion(c: Context) {
   const compactType = getCompactType(anthropicPayload)
   const isCompact = compactType !== 0
   const originalRequestModel = anthropicPayload.model
+  let usesInternalModelRewrite = false
 
   // Fix warmup probe: force small model for Claude Code warmup requests (CLAUDE_CODE_SUBAGENT_MODEL also works).
   if (anthropicBeta && isWarmupProbeRequest(anthropicPayload)) {
     anthropicPayload.model = getSmallModel()
+    usesInternalModelRewrite = true
   }
 
   if (compactType !== 0) {
@@ -495,6 +500,7 @@ export async function handleCompletion(c: Context) {
 
   if (compactType === COMPACT_REQUEST && shouldCompactUseSmallModel()) {
     anthropicPayload.model = getSmallModel()
+    usesInternalModelRewrite = true
   }
 
   stripToolReferenceTurnBoundary(anthropicPayload)
@@ -514,6 +520,7 @@ export async function handleCompletion(c: Context) {
   anthropicPayload.model = resolveModelAlias(anthropicPayload.model)
   if (webSearchRoute.kind === "responses") {
     anthropicPayload.model = webSearchRoute.model
+    usesInternalModelRewrite = true
   }
   const routingModel = anthropicPayload.model
   const streamRequested = Boolean(anthropicPayload.stream)
@@ -559,6 +566,8 @@ export async function handleCompletion(c: Context) {
 
   const endpointModel = findEndpointModel(routingModel)
   const resolvedClientModel = endpointModel?.id ?? routingModel
+  const reasoningRequestModel =
+    usesInternalModelRewrite ? resolvedClientModel : requestedModel
   const affinityModelId =
     routingModel !== originalRequestModel ?
       (findEndpointModel(originalRequestModel)?.id ?? originalRequestModel)
@@ -654,6 +663,7 @@ export async function handleCompletion(c: Context) {
     safetyIdentifier: normalizedSafetyIdentifier,
     promptCacheKey: normalizedPromptCacheKey,
     isSubagent: isSubagentRequest,
+    requestModel: reasoningRequestModel,
     clientModel,
     account,
     reservation,
@@ -737,6 +747,18 @@ const handleWithChatCompletions = async (params: {
     instr,
     compactType,
   } = params
+  const reasoningEffort = resolveReasoningEffortForTarget({
+    explicitEffort: openAIPayload.reasoning_effort,
+    requestModel: instr.requestModel,
+    targetModel: selectedModel,
+    targetModelId: selectedModel.id,
+  })
+  if (reasoningEffort) {
+    openAIPayload.reasoning_effort = reasoningEffort
+  } else {
+    delete openAIPayload.reasoning_effort
+  }
+
   debugJson(logger, "Translated OpenAI request payload:", openAIPayload)
 
   const ctx = toAccountContext(instr.account)
@@ -833,8 +855,15 @@ const handleWithWebSearchResponsesApi = async (params: {
     instr,
     compactType,
   } = params
+  const reasoningEffort = resolveReasoningEffortForTarget({
+    explicitEffort: anthropicPayload.output_config?.effort,
+    requestModel: instr.requestModel,
+    targetModel: selectedModel,
+    targetModelId: selectedModel.id,
+  })
   const responsesPayload = prepareWebSearchResponsesPayload(anthropicPayload, {
     model: selectedModel.id,
+    reasoningEffort,
     subagentAgentId: subagentMarker?.agent_id,
   })
 
@@ -941,10 +970,17 @@ const handleWithResponsesApi = async (params: {
     instr,
     compactType,
   } = params
+  const reasoningEffort = resolveReasoningEffortForTarget({
+    explicitEffort: anthropicPayload.output_config?.effort,
+    requestModel: instr.requestModel,
+    targetModel: selectedModel,
+    targetModelId: selectedModel.id,
+  })
   const responsesPayload = translateAnthropicMessagesToResponsesPayload(
     anthropicPayload,
     {
       modelOverride: selectedModel.id,
+      reasoningEffort,
       subagentAgentId: subagentMarker?.agent_id,
     },
   )
@@ -2264,7 +2300,9 @@ const handleWithMessagesApi = async (params: {
     compactType,
   } = params
 
-  prepareMessagesApiPayload(anthropicPayload, selectedModel)
+  prepareMessagesApiPayload(anthropicPayload, selectedModel, {
+    requestModel: instr.requestModel,
+  })
 
   debugJson(logger, "Translated Messages payload:", anthropicPayload)
 

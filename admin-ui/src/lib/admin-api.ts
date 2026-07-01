@@ -222,7 +222,14 @@ export type AdminRequestDetailResponse = {
   has_outbound?: boolean
 }
 
-export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+export type ReasoningEffort =
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max"
 
 export type ModelAliasSpec = {
   target: string
@@ -454,6 +461,7 @@ export type AdminModelDetailsItem = {
       structured_outputs?: boolean
       streaming?: boolean
       vision?: boolean
+      reasoning_effort?: Array<string>
     }
   }
   aliases: Array<string>

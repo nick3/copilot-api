@@ -111,6 +111,25 @@ test("GET /api/admin/models/details returns model details with aliases", async (
       await withMockedModels(
         [
           buildModel("gpt-5-mini", {
+            capabilities: {
+              family: "test",
+              limits: {
+                max_context_window_tokens: 128_000,
+                max_prompt_tokens: 96_000,
+                max_output_tokens: 32_000,
+              },
+              object: "capabilities",
+              supports: {
+                tool_calls: true,
+                vision: false,
+                structured_outputs: true,
+                streaming: true,
+                parallel_tool_calls: true,
+                reasoning_effort: ["xhigh", "low", "ultra", "low", "medium"],
+              },
+              tokenizer: "test",
+              type: "chat",
+            },
             billing: {
               multiplier: 2,
               is_premium: true,
@@ -150,7 +169,10 @@ test("GET /api/admin/models/details returns model details with aliases", async (
                   max_prompt_tokens?: number
                   max_output_tokens?: number
                 }
-                supports: { tool_calls?: boolean }
+                supports: {
+                  tool_calls?: boolean
+                  reasoning_effort?: Array<string>
+                }
               }
             }>
           }
@@ -180,6 +202,11 @@ test("GET /api/admin/models/details returns model details with aliases", async (
           expect(mini?.capabilities.limits.max_prompt_tokens).toBe(96_000)
           expect(mini?.capabilities.limits.max_output_tokens).toBe(32_000)
           expect(mini?.capabilities.supports.tool_calls).toBe(true)
+          expect(mini?.capabilities.supports.reasoning_effort).toEqual([
+            "low",
+            "medium",
+            "xhigh",
+          ])
         },
       )
     },

@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test"
 
 import { COMPACT_REQUEST } from "../src/lib/compact"
-import { getReasoningEffortForModel } from "../src/lib/config"
 import { state } from "../src/lib/state"
 import {
   createChatCompletions,
@@ -183,24 +182,7 @@ test("keeps subagent interaction type for compact chat requests", async () => {
   expect(headers["x-initiator"]).toBe("agent")
 })
 
-test("injects reasoning_effort from config for gpt-5-mini when omitted", async () => {
-  const callCountBefore = fetchMock.mock.calls.length
-
-  const payload: ChatCompletionsPayload = {
-    messages: [{ role: "user", content: "hi" }],
-    model: "gpt-5-mini",
-  }
-
-  await callCreateChatCompletions(payload)
-
-  expect(fetchMock.mock.calls.length).toBe(callCountBefore + 1)
-  const upstreamPayload = getLastUpstreamPayload()
-  expect(upstreamPayload["reasoning_effort"]).toBe(
-    getReasoningEffortForModel("gpt-5-mini"),
-  )
-})
-
-test("does not override explicit reasoning_effort for gpt-5-mini", async () => {
+test("passes through explicit reasoning_effort unchanged", async () => {
   const callCountBefore = fetchMock.mock.calls.length
 
   const payload: ChatCompletionsPayload = {
@@ -245,21 +227,4 @@ test("does not inject reasoning_effort for non-gpt-5-mini models when omitted", 
   expect(fetchMock.mock.calls.length).toBe(callCountBefore + 1)
   const upstreamPayload = getLastUpstreamPayload()
   expect(Object.hasOwn(upstreamPayload, "reasoning_effort")).toBe(false)
-})
-
-test("injects reasoning_effort for gpt-5-mini variant models when omitted", async () => {
-  const callCountBefore = fetchMock.mock.calls.length
-
-  const payload: ChatCompletionsPayload = {
-    messages: [{ role: "user", content: "hi" }],
-    model: "gpt-5-mini-2026-01-01",
-  }
-
-  await callCreateChatCompletions(payload)
-
-  expect(fetchMock.mock.calls.length).toBe(callCountBefore + 1)
-  const upstreamPayload = getLastUpstreamPayload()
-  expect(upstreamPayload["reasoning_effort"]).toBe(
-    getReasoningEffortForModel("gpt-5-mini"),
-  )
 })

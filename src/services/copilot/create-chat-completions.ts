@@ -2,6 +2,7 @@ import consola from "consola"
 import { events } from "fetch-event-stream"
 
 import type { CompactType } from "~/lib/compact"
+import type { ReasoningEffort } from "~/lib/reasoning-effort"
 import type { SubagentMarker } from "~/lib/subagent"
 import type { AccountContext } from "~/lib/types/account"
 
@@ -11,7 +12,7 @@ import {
   prepareForCompact,
   prepareInteractionHeaders,
 } from "~/lib/api-config"
-import { getReasoningEffortForModel, isForceAgentEnabled } from "~/lib/config"
+import { isForceAgentEnabled } from "~/lib/config"
 import { logCopilotRateLimits } from "~/lib/copilot-rate-limit"
 import { HTTPError } from "~/lib/error"
 import { captureOutboundHeadersSnapshot } from "~/lib/request-context"
@@ -19,28 +20,6 @@ import { resolveEffectiveInitiator } from "~/lib/request-initiator"
 import { accountFromState } from "~/lib/state"
 
 import { copilotFetch } from "./copilot-fetch"
-
-function isGpt5MiniFamily(modelId: string): boolean {
-  return modelId === "gpt-5-mini" || modelId.startsWith("gpt-5-mini-")
-}
-
-function applyDefaultReasoningEffort(
-  payload: ChatCompletionsPayload,
-): ChatCompletionsPayload {
-  if (!isGpt5MiniFamily(payload.model)) return payload
-
-  // Only inject when omitted/null; allow callers to explicitly override.
-  if (
-    payload.reasoning_effort !== null
-    && payload.reasoning_effort !== undefined
-  )
-    return payload
-
-  return {
-    ...payload,
-    reasoning_effort: getReasoningEffortForModel("gpt-5-mini"),
-  }
-}
 
 export const getChatInitiator = (
   messages: Array<Message>,
@@ -100,7 +79,7 @@ export const createChatCompletions = async (
     headers,
   )
 
-  const upstreamPayload = applyDefaultReasoningEffort(payload)
+  const upstreamPayload = payload
 
   prepareForCompact(headers, options?.compactType)
   captureOutboundHeadersSnapshot(headers)
@@ -256,15 +235,7 @@ export interface ChatCompletionsPayload {
     | { type: "function"; function: { name: string } }
     | null
   user?: string | null
-  reasoning_effort?:
-    | "none"
-    | "minimal"
-    | "low"
-    | "medium"
-    | "high"
-    | "xhigh"
-    | "max"
-    | null
+  reasoning_effort?: ReasoningEffort | null
   stream_options?: {
     include_usage?: boolean | null
   } | null

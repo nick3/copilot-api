@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import fs from "node:fs/promises"
+import path from "node:path"
+
+import "./shared-admin-db-test-home"
 
 import type { AccountRuntime } from "~/lib/types/account"
 import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
@@ -11,8 +15,9 @@ import {
   compactSummaryPromptStart,
   compactTextOnlyGuard,
 } from "~/lib/compact"
-import { getSmallModel } from "~/lib/config"
+import { getSmallModel, mergeConfigWithDefaults } from "~/lib/config"
 import { HTTPError } from "~/lib/error"
+import { PATHS } from "~/lib/paths"
 import { state } from "~/lib/state"
 import { closeUsageStore, getTokenUsageEventsPage } from "~/lib/token-usage"
 import { getUUID } from "~/lib/utils"
@@ -36,6 +41,30 @@ const originalFinalize = accountsManager.finalizeQuota.bind(accountsManager)
 const originalMarkFailed =
   accountsManager.markAccountFailed.bind(accountsManager)
 let dbPathBeforeTest: string | undefined
+let configBeforeTest: string | null | undefined
+
+const readConfigText = async (): Promise<string | null> =>
+  await fs.readFile(PATHS.CONFIG_PATH, "utf8").catch(() => null)
+
+const restoreConfigText = async (configText: string | null): Promise<void> => {
+  if (configText === null) {
+    await fs.rm(PATHS.CONFIG_PATH, { force: true })
+  } else {
+    await fs.mkdir(path.dirname(PATHS.CONFIG_PATH), { recursive: true })
+    await fs.writeFile(PATHS.CONFIG_PATH, configText, "utf8")
+  }
+  mergeConfigWithDefaults()
+}
+
+const writeConfig = async (config: Record<string, unknown>): Promise<void> => {
+  await fs.mkdir(path.dirname(PATHS.CONFIG_PATH), { recursive: true })
+  await fs.writeFile(
+    PATHS.CONFIG_PATH,
+    `${JSON.stringify(config, null, 2)}\n`,
+    "utf8",
+  )
+  mergeConfigWithDefaults()
+}
 
 function parseFetchBody(body: unknown): Record<string, unknown> {
   if (typeof body !== "string") {
@@ -58,7 +87,10 @@ function buildAccount(): AccountRuntime {
   }
 }
 
-function buildModel(id: string): Model {
+function buildModel(
+  id: string,
+  reasoningEffort: Array<string> = ["low", "medium", "high", "xhigh"],
+): Model {
   return {
     id,
     name: id,
@@ -77,6 +109,7 @@ function buildModel(id: string): Model {
       supports: {
         adaptive_thinking: true,
         streaming: true,
+        reasoning_effort: reasoningEffort,
       },
       tokenizer: "o200k_base",
       type: "chat",
@@ -84,11 +117,15 @@ function buildModel(id: string): Model {
   }
 }
 
-function buildSelection(endpoint: string, modelId: string): SelectionOk {
+function buildSelection(
+  endpoint: string,
+  modelId: string,
+  reasoningEffort?: Array<string>,
+): SelectionOk {
   return {
     ok: true,
     account: buildAccount(),
-    selectedModel: buildModel(modelId),
+    selectedModel: buildModel(modelId, reasoningEffort),
     endpoint,
     costUnits: 0,
     confirmAffinity: mock(() => {}),
@@ -204,6 +241,7 @@ beforeEach(async () => {
   dbPathBeforeTest = process.env[DB_PATH_ENV]
   process.env[DB_PATH_ENV] = ":memory:"
   await closeUsageStore()
+  configBeforeTest = await readConfigText()
 
   state.manualApprove = false
   state.verbose = false
@@ -228,6 +266,11 @@ afterEach(async () => {
     process.env[DB_PATH_ENV] = dbPathBeforeTest
   }
   dbPathBeforeTest = undefined
+
+  if (configBeforeTest !== undefined) {
+    await restoreConfigText(configBeforeTest)
+    configBeforeTest = undefined
+  }
 })
 
 describe("messages handler sanitization", () => {
@@ -597,6 +640,108 @@ describe("messages handler routing", () => {
     expect(selection.confirmOwnership).toHaveBeenCalledTimes(1)
   })
 
+  test("Messages to native Messages injects request default effort when omitted", async () => {
+    await writeConfig({
+      modelReasoningEfforts: {
+        "original-model": "max",
+        "messages-model": "low",
+      },
+    })
+
+    let upstreamBody: Record<string, unknown> | undefined
+
+    const selection = buildSelection("/v1/messages", "messages-model", [
+      "low",
+      "medium",
+      "high",
+    ])
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    const fetchMock = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = parseFetchBody(opts?.body)
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildAnthropicResponse("messages-model", "messages")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(createPayload()),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect((upstreamBody?.output_config as { effort?: string }).effort).toBe(
+      "high",
+    )
+  })
+
+  test("compact small-model reroutes use routed model reasoning defaults", async () => {
+    await writeConfig({
+      modelReasoningEfforts: {
+        "original-model": "max",
+        [getSmallModel()]: "low",
+      },
+    })
+
+    let upstreamBody: Record<string, unknown> | undefined
+
+    const selection = buildSelection("/v1/messages", getSmallModel(), [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ])
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    const fetchMock = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = parseFetchBody(opts?.body)
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildAnthropicResponse(getSmallModel(), "compact")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          createPayload({
+            system:
+              "You are a helpful AI assistant tasked with summarizing conversations",
+          }),
+        ),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect((upstreamBody?.output_config as { effort?: string }).effort).toBe(
+      "low",
+    )
+  })
+
   test("records Copilot AIU from non-streaming Messages API responses", async () => {
     const selection = buildSelection("/v1/messages", "messages-model")
     accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
@@ -799,6 +944,100 @@ describe("messages handler routing", () => {
     expect(selection.confirmOwnership).toHaveBeenCalledTimes(1)
   })
 
+  test("Messages to Responses preserves explicit effort as normalized intent", async () => {
+    let upstreamBody: Record<string, unknown> | undefined
+
+    const selection = buildSelection("/responses", "responses-model", [
+      "low",
+      "high",
+    ])
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    const fetchMock = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = parseFetchBody(opts?.body)
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildResponsesResult("responses-model", "responses")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          createPayload({
+            output_config: {
+              effort: "medium",
+            },
+          }),
+        ),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect((upstreamBody?.reasoning as { effort?: string }).effort).toBe("low")
+  })
+
+  test("Messages to Responses uses request model default before modelMappings", async () => {
+    await writeConfig({
+      modelMappings: {
+        "messages-requested": "mapped-model",
+      },
+      modelReasoningEfforts: {
+        "messages-requested": "max",
+        "mapped-model": "low",
+      },
+    })
+
+    let upstreamBody: Record<string, unknown> | undefined
+
+    const selection = buildSelection("/responses", "mapped-model", [
+      "low",
+      "medium",
+      "high",
+    ])
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    const fetchMock = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = parseFetchBody(opts?.body)
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildResponsesResult("mapped-model", "responses")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(createPayload({ model: "messages-requested" })),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(upstreamBody?.model).toBe("mapped-model")
+    expect((upstreamBody?.reasoning as { effort?: string }).effort).toBe("high")
+  })
+
   test("records Copilot AIU when Messages routes to non-streaming Responses", async () => {
     const selection = buildSelection("/responses", "responses-model")
     accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
@@ -929,7 +1168,10 @@ describe("messages handler routing", () => {
   })
 
   test("records Copilot AIU when Messages web search routes through Responses", async () => {
-    const selection = buildSelection("/responses", "search-model")
+    const selection = buildSelection("/responses", "search-model", [
+      "low",
+      "high",
+    ])
     accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
 
     let upstreamBody: Record<string, unknown> | undefined
@@ -969,6 +1211,9 @@ describe("messages handler routing", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(
           createPayload({
+            output_config: {
+              effort: "medium",
+            },
             tools: [
               { type: "web_search_20250305", name: "web_search" },
             ] as never,
@@ -980,6 +1225,7 @@ describe("messages handler routing", () => {
 
     expect(response.status).toBe(200)
     expect(upstreamBody?.model).toBe("search-model")
+    expect((upstreamBody?.reasoning as { effort?: string }).effort).toBe("low")
     expect(await readSingleTokenUsageEvent()).toMatchObject({
       cache_read_input_tokens: 6,
       cost: {
@@ -1041,6 +1287,50 @@ describe("messages handler routing", () => {
     expect(body.content[0].text).toBe("chat")
     expect(selection.confirmAffinity).toHaveBeenCalledTimes(1)
     expect(selection.confirmOwnership).toHaveBeenCalledTimes(1)
+  })
+
+  test("Messages to Chat Completions writes normalized reasoning_effort", async () => {
+    let upstreamBody: Record<string, unknown> | undefined
+
+    const selection = buildSelection("/chat/completions", "chat-model", [
+      "low",
+      "high",
+    ])
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    const fetchMock = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = parseFetchBody(opts?.body)
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildChatCompletionResponse("chat-model", "chat")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          createPayload({
+            output_config: {
+              effort: "medium",
+            },
+          }),
+        ),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(upstreamBody?.reasoning_effort).toBe("low")
   })
 
   test("records Copilot AIU when Messages routes to non-streaming Chat Completions", async () => {

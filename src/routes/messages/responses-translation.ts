@@ -12,10 +12,8 @@ import {
   shouldEnableResponsesToolSearch,
 } from "~/lib/tool-search"
 import { HTTPError } from "~/lib/error"
-import {
-  getExtraPromptForModel,
-  getReasoningEffortForModel,
-} from "~/lib/config"
+import { getExtraPromptForModel } from "~/lib/config"
+import type { ReasoningEffort } from "~/lib/reasoning-effort"
 import { requestContext } from "~/lib/request-context"
 import { parseUserIdMetadata } from "~/lib/utils"
 import {
@@ -74,6 +72,7 @@ export const THINKING_TEXT = "Thinking..."
 
 interface ResponsesTranslationOptions {
   modelOverride?: string
+  reasoningEffort?: ReasoningEffort
   subagentAgentId?: string | null
 }
 
@@ -152,10 +151,15 @@ export const translateAnthropicMessagesToResponsesPayload = (
     stream: payload.stream ?? null,
     store: false,
     parallel_tool_calls: true,
-    reasoning: {
-      effort: getReasoningEffortForModel(model),
-      summary: "auto",
-    },
+    reasoning:
+      options.reasoningEffort ?
+        {
+          effort: options.reasoningEffort,
+          summary: "auto",
+        }
+      : {
+          summary: "auto",
+        },
     include: ["reasoning.encrypted_content"],
   }
 

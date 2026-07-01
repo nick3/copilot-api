@@ -14,6 +14,7 @@ import {
   AdminApiError,
   type AdminConfig,
   type AdminConfigResponse,
+  type AdminModelDetailsItem,
   type DevModeState,
   type ModelAliasSpec,
   type ProviderAuthType,
@@ -25,6 +26,7 @@ import {
   type TokenUsagePricingTier,
   type ToolContentSupportType,
   getAdminConfig,
+  getAdminModelDetails,
   getAdminModels,
   getDevMode,
   setDevMode,
@@ -78,6 +80,7 @@ const REASONING_EFFORTS: Array<ReasoningEffort> = [
   "medium",
   "high",
   "xhigh",
+  "max",
 ]
 
 const PROVIDER_TYPES: Array<ProviderType> = [
@@ -171,6 +174,11 @@ type ReasoningItem = {
   id: string
   model: string
   effort: ReasoningEffort
+}
+
+export type ReasoningSupportInfo = {
+  efforts: Array<ReasoningEffort>
+  target?: string
 }
 
 type CompactThresholdItem = {
@@ -465,6 +473,45 @@ function reasoningRecordFromItems(
     record[key] = item.effort
   }
   return record
+}
+
+function isReasoningEffort(value: string): value is ReasoningEffort {
+  return REASONING_EFFORTS.includes(value as ReasoningEffort)
+}
+
+function normalizeReasoningSupport(
+  values: ReadonlyArray<string> | undefined,
+): Array<ReasoningEffort> {
+  if (!values) return []
+
+  const supported = new Set(
+    values.filter((value): value is ReasoningEffort => isReasoningEffort(value)),
+  )
+
+  return REASONING_EFFORTS.filter((effort) => supported.has(effort))
+}
+
+export function deriveReasoningSupportByModel(
+  details: Array<AdminModelDetailsItem>,
+): Record<string, ReasoningSupportInfo> {
+  const support: Record<string, ReasoningSupportInfo> = {}
+
+  for (const model of details) {
+    const efforts = normalizeReasoningSupport(
+      model.capabilities?.supports?.reasoning_effort,
+    )
+    if (efforts.length === 0) continue
+
+    support[model.id] = { efforts }
+    for (const alias of model.aliases) {
+      support[alias] = {
+        efforts,
+        target: model.id,
+      }
+    }
+  }
+
+  return support
 }
 
 function isPositiveInteger(value: number): boolean {
@@ -1201,7 +1248,7 @@ function parseExtraPromptsJson(
   }
 }
 
-function parseReasoningJson(
+export function parseReasoningJson(
   value: string,
 ): ParseResult<Record<string, ReasoningEffort>> {
   if (!value.trim()) return { record: {} }
@@ -2045,6 +2092,8 @@ type ReasoningEffortsCardProps = {
   jsonIssue: string | null
   items: Array<ReasoningItem>
   models: Array<string>
+  reasoningSupportByModel?: Record<string, ReasoningSupportInfo>
+  reasoningSupportLoaded?: boolean
   onToggleMode: (next: boolean) => void
   onJsonChange: (value: string) => void
   onAddItem: () => void
@@ -2052,12 +2101,14 @@ type ReasoningEffortsCardProps = {
   onUpdateItem: (id: string, patch: Partial<ReasoningItem>) => void
 }
 
-function ReasoningEffortsCard({
+export function ReasoningEffortsCard({
   mode,
   json,
   jsonIssue,
   items,
   models,
+  reasoningSupportByModel = {},
+  reasoningSupportLoaded = true,
   onToggleMode,
   onJsonChange,
   onAddItem,
@@ -2108,12 +2159,40 @@ function ReasoningEffortsCard({
             ) : (
               items.map((item) => {
                 const modelValue = item.model || defaultModelValue
+                const isDefaultModel = modelValue === defaultModelValue
                 const showCustomModel =
-                  modelValue !== defaultModelValue && !models.includes(modelValue)
+                  !isDefaultModel && !models.includes(modelValue)
                 const disableModelSelect = !hasModels && !showCustomModel
+                const supportInfo =
+                  !isDefaultModel ? reasoningSupportByModel[modelValue] : undefined
+                const supportEfforts = supportInfo?.efforts ?? []
+                const hasSupportEfforts = supportEfforts.length > 0
+                const supportMissingForModel =
+                  reasoningSupportLoaded && !isDefaultModel && !hasSupportEfforts
+                const supportedEfforts =
+                  hasSupportEfforts
+                    ? supportEfforts
+                    : supportMissingForModel
+                      ? [item.effort]
+                      : REASONING_EFFORTS
+                const showUnsupportedConfiguredEffort =
+                  hasSupportEfforts && !supportEfforts.includes(item.effort)
+                const effortOptions =
+                  showUnsupportedConfiguredEffort
+                    ? [item.effort, ...supportedEfforts]
+                    : supportedEfforts
 
                 return (
-                  <div key={item.id} className="grid gap-2 rounded-lg border p-3">
+                  <div
+                    key={item.id}
+                    className="grid gap-2 rounded-lg border p-3"
+                    data-reasoning-model={modelValue}
+                    data-reasoning-target={supportInfo?.target}
+                    data-reasoning-effort-options={effortOptions.join(",")}
+                    data-reasoning-effort-disabled={
+                      supportMissingForModel ? "true" : undefined
+                    }
+                  >
                     <div className="flex flex-wrap items-center gap-2">
                       <Select
                         value={modelValue}
@@ -2154,12 +2233,13 @@ function ReasoningEffortsCard({
                         onValueChange={(value) =>
                           onUpdateItem(item.id, { effort: value as ReasoningEffort })
                         }
+                        disabled={supportMissingForModel}
                       >
                         <SelectTrigger className="w-40">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {REASONING_EFFORTS.map((effort) => (
+                          {effortOptions.map((effort) => (
                             <SelectItem key={effort} value={effort}>
                               {effort}
                             </SelectItem>
@@ -2175,6 +2255,32 @@ function ReasoningEffortsCard({
                         {t("settingsPage.common.remove")}
                       </Button>
                     </div>
+                    {supportInfo?.target ? (
+                      <div className="text-muted-foreground text-xs">
+                        {t("settingsPage.reasoning.aliasSupportHint", {
+                          target: supportInfo.target,
+                        })}
+                      </div>
+                    ) : null}
+                    {supportMissingForModel ? (
+                      <InlineAlert
+                        variant="warning"
+                        title={t("settingsPage.reasoning.noMetadataTitle")}
+                        description={t(
+                          "settingsPage.reasoning.noMetadataDescription",
+                        )}
+                      />
+                    ) : null}
+                    {showUnsupportedConfiguredEffort ? (
+                      <InlineAlert
+                        variant="warning"
+                        title={t("settingsPage.reasoning.unsupportedEffortTitle")}
+                        description={t(
+                          "settingsPage.reasoning.unsupportedEffortDescription",
+                          { effort: item.effort },
+                        )}
+                      />
+                    ) : null}
                     <div className="text-muted-foreground text-xs">
                       {t("settingsPage.reasoning.itemHint")}
                     </div>
@@ -4172,6 +4278,8 @@ type SettingsPageViewProps = {
   reasoningJson: string
   reasoningJsonIssue: string | null
   reasoningItems: Array<ReasoningItem>
+  reasoningSupportByModel: Record<string, ReasoningSupportInfo>
+  reasoningSupportLoaded: boolean
   onReasoningToggleMode: (next: boolean) => void
   onReasoningJsonChange: (value: string) => void
   onReasoningAddItem: () => void
@@ -4261,6 +4369,10 @@ function useSettingsPageState(): SettingsPageViewProps {
   const [configPath, setConfigPath] = useState<string | null>(null)
 
   const [models, setModels] = useState<Array<string>>([])
+  const [reasoningSupportByModel, setReasoningSupportByModel] = useState<
+    Record<string, ReasoningSupportInfo>
+  >({})
+  const [reasoningSupportLoaded, setReasoningSupportLoaded] = useState(false)
   const [devMode, setDevModeState] = useState<DevModeState>({
     enabled: false,
     capture4xx: false,
@@ -4439,9 +4551,29 @@ function useSettingsPageState(): SettingsPageViewProps {
     ],
   )
 
+  const loadReasoningSupport = useCallback(async () => {
+    setReasoningSupportLoaded(false)
+    setReasoningSupportByModel({})
+
+    try {
+      const modelDetails = await getAdminModelDetails()
+      setReasoningSupportByModel(
+        deriveReasoningSupportByModel(modelDetails.items ?? []),
+      )
+      setReasoningSupportLoaded(true)
+    } catch (err) {
+      setReasoningSupportByModel({})
+      setReasoningSupportLoaded(false)
+      toast.error(i18n.t("settingsPage.toast.loadReasoningSupportFailed"), {
+        description: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }, [])
+
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setReasoningSupportLoaded(false)
 
     try {
       const [configRes, modelsRes, devModeRes] = await Promise.allSettled([
@@ -4477,6 +4609,8 @@ function useSettingsPageState(): SettingsPageViewProps {
               : String(devModeRes.reason),
         })
       }
+
+      void loadReasoningSupport()
     } catch (err) {
       const msg = err instanceof AdminApiError ? err.message : String(err)
       setError(msg)
@@ -4484,7 +4618,7 @@ function useSettingsPageState(): SettingsPageViewProps {
     } finally {
       setLoading(false)
     }
-  }, [applyConfigResponse])
+  }, [applyConfigResponse, loadReasoningSupport])
 
   useEffect(() => {
     void load()
@@ -4806,6 +4940,8 @@ function useSettingsPageState(): SettingsPageViewProps {
     reasoningJson,
     reasoningJsonIssue,
     reasoningItems,
+    reasoningSupportByModel,
+    reasoningSupportLoaded,
     onReasoningToggleMode,
     onReasoningJsonChange,
     onReasoningAddItem,
@@ -4919,6 +5055,8 @@ function SettingsPageView({
   reasoningJson,
   reasoningJsonIssue,
   reasoningItems,
+  reasoningSupportByModel,
+  reasoningSupportLoaded,
   onReasoningToggleMode,
   onReasoningJsonChange,
   onReasoningAddItem,
@@ -5144,6 +5282,8 @@ function SettingsPageView({
               jsonIssue={reasoningJsonIssue}
               items={reasoningItems}
               models={models}
+              reasoningSupportByModel={reasoningSupportByModel}
+              reasoningSupportLoaded={reasoningSupportLoaded}
               onToggleMode={onReasoningToggleMode}
               onJsonChange={onReasoningJsonChange}
               onAddItem={onReasoningAddItem}

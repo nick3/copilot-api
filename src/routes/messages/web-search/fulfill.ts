@@ -14,6 +14,10 @@ import {
   type ProviderModelAlias,
 } from "~/lib/provider-model"
 import {
+  type ReasoningEffort,
+  resolveReasoningEffortForTarget,
+} from "~/lib/reasoning-effort"
+import {
   createCopilotTokenUsageRecorder,
   mergeCopilotAiuUsage,
   normalizeResponsesUsage,
@@ -212,6 +216,7 @@ export const prepareWebSearchResponsesPayload = (
   payload: AnthropicMessagesPayload,
   options: {
     model?: string
+    reasoningEffort?: ReasoningEffort
     subagentAgentId?: string | null
   } = {},
 ): ResponsesPayload => {
@@ -225,7 +230,10 @@ export const prepareWebSearchResponsesPayload = (
 
   const responsesPayload = translateAnthropicMessagesToResponsesPayload(
     switchedPayload,
-    { subagentAgentId: options.subagentAgentId },
+    {
+      reasoningEffort: options.reasoningEffort,
+      subagentAgentId: options.subagentAgentId,
+    },
   )
   responsesPayload.tools = [buildResponsesWebSearchTool(config)]
   responsesPayload.tool_choice = undefined
@@ -632,16 +640,23 @@ export const handleWebSearchViaResponses = async (
 ) => {
   const { logger, webSearchModel } = options
   const wantsStream = Boolean(payload.stream)
+  const selectedModel: Model | undefined = findEndpointModel(webSearchModel)
+  const reasoningEffort = resolveReasoningEffortForTarget({
+    explicitEffort: payload.output_config?.effort,
+    requestModel: payload.model,
+    targetModel: selectedModel,
+    targetModelId: webSearchModel,
+  })
 
   // Switch to the GPT web search model and drop the Anthropic server tool so the
   // standard Anthropic -> Responses translation does not choke on it; the
   // Responses web_search tool is attached to the translated payload instead.
   const responsesPayload = prepareWebSearchResponsesPayload(payload, {
     model: webSearchModel,
+    reasoningEffort,
     subagentAgentId: options.subagentMarker?.agent_id,
   })
 
-  const selectedModel: Model | undefined = findEndpointModel(webSearchModel)
   const { vision, initiator } = getResponsesRequestOptions(responsesPayload)
   const transport =
     getResponsesTransportForModel(selectedModel, {

@@ -10,8 +10,11 @@ import {
   compactTextOnlyGuard,
   type CompactType,
 } from "~/lib/compact"
-import { getReasoningEffortForModel } from "~/lib/config"
 import { normalizeSdkModelId } from "~/lib/models"
+import {
+  type ReasoningEffort,
+  resolveReasoningEffortForTarget,
+} from "~/lib/reasoning-effort"
 
 import type {
   AnthropicAssistantContentBlock,
@@ -919,9 +922,61 @@ const filterAssistantThinkingBlocks = (
   }
 }
 
+type AnthropicOutputConfig = NonNullable<
+  AnthropicMessagesPayload["output_config"]
+>
+type AnthropicOutputEffort = AnthropicOutputConfig["effort"]
+
+const normalizeAdaptiveMessagesEffort = (
+  effort: ReasoningEffort | undefined,
+): AnthropicOutputEffort | undefined => {
+  if (!effort) return undefined
+
+  switch (effort) {
+    case "none":
+    case "minimal":
+      return "low"
+    default:
+      return effort
+  }
+}
+
+const applyMessagesReasoningEffort = (
+  payload: AnthropicMessagesPayload,
+  selectedModel: Model | undefined,
+  requestModel: string,
+): void => {
+  const effort = normalizeAdaptiveMessagesEffort(
+    resolveReasoningEffortForTarget({
+      explicitEffort: payload.output_config?.effort,
+      requestModel,
+      targetModel: selectedModel,
+      targetModelId: selectedModel?.id,
+    }),
+  )
+
+  if (effort) {
+    payload.output_config = {
+      ...payload.output_config,
+      effort,
+    }
+    return
+  }
+
+  if (payload.output_config) {
+    delete payload.output_config.effort
+    if (Object.keys(payload.output_config).length === 0) {
+      delete payload.output_config
+    }
+  }
+}
+
 export const prepareMessagesApiPayload = (
   payload: AnthropicMessagesPayload,
   selectedModel?: Model,
+  options: {
+    requestModel?: string
+  } = {},
 ): void => {
   stripCacheControl(payload)
   applyTopLevelCacheControl(payload)
@@ -934,6 +989,11 @@ export const prepareMessagesApiPayload = (
   // Using tool_choice: {"type": "any"} or tool_choice: {"type": "tool", "name": "..."} will result in an error because these options force tool use, which is incompatible with extended thinking.
   const toolChoice = payload.tool_choice
   const disableThink = toolChoice?.type === "any" || toolChoice?.type === "tool"
+  applyMessagesReasoningEffort(
+    payload,
+    selectedModel,
+    options.requestModel ?? payload.model,
+  )
 
   if (selectedModel?.capabilities.supports.adaptive_thinking && !disableThink) {
     payload.thinking = {
@@ -945,18 +1005,6 @@ export const prepareMessagesApiPayload = (
     }
     if (shouldSummarizeThinkingDisplayForModel(payload.model)) {
       payload.thinking.display = "summarized"
-    }
-    let effort =
-      payload.output_config?.effort ?? getReasoningEffortForModel(payload.model)
-    if (effort === "none" || effort === "minimal") {
-      effort = "low"
-    }
-    const reasoningEffort = selectedModel.capabilities.supports.reasoning_effort
-    if (reasoningEffort && !reasoningEffort.includes(effort)) {
-      effort = reasoningEffort.at(-1) as "low" | "medium" | "high"
-    }
-    payload.output_config = {
-      effort: effort,
     }
   }
 

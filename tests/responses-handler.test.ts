@@ -83,6 +83,16 @@ const restoreConfigText = async (configText: string | null): Promise<void> => {
   mergeConfigWithDefaults()
 }
 
+const writeConfig = async (config: Record<string, unknown>): Promise<void> => {
+  await fs.mkdir(path.dirname(PATHS.CONFIG_PATH), { recursive: true })
+  await fs.writeFile(
+    PATHS.CONFIG_PATH,
+    `${JSON.stringify(config, null, 2)}\n`,
+    "utf8",
+  )
+  mergeConfigWithDefaults()
+}
+
 function buildAccount(): AccountRuntime {
   return {
     id: "octocat",
@@ -96,7 +106,11 @@ function buildAccount(): AccountRuntime {
   }
 }
 
-function buildModel(id: string, maxPromptImageSize?: number): Model {
+function buildModel(
+  id: string,
+  maxPromptImageSize?: number,
+  reasoningEffort: Array<string> = ["low", "medium", "high", "xhigh"],
+): Model {
   return {
     id,
     name: id,
@@ -119,6 +133,7 @@ function buildModel(id: string, maxPromptImageSize?: number): Model {
         adaptive_thinking: true,
         streaming: true,
         vision: maxPromptImageSize !== undefined ? true : undefined,
+        reasoning_effort: reasoningEffort,
       },
       tokenizer: "o200k_base",
       type: "chat",
@@ -126,11 +141,15 @@ function buildModel(id: string, maxPromptImageSize?: number): Model {
   }
 }
 
-function buildSelection(endpoint: string, modelId: string): SelectionOk {
+function buildSelection(
+  endpoint: string,
+  modelId: string,
+  reasoningEffort?: Array<string>,
+): SelectionOk {
   return {
     ok: true,
     account: buildAccount(),
-    selectedModel: buildModel(modelId),
+    selectedModel: buildModel(modelId, undefined, reasoningEffort),
     endpoint,
     costUnits: 0,
     confirmAffinity: mock(() => {}),
@@ -300,6 +319,351 @@ describe("responses handler model mapping", () => {
 
     expect(response.status).toBe(200)
     expect(selectionCandidates?.[0]?.modelId).toBe("gpt-original")
+  })
+})
+
+describe("responses handler reasoning effort normalization", () => {
+  test("normalizes explicit Responses reasoning effort to selected model support", async () => {
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("/responses", "gpt-test", ["low", "high"]))
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchHolder.fetch = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(JSON.stringify(buildResponsesResult("gpt-test", "ok")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+    }) as unknown as typeof fetch
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-test",
+          input: "hello",
+          reasoning: { effort: "medium" },
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect((upstreamBody?.reasoning as { effort?: string }).effort).toBe("low")
+  })
+
+  test("injects configured fallback effort for supported Responses models", async () => {
+    await writeConfig({
+      modelReasoningEfforts: {
+        "gpt-test": "high",
+      },
+    })
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(
+        buildSelection("/responses", "gpt-test", ["low", "medium"]),
+      )
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchHolder.fetch = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(JSON.stringify(buildResponsesResult("gpt-test", "ok")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+    }) as unknown as typeof fetch
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-test",
+          input: "hello",
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect((upstreamBody?.reasoning as { effort?: string }).effort).toBe(
+      "medium",
+    )
+  })
+
+  test("does not inject configured fallback when Responses reasoning effort is explicit null", async () => {
+    await writeConfig({
+      modelReasoningEfforts: {
+        "gpt-test": "high",
+      },
+    })
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(
+        buildSelection("/responses", "gpt-test", ["low", "medium", "high"]),
+      )
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchHolder.fetch = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(JSON.stringify(buildResponsesResult("gpt-test", "ok")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+    }) as unknown as typeof fetch
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-test",
+          input: "hello",
+          reasoning: { effort: null, summary: "auto" },
+        }),
+      }),
+    )
+
+    const reasoning = upstreamBody?.reasoning as
+      | { effort?: string; summary?: string }
+      | undefined
+
+    expect(response.status).toBe(200)
+    expect(reasoning?.summary).toBe("auto")
+    expect(Object.hasOwn(reasoning ?? {}, "effort")).toBe(false)
+  })
+
+  test("preserves explicit null Responses reasoning without injecting fallback", async () => {
+    await writeConfig({
+      modelReasoningEfforts: {
+        "gpt-test": "high",
+      },
+    })
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(
+        buildSelection("/responses", "gpt-test", ["low", "medium", "high"]),
+      )
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchHolder.fetch = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(JSON.stringify(buildResponsesResult("gpt-test", "ok")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+    }) as unknown as typeof fetch
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-test",
+          input: "hello",
+          reasoning: null,
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(upstreamBody?.reasoning).toBeNull()
+  })
+
+  test("uses requested model configured fallback before modelMappings", async () => {
+    await writeConfig({
+      modelMappings: {
+        "responses-requested": "responses-mapped",
+      },
+      modelReasoningEfforts: {
+        "responses-requested": "max",
+        "responses-mapped": "low",
+      },
+    })
+
+    let selectionCandidates:
+      | ReadonlyArray<{ modelId: string; endpoint: string }>
+      | undefined
+    accountsManager.selectAccountForRequest = (candidates) => {
+      selectionCandidates = candidates
+      return Promise.resolve(
+        buildSelection("/responses", "responses-mapped", [
+          "low",
+          "medium",
+          "high",
+        ]),
+      )
+    }
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchHolder.fetch = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildResponsesResult("responses-mapped", "ok")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    }) as unknown as typeof fetch
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "responses-requested",
+          input: "hello",
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(selectionCandidates?.[0]?.modelId).toBe("responses-mapped")
+    expect(upstreamBody?.model).toBe("responses-mapped")
+    expect((upstreamBody?.reasoning as { effort?: string }).effort).toBe("high")
+  })
+
+  test("uses selected target model configured fallback when request model has none", async () => {
+    await writeConfig({
+      modelReasoningEfforts: {},
+      modelMappings: {},
+    })
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(
+        buildSelection("/responses", "gpt-5-mini", ["low", "medium", "high"]),
+      )
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchHolder.fetch = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(JSON.stringify(buildResponsesResult("gpt-5-mini", "ok")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+    }) as unknown as typeof fetch
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "unconfigured-responses-request",
+          input: "hello",
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(upstreamBody?.model).toBe("gpt-5-mini")
+    expect((upstreamBody?.reasoning as { effort?: string }).effort).toBe("low")
+  })
+
+  test("omits reasoning effort but preserves other reasoning fields without configured default", async () => {
+    await writeConfig({
+      modelReasoningEfforts: {},
+      modelMappings: {},
+    })
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(
+        buildSelection("/responses", "unconfigured-responses", [
+          "low",
+          "medium",
+          "high",
+        ]),
+      )
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchHolder.fetch = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildResponsesResult("unconfigured-responses", "ok")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    }) as unknown as typeof fetch
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "unconfigured-responses",
+          input: "hello",
+          reasoning: { summary: "auto" },
+        }),
+      }),
+    )
+
+    const reasoning = upstreamBody?.reasoning as
+      | { effort?: string; summary?: string }
+      | undefined
+
+    expect(response.status).toBe(200)
+    expect(reasoning?.summary).toBe("auto")
+    expect(Object.hasOwn(reasoning ?? {}, "effort")).toBe(false)
+  })
+
+  test("removes Responses reasoning object when effort cleanup leaves it empty", async () => {
+    await writeConfig({
+      modelReasoningEfforts: {},
+      modelMappings: {},
+    })
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(
+        buildSelection("/responses", "unconfigured-responses", [
+          "low",
+          "medium",
+          "high",
+        ]),
+      )
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchHolder.fetch = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildResponsesResult("unconfigured-responses", "ok")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    }) as unknown as typeof fetch
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "unconfigured-responses",
+          input: "hello",
+          reasoning: { effort: null },
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(Object.hasOwn(upstreamBody ?? {}, "reasoning")).toBe(false)
   })
 })
 

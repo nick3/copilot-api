@@ -14,8 +14,10 @@ import type {
   ChatCompletionResponse,
   ChatCompletionsPayload,
 } from "~/services/copilot/create-chat-completions"
+import type { Model } from "~/services/copilot/get-models"
 
 import {
+  getConfiguredReasoningEffortForModel,
   getProviderConfig,
   type ModelConfig,
   type ResolvedProviderConfig,
@@ -60,6 +62,11 @@ import {
 } from "~/routes/messages/responses-translation"
 import { normalizeSystemMessages } from "~/routes/messages/preprocess"
 import {
+  parseReasoningEffort,
+  type ReasoningEffort,
+  resolveReasoningEffortForTarget,
+} from "~/lib/reasoning-effort"
+import {
   assertWebSearchResponsesResultSucceeded,
   collectWebSearchResponsesStreamResult,
   hasWebSearchServerTool,
@@ -87,6 +94,28 @@ import {
 } from "~/services/providers/provider-proxy"
 
 const logger = createHandlerLogger("provider-messages-handler")
+
+const resolveProviderResponsesReasoningEffort = (
+  payload: AnthropicMessagesPayload,
+  selectedModel: Pick<Model, "id" | "capabilities"> | undefined,
+  requestModel = payload.model,
+): ReasoningEffort | undefined => {
+  if (selectedModel) {
+    return resolveReasoningEffortForTarget({
+      explicitEffort: payload.output_config?.effort,
+      requestModel,
+      targetModel: selectedModel,
+      targetModelId: selectedModel.id,
+    })
+  }
+
+  if (payload.output_config?.effort === null) return undefined
+
+  return (
+    parseReasoningEffort(payload.output_config?.effort)
+    ?? getConfiguredReasoningEffortForModel(requestModel)
+  )
+}
 
 type ProviderConfigResolver = (
   provider: string,
@@ -152,9 +181,10 @@ export async function handleProviderMessagesForProvider(
     instrumentation?: ProviderMessagesInstrumentation
     payload: AnthropicMessagesPayload
     provider: string
+    requestModel?: string
   },
 ): Promise<Response> {
-  const { instrumentation, payload, provider } = options
+  const { instrumentation, payload, provider, requestModel } = options
   const providerConfig = resolveProviderConfig(c, provider)
   if (!providerConfig) {
     const message = `Provider '${provider}' not found or disabled`
@@ -195,6 +225,7 @@ export async function handleProviderMessagesForProvider(
             payload,
             provider,
             providerConfig: effectiveProviderConfig,
+            requestModel,
           })
         }
 
@@ -207,6 +238,7 @@ export async function handleProviderMessagesForProvider(
         payload,
         provider,
         providerConfig: effectiveProviderConfig,
+        requestModel,
       })
     }
 
@@ -277,14 +309,23 @@ const handleOpenAIResponsesProviderWebSearchMessages = async (
     payload: AnthropicMessagesPayload
     provider: string
     providerConfig: ResolvedProviderConfig
+    requestModel?: string
   },
 ): Promise<Response> => {
-  const { instrumentation, payload, provider, providerConfig } = options
+  const { instrumentation, payload, provider, providerConfig, requestModel } =
+    options
   const selectedModel =
     providerConfig.name === "codex" ?
       getCodexModels().data.find((model) => model.id === payload.model)
     : undefined
-  const responsesPayload = prepareWebSearchResponsesPayload(payload)
+  const reasoningEffort = resolveProviderResponsesReasoningEffort(
+    payload,
+    selectedModel,
+    requestModel,
+  )
+  const responsesPayload = prepareWebSearchResponsesPayload(payload, {
+    reasoningEffort,
+  })
   responsesPayload.stream = true
 
   applyResponsesApiContextManagement(
@@ -380,14 +421,26 @@ const handleOpenAIResponsesProviderMessages = async (
     payload: AnthropicMessagesPayload
     provider: string
     providerConfig: ResolvedProviderConfig
+    requestModel?: string
   },
 ): Promise<Response> => {
-  const { instrumentation, payload, provider, providerConfig } = options
+  const { instrumentation, payload, provider, providerConfig, requestModel } =
+    options
   const selectedModel =
     providerConfig.name === "codex" ?
       getCodexModels().data.find((model) => model.id === payload.model)
     : undefined
-  const responsesPayload = translateAnthropicMessagesToResponsesPayload(payload)
+  const reasoningEffort = resolveProviderResponsesReasoningEffort(
+    payload,
+    selectedModel,
+    requestModel,
+  )
+  const responsesPayload = translateAnthropicMessagesToResponsesPayload(
+    payload,
+    {
+      reasoningEffort,
+    },
+  )
 
   applyResponsesApiContextManagement(
     responsesPayload,

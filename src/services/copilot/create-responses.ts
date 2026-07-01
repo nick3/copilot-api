@@ -3,6 +3,7 @@ import { events } from "fetch-event-stream"
 import { createHash } from "node:crypto"
 import { WebSocket } from "undici"
 
+import type { ReasoningEffort } from "~/lib/reasoning-effort"
 import type { SubagentMarker } from "~/lib/subagent"
 import type { AccountContext } from "~/lib/types/account"
 
@@ -99,7 +100,7 @@ export type ResponseIncludable =
   | "message.output_text.logprobs"
 
 export interface Reasoning {
-  effort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | null
+  effort?: ReasoningEffort | null
   summary?: "auto" | "concise" | "detailed" | null
 }
 

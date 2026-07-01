@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
+import fs from "node:fs/promises"
+import path from "node:path"
+
+import "./shared-admin-db-test-home"
 
 import type { AccountRuntime } from "~/lib/types/account"
 import type { Model } from "~/services/copilot/get-models"
@@ -13,6 +17,8 @@ await mock.module("~/lib/rate-limit", () => ({
 
 import { state } from "../src/lib/state"
 import { accountsManager } from "../src/lib/accounts-manager"
+import { mergeConfigWithDefaults } from "../src/lib/config"
+import { PATHS } from "../src/lib/paths"
 import {
   closeUsageStore,
   getTokenUsageEventsPage,
@@ -41,7 +47,31 @@ const originalState = {
   vsCodeVersion: state.vsCodeVersion,
 }
 const DB_PATH_ENV = "COPILOT_API_SQLITE_DB_PATH"
+let configBeforeTest: string | null | undefined
 let dbPathBeforeTest: string | undefined
+
+const readConfigText = async (): Promise<string | null> =>
+  await fs.readFile(PATHS.CONFIG_PATH, "utf8").catch(() => null)
+
+const restoreConfigText = async (configText: string | null): Promise<void> => {
+  if (configText === null) {
+    await fs.rm(PATHS.CONFIG_PATH, { force: true })
+  } else {
+    await fs.mkdir(path.dirname(PATHS.CONFIG_PATH), { recursive: true })
+    await fs.writeFile(PATHS.CONFIG_PATH, configText, "utf8")
+  }
+  mergeConfigWithDefaults()
+}
+
+const writeConfig = async (config: Record<string, unknown>): Promise<void> => {
+  await fs.mkdir(path.dirname(PATHS.CONFIG_PATH), { recursive: true })
+  await fs.writeFile(
+    PATHS.CONFIG_PATH,
+    `${JSON.stringify(config, null, 2)}\n`,
+    "utf8",
+  )
+  mergeConfigWithDefaults()
+}
 
 function buildAccount(): AccountRuntime {
   return {
@@ -56,7 +86,10 @@ function buildAccount(): AccountRuntime {
   }
 }
 
-function buildModel(id: string): Model {
+function buildModel(
+  id: string,
+  reasoningEffort: Array<string> = ["low", "medium", "high", "xhigh"],
+): Model {
   return {
     id,
     name: id,
@@ -75,6 +108,7 @@ function buildModel(id: string): Model {
       supports: {
         adaptive_thinking: true,
         streaming: true,
+        reasoning_effort: reasoningEffort,
       },
       tokenizer: "o200k_base",
       type: "chat",
@@ -82,11 +116,14 @@ function buildModel(id: string): Model {
   }
 }
 
-function buildSelection(modelId: string): SelectionOk {
+function buildSelection(
+  modelId: string,
+  reasoningEffort?: Array<string>,
+): SelectionOk {
   return {
     ok: true,
     account: buildAccount(),
-    selectedModel: buildModel(modelId),
+    selectedModel: buildModel(modelId, reasoningEffort),
     endpoint: "/chat/completions",
     costUnits: 0,
     confirmAffinity: mock(() => {}),
@@ -95,7 +132,7 @@ function buildSelection(modelId: string): SelectionOk {
   }
 }
 
-const fetchMock = mock(() =>
+const fetchMock = mock((_url?: unknown, _opts?: { body?: unknown }) =>
   Promise.resolve(
     new Response(
       JSON.stringify({
@@ -125,6 +162,7 @@ beforeEach(async () => {
   dbPathBeforeTest = process.env[DB_PATH_ENV]
   process.env[DB_PATH_ENV] = ":memory:"
   await closeUsageStore()
+  configBeforeTest = await readConfigText()
 
   state.accountType = "individual"
   state.copilotToken = "test-token"
@@ -165,6 +203,11 @@ afterEach(async () => {
   }
   dbPathBeforeTest = undefined
   ;(globalThis as unknown as { fetch: typeof fetch }).fetch = originalFetch
+
+  if (configBeforeTest !== undefined) {
+    await restoreConfigText(configBeforeTest)
+    configBeforeTest = undefined
+  }
 })
 
 describe("chat completions handler", () => {
@@ -347,5 +390,261 @@ describe("chat completions handler", () => {
       total_nano_aiu: 3_000_000_000,
       total_tokens: 14,
     })
+  })
+
+  test("normalizes explicit reasoning_effort to selected model support", async () => {
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("gpt-test", ["low", "medium", "high"]))
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchMock.mockImplementationOnce((_url, opts) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "chatcmpl-test",
+            object: "chat.completion",
+            created: 0,
+            model: "gpt-test",
+            choices: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+    })
+
+    const app = createApp()
+    const response = await app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-test",
+        messages: [{ role: "user", content: "hello" }],
+        reasoning_effort: "max",
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(upstreamBody?.reasoning_effort).toBe("high")
+  })
+
+  test("injects configured fallback effort for any supported chat model", async () => {
+    await writeConfig({
+      modelReasoningEfforts: {
+        "gpt-test": "high",
+      },
+    })
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("gpt-test", ["low", "medium"]))
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchMock.mockImplementationOnce((_url, opts) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "chatcmpl-test",
+            object: "chat.completion",
+            created: 0,
+            model: "gpt-test",
+            choices: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+    })
+
+    const app = createApp()
+    const response = await app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-test",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(upstreamBody?.reasoning_effort).toBe("medium")
+  })
+
+  test("does not inject configured fallback when reasoning_effort is explicit null", async () => {
+    await writeConfig({
+      modelReasoningEfforts: {
+        "gpt-test": "high",
+      },
+    })
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("gpt-test", ["low", "medium", "high"]))
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchMock.mockImplementationOnce((_url, opts) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "chatcmpl-test",
+            object: "chat.completion",
+            created: 0,
+            model: "gpt-test",
+            choices: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+    })
+
+    const app = createApp()
+    const response = await app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-test",
+        messages: [{ role: "user", content: "hello" }],
+        reasoning_effort: null,
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(Object.hasOwn(upstreamBody ?? {}, "reasoning_effort")).toBe(false)
+  })
+
+  test("uses requested model configured fallback before modelMappings", async () => {
+    await writeConfig({
+      modelMappings: {
+        "chat-requested": "chat-mapped",
+      },
+      modelReasoningEfforts: {
+        "chat-requested": "max",
+        "chat-mapped": "low",
+      },
+    })
+
+    let selectionCandidates:
+      | ReadonlyArray<{ modelId: string; endpoint: string }>
+      | undefined
+    accountsManager.selectAccountForRequest = (candidates) => {
+      selectionCandidates = candidates
+      return Promise.resolve(
+        buildSelection("chat-mapped", ["low", "medium", "high"]),
+      )
+    }
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchMock.mockImplementationOnce((_url, opts) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "chatcmpl-test",
+            object: "chat.completion",
+            created: 0,
+            model: "chat-mapped",
+            choices: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+    })
+
+    const app = createApp()
+    const response = await app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "chat-requested",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(selectionCandidates?.[0]?.modelId).toBe("chat-mapped")
+    expect(upstreamBody?.model).toBe("chat-mapped")
+    expect(upstreamBody?.reasoning_effort).toBe("high")
+  })
+
+  test("uses selected target model configured fallback when request model has none", async () => {
+    await writeConfig({
+      modelReasoningEfforts: {},
+      modelMappings: {},
+    })
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("gpt-5-mini", ["low", "medium", "high"]))
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchMock.mockImplementationOnce((_url, opts) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "chatcmpl-test",
+            object: "chat.completion",
+            created: 0,
+            model: "gpt-5-mini",
+            choices: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+    })
+
+    const app = createApp()
+    const response = await app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "unconfigured-chat-request",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(upstreamBody?.model).toBe("gpt-5-mini")
+    expect(upstreamBody?.reasoning_effort).toBe("low")
+  })
+
+  test("omits reasoning_effort when no explicit or configured default exists", async () => {
+    await writeConfig({
+      modelReasoningEfforts: {},
+      modelMappings: {},
+    })
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(
+        buildSelection("unconfigured-chat", ["low", "medium", "high"]),
+      )
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchMock.mockImplementationOnce((_url, opts) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "chatcmpl-test",
+            object: "chat.completion",
+            created: 0,
+            model: "unconfigured-chat",
+            choices: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+    })
+
+    const app = createApp()
+    const response = await app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "unconfigured-chat",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(Object.hasOwn(upstreamBody ?? {}, "reasoning_effort")).toBe(false)
   })
 })

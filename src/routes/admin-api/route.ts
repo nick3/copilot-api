@@ -36,6 +36,11 @@ import {
 import { PATHS } from "~/lib/paths"
 import { updateQuotaRefreshSchedulerFromConfig } from "~/lib/quota-refresh-scheduler-runtime"
 import {
+  parseReasoningEffortSupport,
+  REASONING_EFFORTS as REASONING_EFFORT_VALUES,
+  type ReasoningEffort,
+} from "~/lib/reasoning-effort"
+import {
   getRequestHistoryStore,
   getStatsStore,
   toAdminRequestLogRow,
@@ -200,8 +205,6 @@ function parsePositiveInt(value: string | null, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
 }
 
-type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
-
 type ConfigErrorType = "bad_request" | "internal_error" | "not_found"
 
 type ConfigErrorPayload = {
@@ -239,14 +242,7 @@ const CONFIG_KEYS = new Set<keyof AppConfig>([
   "quotaRefresh",
 ])
 
-const REASONING_EFFORTS = new Set<ReasoningEffort>([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-])
+const REASONING_EFFORTS = new Set<ReasoningEffort>(REASONING_EFFORT_VALUES)
 
 const LOG_LEVELS = new Set<LogLevel>(["error", "warn", "info", "debug"])
 
@@ -1809,6 +1805,7 @@ type AdminModelDetailsItem = {
       structured_outputs?: boolean
       streaming?: boolean
       vision?: boolean
+      reasoning_effort?: Array<string>
     }
   }
   aliases: Array<string>
@@ -1907,6 +1904,11 @@ function parseCapabilities(
       structured_outputs: toBooleanOrUndefined(supportsRaw?.structured_outputs),
       streaming: toBooleanOrUndefined(supportsRaw?.streaming),
       vision: toBooleanOrUndefined(supportsRaw?.vision),
+      reasoning_effort: parseReasoningEffortSupport(
+        Array.isArray(supportsRaw?.reasoning_effort) ?
+          supportsRaw.reasoning_effort
+        : undefined,
+      ),
     },
   }
 }

@@ -1,6 +1,8 @@
 import consola from "consola"
 import fs from "node:fs"
 
+import type { ReasoningEffort } from "~/lib/reasoning-effort"
+
 import { PATHS } from "./paths"
 
 export type LogLevel = "error" | "warn" | "info" | "debug"
@@ -28,6 +30,8 @@ export interface ResolvedQuotaRefreshConfig {
   staggerMaxSeconds: number
 }
 
+export type ConfiguredReasoningEffort = ReasoningEffort
+
 export interface AppConfig {
   auth?: {
     apiKeys?: Array<string>
@@ -42,10 +46,7 @@ export interface AppConfig {
   responsesApiContextManagementModels?: Array<string>
   useResponsesApiContextManagement?: boolean
   modelResponsesApiCompactThresholds?: Record<string, number>
-  modelReasoningEfforts?: Record<
-    string,
-    "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
-  >
+  modelReasoningEfforts?: Record<string, ConfiguredReasoningEffort>
   modelAliases?: Record<string, { target: string; allowOriginal?: boolean }>
   allowOriginalModelNamesForAliases?: boolean
   modelMappings?: Record<string, string>
@@ -791,6 +792,27 @@ function getAliasFallbackValue<T extends string>(
   return undefined
 }
 
+function getRecordValueForModel<T extends string>(
+  record: Record<string, T> | undefined,
+  modelId: string,
+): T | undefined {
+  if (!record) return undefined
+
+  const direct = record[modelId]
+  if (direct !== undefined) return direct
+
+  const normalizedModel = normalizeAliasKey(modelId)
+  if (!normalizedModel) return undefined
+
+  for (const [key, value] of Object.entries(record)) {
+    if (normalizeAliasKey(key) === normalizedModel) {
+      return value
+    }
+  }
+
+  return undefined
+}
+
 export function getExtraPromptForModel(model: string): string {
   const config = getConfig()
   const direct = config.extraPrompts?.[model]
@@ -941,20 +963,41 @@ export function getModelResponsesApiCompactThreshold(
   return threshold
 }
 
-export function getReasoningEffortForModel(
+export function getConfiguredReasoningEffortForModel(
   model: string,
-): "none" | "minimal" | "low" | "medium" | "high" | "xhigh" {
+): ConfiguredReasoningEffort | undefined {
   const config = getConfig()
-  const direct = config.modelReasoningEfforts?.[model]
+  const efforts = config.modelReasoningEfforts
+  const direct = getReasoningEffortRecordValue(efforts, model)
   if (direct !== undefined) return direct
 
   const aliases = getModelAliases()
-  const fallback = getAliasFallbackValue(
-    config.modelReasoningEfforts,
-    model,
-    aliases,
-  )
-  return fallback ?? "high"
+  const normalizedModel = normalizeAliasKey(model)
+  const aliasTarget = normalizedModel ? aliases[normalizedModel] : undefined
+  if (aliasTarget) {
+    const targetDirect = getReasoningEffortRecordValue(efforts, aliasTarget)
+    if (targetDirect !== undefined) return targetDirect
+  }
+
+  const aliasFallback = getAliasFallbackValue(efforts, model, aliases)
+  if (aliasFallback !== undefined) return aliasFallback
+
+  return undefined
+}
+
+function getReasoningEffortRecordValue(
+  record: Record<string, ConfiguredReasoningEffort> | undefined,
+  modelId: string,
+): ConfiguredReasoningEffort | undefined {
+  const direct = getRecordValueForModel(record, modelId)
+  if (direct !== undefined) return direct
+
+  const normalizedModel = normalizeAliasKey(modelId)
+  if (normalizedModel?.startsWith("gpt-5-mini-")) {
+    return getRecordValueForModel(record, "gpt-5-mini")
+  }
+
+  return undefined
 }
 
 export function isForceAgentEnabled(): boolean {
