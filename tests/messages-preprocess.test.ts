@@ -1124,6 +1124,47 @@ describe("prepareMessagesApiPayload", () => {
     expect(payload.output_config).toBeUndefined()
   })
 
+  test("normalizes reasoning effort when tool choice disables adaptive thinking", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "gpt-5.4",
+      max_tokens: 128,
+      messages: [{ role: "user", content: "hello" }],
+      output_config: {
+        effort: "max",
+        format: {
+          schema: {
+            type: "object",
+          },
+          type: "json_schema",
+        },
+      },
+      tool_choice: {
+        type: "tool",
+        name: "apply_patch",
+      },
+    }
+
+    prepareMessagesApiPayload(payload, {
+      capabilities: {
+        supports: {
+          adaptive_thinking: true,
+          reasoning_effort: ["low", "medium", "high"],
+        },
+      },
+    } as never)
+
+    expect(payload.thinking).toBeUndefined()
+    expect(payload.output_config).toEqual({
+      effort: "high",
+      format: {
+        schema: {
+          type: "object",
+        },
+        type: "json_schema",
+      },
+    })
+  })
+
   test("preserves output format when stripping unsupported reasoning effort", () => {
     const payload: AnthropicMessagesPayload = {
       model: "claude-haiku-4.5",
