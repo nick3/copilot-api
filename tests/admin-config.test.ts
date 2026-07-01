@@ -1007,7 +1007,7 @@ test("POST /api/admin/config rejects invalid provider model advanced fields", as
   }
 })
 
-test("POST /api/admin/config keeps reasoning max out of config layer", async () => {
+test("POST /api/admin/config accepts max reasoning effort as intent", async () => {
   await withConfig({}, async () => {
     const { server } = await import("../src/server")
 
@@ -1025,10 +1025,12 @@ test("POST /api/admin/config keeps reasoning max out of config layer", async () 
       }),
     )
 
-    expect(res.status).toBe(400)
+    expect(res.status).toBe(200)
 
-    const body = (await res.json()) as { error?: { message?: string } }
-    expect(body.error?.message).toContain("modelReasoningEfforts.gpt-5.5")
+    const body = (await res.json()) as {
+      modelReasoningEfforts?: Record<string, string>
+    }
+    expect(body.modelReasoningEfforts?.["gpt-5.5"]).toBe("max")
   })
 })
 

@@ -44,7 +44,7 @@ export interface AppConfig {
   modelResponsesApiCompactThresholds?: Record<string, number>
   modelReasoningEfforts?: Record<
     string,
-    "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+    "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
   >
   modelAliases?: Record<string, { target: string; allowOriginal?: boolean }>
   allowOriginalModelNamesForAliases?: boolean
@@ -943,7 +943,7 @@ export function getModelResponsesApiCompactThreshold(
 
 export function getReasoningEffortForModel(
   model: string,
-): "none" | "minimal" | "low" | "medium" | "high" | "xhigh" {
+): "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" {
   const config = getConfig()
   const direct = config.modelReasoningEfforts?.[model]
   if (direct !== undefined) return direct

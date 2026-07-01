@@ -200,7 +200,14 @@ function parsePositiveInt(value: string | null, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
 }
 
-type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+type ReasoningEffort =
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max"
 
 type ConfigErrorType = "bad_request" | "internal_error" | "not_found"
 
@@ -246,6 +253,7 @@ const REASONING_EFFORTS = new Set<ReasoningEffort>([
   "medium",
   "high",
   "xhigh",
+  "max",
 ])
 
 const LOG_LEVELS = new Set<LogLevel>(["error", "warn", "info", "debug"])
@@ -1809,6 +1817,7 @@ type AdminModelDetailsItem = {
       structured_outputs?: boolean
       streaming?: boolean
       vision?: boolean
+      reasoning_effort?: Array<string>
     }
   }
   aliases: Array<string>
@@ -1907,6 +1916,7 @@ function parseCapabilities(
       structured_outputs: toBooleanOrUndefined(supportsRaw?.structured_outputs),
       streaming: toBooleanOrUndefined(supportsRaw?.streaming),
       vision: toBooleanOrUndefined(supportsRaw?.vision),
+      reasoning_effort: parseStringArray(supportsRaw?.reasoning_effort),
     },
   }
 }
