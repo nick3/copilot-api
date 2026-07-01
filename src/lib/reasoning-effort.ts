@@ -27,10 +27,9 @@ export function parseReasoningEffort(
     : undefined
 }
 
-export function getReasoningEffortSupport(
-  model: Pick<Model, "capabilities"> | undefined,
+function parseReasoningEffortSupport(
+  rawSupport: ReadonlyArray<unknown> | undefined,
 ): Array<ReasoningEffort> | undefined {
-  const rawSupport = model?.capabilities.supports.reasoning_effort
   if (!Array.isArray(rawSupport)) return undefined
 
   const seen = new Set<ReasoningEffort>()
@@ -48,6 +47,14 @@ export function getReasoningEffortSupport(
   return support.length > 0 ? support : undefined
 }
 
+export function getReasoningEffortSupport(
+  model: Pick<Model, "capabilities"> | undefined,
+): Array<ReasoningEffort> | undefined {
+  return parseReasoningEffortSupport(
+    model?.capabilities.supports.reasoning_effort,
+  )
+}
+
 export function normalizeReasoningEffortForSupport(
   intent: unknown,
   rawSupport: ReadonlyArray<string> | undefined,
@@ -55,18 +62,7 @@ export function normalizeReasoningEffortForSupport(
   const requested = parseReasoningEffort(intent)
   if (!requested) return undefined
 
-  const support = getReasoningEffortSupport({
-    capabilities: {
-      family: "",
-      limits: {},
-      object: "",
-      supports: {
-        reasoning_effort: rawSupport ? [...rawSupport] : undefined,
-      },
-      tokenizer: "",
-      type: "",
-    },
-  })
+  const support = parseReasoningEffortSupport(rawSupport)
   if (!support) return undefined
 
   if (support.includes(requested)) return requested

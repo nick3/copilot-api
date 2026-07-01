@@ -109,4 +109,16 @@ describe("reasoning effort normalization", () => {
       }),
     ).toBe("medium")
   })
+
+  test("uses getReasoningEffortForModel when no default resolver is provided", () => {
+    const model = buildModel(["low", "medium", "high"])
+
+    expect(
+      resolveReasoningEffortForTarget({
+        explicitEffort: undefined,
+        requestModel: "gpt-5-mini",
+        targetModel: model,
+      }),
+    ).toBe("low")
+  })
 })
