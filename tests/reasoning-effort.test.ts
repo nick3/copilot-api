@@ -155,6 +155,19 @@ describe("reasoning effort normalization", () => {
     ).toBe("medium")
   })
 
+  test("treats explicit null as disabling reasoning effort fallback", () => {
+    const model = buildModel(["low", "medium"])
+
+    expect(
+      resolveReasoningEffortForTarget({
+        explicitEffort: null,
+        requestModel: "gpt-test",
+        targetModel: model,
+        defaultEffortResolver: () => "high",
+      }),
+    ).toBeUndefined()
+  })
+
   test("uses configured model default when no default resolver is provided", () => {
     const model = buildModel(["low", "medium", "high"])
 
@@ -231,6 +244,19 @@ describe("reasoning effort normalization", () => {
       modelAliases: {
         fast: {
           target: "gpt-5-mini",
+        },
+      },
+      modelReasoningEfforts: {},
+    })
+
+    expect(getConfiguredReasoningEffortForModel("fast")).toBe("low")
+  })
+
+  test("uses gpt-5-mini base default for dated alias targets", async () => {
+    await writeConfig({
+      modelAliases: {
+        fast: {
+          target: "gpt-5-mini-2026-01-01",
         },
       },
       modelReasoningEfforts: {},

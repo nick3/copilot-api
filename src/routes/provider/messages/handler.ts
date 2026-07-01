@@ -98,19 +98,22 @@ const logger = createHandlerLogger("provider-messages-handler")
 const resolveProviderResponsesReasoningEffort = (
   payload: AnthropicMessagesPayload,
   selectedModel: Pick<Model, "id" | "capabilities"> | undefined,
+  requestModel = payload.model,
 ): ReasoningEffort | undefined => {
   if (selectedModel) {
     return resolveReasoningEffortForTarget({
       explicitEffort: payload.output_config?.effort,
-      requestModel: payload.model,
+      requestModel,
       targetModel: selectedModel,
       targetModelId: selectedModel.id,
     })
   }
 
+  if (payload.output_config?.effort === null) return undefined
+
   return (
     parseReasoningEffort(payload.output_config?.effort)
-    ?? getConfiguredReasoningEffortForModel(payload.model)
+    ?? getConfiguredReasoningEffortForModel(requestModel)
   )
 }
 
@@ -178,9 +181,10 @@ export async function handleProviderMessagesForProvider(
     instrumentation?: ProviderMessagesInstrumentation
     payload: AnthropicMessagesPayload
     provider: string
+    requestModel?: string
   },
 ): Promise<Response> {
-  const { instrumentation, payload, provider } = options
+  const { instrumentation, payload, provider, requestModel } = options
   const providerConfig = resolveProviderConfig(c, provider)
   if (!providerConfig) {
     const message = `Provider '${provider}' not found or disabled`
@@ -221,6 +225,7 @@ export async function handleProviderMessagesForProvider(
             payload,
             provider,
             providerConfig: effectiveProviderConfig,
+            requestModel,
           })
         }
 
@@ -233,6 +238,7 @@ export async function handleProviderMessagesForProvider(
         payload,
         provider,
         providerConfig: effectiveProviderConfig,
+        requestModel,
       })
     }
 
@@ -303,9 +309,11 @@ const handleOpenAIResponsesProviderWebSearchMessages = async (
     payload: AnthropicMessagesPayload
     provider: string
     providerConfig: ResolvedProviderConfig
+    requestModel?: string
   },
 ): Promise<Response> => {
-  const { instrumentation, payload, provider, providerConfig } = options
+  const { instrumentation, payload, provider, providerConfig, requestModel } =
+    options
   const selectedModel =
     providerConfig.name === "codex" ?
       getCodexModels().data.find((model) => model.id === payload.model)
@@ -313,6 +321,7 @@ const handleOpenAIResponsesProviderWebSearchMessages = async (
   const reasoningEffort = resolveProviderResponsesReasoningEffort(
     payload,
     selectedModel,
+    requestModel,
   )
   const responsesPayload = prepareWebSearchResponsesPayload(payload, {
     reasoningEffort,
@@ -412,9 +421,11 @@ const handleOpenAIResponsesProviderMessages = async (
     payload: AnthropicMessagesPayload
     provider: string
     providerConfig: ResolvedProviderConfig
+    requestModel?: string
   },
 ): Promise<Response> => {
-  const { instrumentation, payload, provider, providerConfig } = options
+  const { instrumentation, payload, provider, providerConfig, requestModel } =
+    options
   const selectedModel =
     providerConfig.name === "codex" ?
       getCodexModels().data.find((model) => model.id === payload.model)
@@ -422,6 +433,7 @@ const handleOpenAIResponsesProviderMessages = async (
   const reasoningEffort = resolveProviderResponsesReasoningEffort(
     payload,
     selectedModel,
+    requestModel,
   )
   const responsesPayload = translateAnthropicMessagesToResponsesPayload(
     payload,

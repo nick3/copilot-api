@@ -214,6 +214,9 @@ export const handleResponses = async (c: Context) => {
     }
   } else if (upstreamPayload.reasoning) {
     delete upstreamPayload.reasoning.effort
+    if (Object.keys(upstreamPayload.reasoning).length === 0) {
+      delete upstreamPayload.reasoning
+    }
   }
   removeUnsupportedTools(upstreamPayload)
 

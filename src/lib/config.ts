@@ -1,6 +1,8 @@
 import consola from "consola"
 import fs from "node:fs"
 
+import type { ReasoningEffort } from "~/lib/reasoning-effort"
+
 import { PATHS } from "./paths"
 
 export type LogLevel = "error" | "warn" | "info" | "debug"
@@ -28,14 +30,7 @@ export interface ResolvedQuotaRefreshConfig {
   staggerMaxSeconds: number
 }
 
-export type ConfiguredReasoningEffort =
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | "max"
+export type ConfiguredReasoningEffort = ReasoningEffort
 
 export interface AppConfig {
   auth?: {
@@ -973,31 +968,36 @@ export function getConfiguredReasoningEffortForModel(
 ): ConfiguredReasoningEffort | undefined {
   const config = getConfig()
   const efforts = config.modelReasoningEfforts
-  const direct = getRecordValueForModel(efforts, model)
+  const direct = getReasoningEffortRecordValue(efforts, model)
   if (direct !== undefined) return direct
 
   const aliases = getModelAliases()
   const normalizedModel = normalizeAliasKey(model)
   const aliasTarget = normalizedModel ? aliases[normalizedModel] : undefined
   if (aliasTarget) {
-    const targetDirect = getRecordValueForModel(efforts, aliasTarget)
+    const targetDirect = getReasoningEffortRecordValue(efforts, aliasTarget)
     if (targetDirect !== undefined) return targetDirect
   }
 
   const aliasFallback = getAliasFallbackValue(efforts, model, aliases)
   if (aliasFallback !== undefined) return aliasFallback
 
-  if (normalizedModel?.startsWith("gpt-5-mini-")) {
-    return getRecordValueForModel(efforts, "gpt-5-mini")
-  }
-
   return undefined
 }
 
-export function getReasoningEffortForModel(
-  model: string,
-): ConfiguredReasoningEffort {
-  return getConfiguredReasoningEffortForModel(model) ?? "high"
+function getReasoningEffortRecordValue(
+  record: Record<string, ConfiguredReasoningEffort> | undefined,
+  modelId: string,
+): ConfiguredReasoningEffort | undefined {
+  const direct = getRecordValueForModel(record, modelId)
+  if (direct !== undefined) return direct
+
+  const normalizedModel = normalizeAliasKey(modelId)
+  if (normalizedModel?.startsWith("gpt-5-mini-")) {
+    return getRecordValueForModel(record, "gpt-5-mini")
+  }
+
+  return undefined
 }
 
 export function isForceAgentEnabled(): boolean {

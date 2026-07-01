@@ -125,7 +125,7 @@ test("GET /api/admin/models/details returns model details with aliases", async (
                 structured_outputs: true,
                 streaming: true,
                 parallel_tool_calls: true,
-                reasoning_effort: ["low", "medium", "high", "xhigh"],
+                reasoning_effort: ["xhigh", "low", "ultra", "low", "medium"],
               },
               tokenizer: "test",
               type: "chat",
@@ -205,7 +205,6 @@ test("GET /api/admin/models/details returns model details with aliases", async (
           expect(mini?.capabilities.supports.reasoning_effort).toEqual([
             "low",
             "medium",
-            "high",
             "xhigh",
           ])
         },

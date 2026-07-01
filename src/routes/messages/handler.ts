@@ -382,6 +382,7 @@ async function handleProviderAliasCompletion(
       instrumentation,
       payload,
       provider,
+      requestModel: originalModel,
     })
   } catch (error) {
     const observableError = await extractErrorObservability(error)

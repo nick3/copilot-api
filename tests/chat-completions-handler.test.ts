@@ -469,6 +469,48 @@ describe("chat completions handler", () => {
     expect(upstreamBody?.reasoning_effort).toBe("medium")
   })
 
+  test("does not inject configured fallback when reasoning_effort is explicit null", async () => {
+    await writeConfig({
+      modelReasoningEfforts: {
+        "gpt-test": "high",
+      },
+    })
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("gpt-test", ["low", "medium", "high"]))
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchMock.mockImplementationOnce((_url, opts) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "chatcmpl-test",
+            object: "chat.completion",
+            created: 0,
+            model: "gpt-test",
+            choices: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+    })
+
+    const app = createApp()
+    const response = await app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-test",
+        messages: [{ role: "user", content: "hello" }],
+        reasoning_effort: null,
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(Object.hasOwn(upstreamBody ?? {}, "reasoning_effort")).toBe(false)
+  })
+
   test("uses requested model configured fallback before modelMappings", async () => {
     await writeConfig({
       modelMappings: {

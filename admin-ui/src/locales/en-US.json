@@ -575,6 +575,7 @@
     },
     "toast": {
       "loadModelsFailed": "Failed to load models",
+      "loadReasoningSupportFailed": "Failed to load reasoning effort metadata",
       "loadDevModeFailed": "Failed to load Developer Mode settings",
       "loadConfigFailed": "Failed to load config",
       "configSaved": "Config saved",

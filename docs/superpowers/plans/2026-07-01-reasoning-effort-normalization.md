@@ -278,16 +278,24 @@ export function resolveReasoningEffortForTarget(params: {
   explicitEffort: unknown
   requestModel: string
   targetModel: Pick<Model, "capabilities"> | undefined
-  defaultEffortResolver?: (model: string) => ReasoningEffort
+  targetModelId?: string
+  defaultEffortResolver?: (model: string) => ReasoningEffort | undefined
 }): ReasoningEffort | undefined {
+  if (params.explicitEffort === null) return undefined
+
   const explicit = parseReasoningEffort(params.explicitEffort)
   const defaultEffortResolver =
-    params.defaultEffortResolver ?? getReasoningEffortForModel
-  const intent = explicit ?? defaultEffortResolver(params.requestModel)
+    params.defaultEffortResolver ?? getConfiguredReasoningEffortForModel
+  const requestDefault = defaultEffortResolver(params.requestModel)
+  const targetDefault =
+    params.targetModelId && params.targetModelId !== params.requestModel ?
+      defaultEffortResolver(params.targetModelId)
+    : undefined
+  const intent = explicit ?? requestDefault ?? targetDefault
 
   return normalizeReasoningEffortForSupport(
     intent,
-    params.targetModel?.capabilities.supports.reasoning_effort,
+    params.targetModel?.capabilities?.supports?.reasoning_effort,
   )
 }
 ```
@@ -1506,21 +1514,29 @@ Accept the prop with a default:
 Inside the `items.map((item) => {` callback before the `return (` statement, derive options:
 
 ```ts
+                const isDefaultModel = modelValue === defaultModelValue
                 const supportInfo =
-                  modelValue !== defaultModelValue ?
-                    reasoningSupportByModel[modelValue]
-                  : undefined
+                  !isDefaultModel ? reasoningSupportByModel[modelValue] : undefined
+                const supportEfforts = supportInfo?.efforts ?? []
+                const hasSupportEfforts = supportEfforts.length > 0
+                const supportMissingForModel =
+                  reasoningSupportLoaded && !isDefaultModel && !hasSupportEfforts
                 const supportedEfforts =
-                  supportInfo?.efforts.length ? supportInfo.efforts : REASONING_EFFORTS
+                  hasSupportEfforts
+                    ? supportEfforts
+                    : supportMissingForModel
+                      ? [item.effort]
+                      : REASONING_EFFORTS
                 const showUnsupportedConfiguredEffort =
-                  item.effort && !supportedEfforts.includes(item.effort)
+                  hasSupportEfforts && !supportEfforts.includes(item.effort)
                 const effortOptions =
                   showUnsupportedConfiguredEffort ?
                     [item.effort, ...supportedEfforts]
                   : supportedEfforts
 ```
 
-Replace the effort `SelectContent` mapping with:
+Pass `disabled={supportMissingForModel}` to the effort `Select`, then replace the
+effort `SelectContent` mapping with:
 
 ```tsx
                         <SelectContent>
@@ -1540,7 +1556,7 @@ Below the row controls, before the existing item hint, render alias/support hint
                           {`Uses ${supportInfo.target} reasoning options.`}
                         </div>
                       ) : null}
-                      {modelValue !== defaultModelValue && !supportInfo ? (
+                      {supportMissingForModel ? (
                         <InlineAlert
                           variant="warning"
                           title="No reasoning effort metadata"

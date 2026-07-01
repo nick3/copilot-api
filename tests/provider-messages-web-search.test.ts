@@ -819,6 +819,49 @@ describe("provider messages web_search", () => {
     expect(upstreamBody.reasoning?.effort).toBe("max")
   })
 
+  test("uses provider alias configured reasoning default from original request model", async () => {
+    writeTestConfig({
+      auth: { apiKeys: [] },
+      modelAliases: {
+        "fast-search": {
+          target: "search/gpt-search",
+        },
+      },
+      modelReasoningEfforts: {
+        "fast-search": "max",
+      },
+      providers: {
+        search: searchProviderConfig(),
+      },
+    })
+
+    const app = createApp()
+    const response = await app.request("/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        max_tokens: 128,
+        messages: [{ role: "user", content: "hello" }],
+        model: "fast-search",
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe("https://provider.example/v1/responses")
+
+    const upstreamBody = JSON.parse((init as RequestInit).body as string) as {
+      model: string
+      reasoning?: { effort?: string }
+    }
+    expect(upstreamBody.model).toBe("gpt-search")
+    expect(upstreamBody.reasoning?.effort).toBe("max")
+  })
+
   test("streams synthetic Anthropic events after parsing upstream Responses stream", async () => {
     const app = createApp()
     const response = await app.request("/search/v1/messages", {

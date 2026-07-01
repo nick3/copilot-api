@@ -27,7 +27,7 @@ export function parseReasoningEffort(
     : undefined
 }
 
-function parseReasoningEffortSupport(
+export function parseReasoningEffortSupport(
   rawSupport: ReadonlyArray<unknown> | undefined,
 ): Array<ReasoningEffort> | undefined {
   if (!Array.isArray(rawSupport)) return undefined
@@ -51,7 +51,7 @@ export function getReasoningEffortSupport(
   model: Pick<Model, "capabilities"> | undefined,
 ): Array<ReasoningEffort> | undefined {
   return parseReasoningEffortSupport(
-    model?.capabilities.supports.reasoning_effort,
+    model?.capabilities?.supports?.reasoning_effort,
   )
 }
 
@@ -95,6 +95,8 @@ export function resolveReasoningEffortForTarget(params: {
   targetModelId?: string
   defaultEffortResolver?: (model: string) => ReasoningEffort | undefined
 }): ReasoningEffort | undefined {
+  if (params.explicitEffort === null) return undefined
+
   const explicit = parseReasoningEffort(params.explicitEffort)
   const defaultEffortResolver =
     params.defaultEffortResolver ?? getConfiguredReasoningEffortForModel
@@ -107,6 +109,6 @@ export function resolveReasoningEffortForTarget(params: {
 
   return normalizeReasoningEffortForSupport(
     intent,
-    params.targetModel?.capabilities.supports.reasoning_effort,
+    params.targetModel?.capabilities?.supports?.reasoning_effort,
   )
 }

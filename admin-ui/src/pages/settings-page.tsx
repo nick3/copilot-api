@@ -498,7 +498,7 @@ export function deriveReasoningSupportByModel(
 
   for (const model of details) {
     const efforts = normalizeReasoningSupport(
-      model.capabilities.supports.reasoning_effort,
+      model.capabilities?.supports?.reasoning_effort,
     )
     if (efforts.length === 0) continue
 
@@ -4551,18 +4551,36 @@ function useSettingsPageState(): SettingsPageViewProps {
     ],
   )
 
+  const loadReasoningSupport = useCallback(async () => {
+    setReasoningSupportLoaded(false)
+    setReasoningSupportByModel({})
+
+    try {
+      const modelDetails = await getAdminModelDetails()
+      setReasoningSupportByModel(
+        deriveReasoningSupportByModel(modelDetails.items ?? []),
+      )
+      setReasoningSupportLoaded(true)
+    } catch (err) {
+      setReasoningSupportByModel({})
+      setReasoningSupportLoaded(false)
+      toast.error(i18n.t("settingsPage.toast.loadReasoningSupportFailed"), {
+        description: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }, [])
+
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setReasoningSupportLoaded(false)
 
     try {
-      const [configRes, modelsRes, modelDetailsRes, devModeRes] =
-        await Promise.allSettled([
-          getAdminConfig(),
-          getAdminModels(),
-          getAdminModelDetails(),
-          getDevMode(),
-        ])
+      const [configRes, modelsRes, devModeRes] = await Promise.allSettled([
+        getAdminConfig(),
+        getAdminModels(),
+        getDevMode(),
+      ])
 
       if (configRes.status === "fulfilled") {
         applyConfigResponse(configRes.value)
@@ -4580,22 +4598,6 @@ function useSettingsPageState(): SettingsPageViewProps {
         })
       }
 
-      if (modelDetailsRes.status === "fulfilled") {
-        setReasoningSupportByModel(
-          deriveReasoningSupportByModel(modelDetailsRes.value.items),
-        )
-        setReasoningSupportLoaded(true)
-      } else {
-        setReasoningSupportByModel({})
-        setReasoningSupportLoaded(false)
-        toast.error(i18n.t("settingsPage.toast.loadModelsFailed"), {
-          description:
-            modelDetailsRes.reason instanceof Error
-              ? modelDetailsRes.reason.message
-              : String(modelDetailsRes.reason),
-        })
-      }
-
       if (devModeRes.status === "fulfilled") {
         setDevModeState(devModeRes.value)
       } else {
@@ -4607,6 +4609,8 @@ function useSettingsPageState(): SettingsPageViewProps {
               : String(devModeRes.reason),
         })
       }
+
+      void loadReasoningSupport()
     } catch (err) {
       const msg = err instanceof AdminApiError ? err.message : String(err)
       setError(msg)
@@ -4614,7 +4618,7 @@ function useSettingsPageState(): SettingsPageViewProps {
     } finally {
       setLoading(false)
     }
-  }, [applyConfigResponse])
+  }, [applyConfigResponse, loadReasoningSupport])
 
   useEffect(() => {
     void load()

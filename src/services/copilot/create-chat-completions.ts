@@ -2,6 +2,7 @@ import consola from "consola"
 import { events } from "fetch-event-stream"
 
 import type { CompactType } from "~/lib/compact"
+import type { ReasoningEffort } from "~/lib/reasoning-effort"
 import type { SubagentMarker } from "~/lib/subagent"
 import type { AccountContext } from "~/lib/types/account"
 
@@ -234,15 +235,7 @@ export interface ChatCompletionsPayload {
     | { type: "function"; function: { name: string } }
     | null
   user?: string | null
-  reasoning_effort?:
-    | "none"
-    | "minimal"
-    | "low"
-    | "medium"
-    | "high"
-    | "xhigh"
-    | "max"
-    | null
+  reasoning_effort?: ReasoningEffort | null
   stream_options?: {
     include_usage?: boolean | null
   } | null
