@@ -3,13 +3,16 @@ import { renderToStaticMarkup } from "react-dom/server"
 
 import {
   ModelMappingsCard,
+  ReasoningEffortsCard,
   ResponsesApiSettingsCard,
   compactThresholdRecordFromItems,
   createQuickProviderItem,
+  deriveReasoningSupportByModel,
   deriveProviderModelSuggestions,
   getUniqueProviderName,
   parseCompactThresholdsJson,
   parseModelMappingsJson,
+  parseReasoningJson,
 } from "../src/pages/settings-page"
 
 test("Responses API settings exposes transport toggles and context management", () => {
@@ -246,6 +249,92 @@ test("compact threshold form record skips decimals", () => {
   ])
 
   expect(record).toEqual({ "gpt-5.5": 2 })
+})
+
+test("reasoning editor renders model-specific effort choices", () => {
+  const html = renderToStaticMarkup(
+    <ReasoningEffortsCard
+      mode="form"
+      json="{}"
+      jsonIssue={null}
+      items={[{ id: "reasoning-1", model: "gpt-5-mini", effort: "low" }]}
+      models={["gpt-5-mini"]}
+      reasoningSupportByModel={{
+        "gpt-5-mini": {
+          efforts: ["low", "medium"],
+        },
+      }}
+      onToggleMode={() => {}}
+      onJsonChange={() => {}}
+      onAddItem={() => {}}
+      onRemoveItem={() => {}}
+      onUpdateItem={() => {}}
+    />,
+  )
+
+  expect(html).toContain("gpt-5-mini")
+  expect(html).toContain("low")
+  expect(html).toContain("medium")
+  expect(html).not.toContain("xhigh")
+})
+
+test("reasoning editor shows alias support inherited from target", () => {
+  const html = renderToStaticMarkup(
+    <ReasoningEffortsCard
+      mode="form"
+      json="{}"
+      jsonIssue={null}
+      items={[{ id: "reasoning-1", model: "fast", effort: "xhigh" }]}
+      models={["fast"]}
+      reasoningSupportByModel={{
+        fast: {
+          efforts: ["high", "xhigh"],
+          target: "gpt-5.4",
+        },
+      }}
+      onToggleMode={() => {}}
+      onJsonChange={() => {}}
+      onAddItem={() => {}}
+      onRemoveItem={() => {}}
+      onUpdateItem={() => {}}
+    />,
+  )
+
+  expect(html).toContain("fast")
+  expect(html).toContain("gpt-5.4")
+  expect(html).toContain("high")
+  expect(html).toContain("xhigh")
+})
+
+test("reasoning JSON validation accepts max", () => {
+  expect(parseReasoningJson('{ "gpt-5.5": "max" }')).toEqual({
+    record: {
+      "gpt-5.5": "max",
+    },
+  })
+})
+
+test("reasoning support derivation includes aliases and ignores unknown efforts", () => {
+  expect(
+    deriveReasoningSupportByModel([
+      {
+        id: "gpt-5-mini",
+        name: "GPT-5 mini",
+        preview: false,
+        supported_endpoints: ["/chat/completions"],
+        capabilities: {
+          limits: {},
+          supports: {
+            reasoning_effort: ["low", "medium", "ultra", "xhigh"],
+          },
+        },
+        aliases: ["fast"],
+      },
+    ]),
+  ).toEqual({
+    "gpt-5-mini": { efforts: ["low", "medium", "xhigh"] },
+    fast: { efforts: ["low", "medium", "xhigh"], target: "gpt-5-mini" },
+  })
 })
 
 test("model mappings card renders mappings editor", () => {
