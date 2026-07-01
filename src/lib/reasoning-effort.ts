@@ -1,6 +1,6 @@
 import type { Model } from "~/services/copilot/get-models"
 
-import { getReasoningEffortForModel } from "~/lib/config"
+import { getConfiguredReasoningEffortForModel } from "~/lib/config"
 
 export const REASONING_EFFORTS = [
   "none",
@@ -92,11 +92,11 @@ export function resolveReasoningEffortForTarget(params: {
   explicitEffort: unknown
   requestModel: string
   targetModel: Pick<Model, "capabilities"> | undefined
-  defaultEffortResolver?: (model: string) => ReasoningEffort
+  defaultEffortResolver?: (model: string) => ReasoningEffort | undefined
 }): ReasoningEffort | undefined {
   const explicit = parseReasoningEffort(params.explicitEffort)
   const defaultEffortResolver =
-    params.defaultEffortResolver ?? getReasoningEffortForModel
+    params.defaultEffortResolver ?? getConfiguredReasoningEffortForModel
   const intent = explicit ?? defaultEffortResolver(params.requestModel)
 
   return normalizeReasoningEffortForSupport(

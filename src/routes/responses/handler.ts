@@ -203,7 +203,7 @@ export const handleResponses = async (c: Context) => {
   const upstreamPayload = { ...payload, model: selectedModel.id }
   const reasoningEffort = resolveReasoningEffortForTarget({
     explicitEffort: payload.reasoning?.effort,
-    requestModel: clientModel,
+    requestModel: requestedModel,
     targetModel: selectedModel,
   })
   if (reasoningEffort) {

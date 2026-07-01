@@ -124,6 +124,7 @@ export async function handleCompletion(c: Context) {
     (c.get("providerConfigResolver" as never) as
       | typeof getProviderConfig
       | undefined) ?? getProviderConfig
+  const requestedModel = payload.model
   payload.model = mappedModelResolver(payload.model)
 
   const providerModelAlias = resolveExistingProviderModelAlias(
@@ -201,7 +202,7 @@ export async function handleCompletion(c: Context) {
   const upstreamPayload = { ...payload, model: selectedModel.id }
   const reasoningEffort = resolveReasoningEffortForTarget({
     explicitEffort: payload.reasoning_effort,
-    requestModel: clientModel,
+    requestModel: requestedModel,
     targetModel: selectedModel,
   })
   if (reasoningEffort) {

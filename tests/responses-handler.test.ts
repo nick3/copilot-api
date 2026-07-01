@@ -83,6 +83,16 @@ const restoreConfigText = async (configText: string | null): Promise<void> => {
   mergeConfigWithDefaults()
 }
 
+const writeConfig = async (config: Record<string, unknown>): Promise<void> => {
+  await fs.mkdir(path.dirname(PATHS.CONFIG_PATH), { recursive: true })
+  await fs.writeFile(
+    PATHS.CONFIG_PATH,
+    `${JSON.stringify(config, null, 2)}\n`,
+    "utf8",
+  )
+  mergeConfigWithDefaults()
+}
+
 function buildAccount(): AccountRuntime {
   return {
     id: "octocat",
@@ -345,6 +355,12 @@ describe("responses handler reasoning effort normalization", () => {
   })
 
   test("injects configured fallback effort for supported Responses models", async () => {
+    await writeConfig({
+      modelReasoningEfforts: {
+        "gpt-test": "high",
+      },
+    })
+
     accountsManager.selectAccountForRequest = () =>
       Promise.resolve(
         buildSelection("/responses", "gpt-test", ["low", "medium"]),
@@ -376,6 +392,112 @@ describe("responses handler reasoning effort normalization", () => {
     expect((upstreamBody?.reasoning as { effort?: string }).effort).toBe(
       "medium",
     )
+  })
+
+  test("uses requested model configured fallback before modelMappings", async () => {
+    await writeConfig({
+      modelMappings: {
+        "responses-requested": "responses-mapped",
+      },
+      modelReasoningEfforts: {
+        "responses-requested": "max",
+        "responses-mapped": "low",
+      },
+    })
+
+    let selectionCandidates:
+      | ReadonlyArray<{ modelId: string; endpoint: string }>
+      | undefined
+    accountsManager.selectAccountForRequest = (candidates) => {
+      selectionCandidates = candidates
+      return Promise.resolve(
+        buildSelection("/responses", "responses-mapped", [
+          "low",
+          "medium",
+          "high",
+        ]),
+      )
+    }
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchHolder.fetch = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildResponsesResult("responses-mapped", "ok")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    }) as unknown as typeof fetch
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "responses-requested",
+          input: "hello",
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(selectionCandidates?.[0]?.modelId).toBe("responses-mapped")
+    expect(upstreamBody?.model).toBe("responses-mapped")
+    expect((upstreamBody?.reasoning as { effort?: string }).effort).toBe("high")
+  })
+
+  test("omits reasoning effort but preserves other reasoning fields without configured default", async () => {
+    await writeConfig({
+      modelReasoningEfforts: {},
+      modelMappings: {},
+    })
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(
+        buildSelection("/responses", "unconfigured-responses", [
+          "low",
+          "medium",
+          "high",
+        ]),
+      )
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchHolder.fetch = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildResponsesResult("unconfigured-responses", "ok")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    }) as unknown as typeof fetch
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "unconfigured-responses",
+          input: "hello",
+          reasoning: { summary: "auto" },
+        }),
+      }),
+    )
+
+    const reasoning = upstreamBody?.reasoning as
+      | { effort?: string; summary?: string }
+      | undefined
+
+    expect(response.status).toBe(200)
+    expect(reasoning?.summary).toBe("auto")
+    expect(Object.hasOwn(reasoning ?? {}, "effort")).toBe(false)
   })
 })
 

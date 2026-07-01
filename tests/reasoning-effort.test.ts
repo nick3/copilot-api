@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
+import "./shared-admin-db-test-home"
+
 import type { Model } from "~/services/copilot/get-models"
 
 import {
@@ -110,7 +112,7 @@ describe("reasoning effort normalization", () => {
     ).toBe("medium")
   })
 
-  test("uses getReasoningEffortForModel when no default resolver is provided", () => {
+  test("uses configured model default when no default resolver is provided", () => {
     const model = buildModel(["low", "medium", "high"])
 
     expect(
@@ -120,5 +122,30 @@ describe("reasoning effort normalization", () => {
         targetModel: model,
       }),
     ).toBe("low")
+  })
+
+  test("omits effort when explicit and configured default are missing", () => {
+    const model = buildModel(["low", "medium", "high"])
+
+    expect(
+      resolveReasoningEffortForTarget({
+        explicitEffort: undefined,
+        requestModel: "unconfigured-reasoning-test-model",
+        targetModel: model,
+      }),
+    ).toBeUndefined()
+  })
+
+  test("omits effort when default resolver has no value", () => {
+    const model = buildModel(["low", "medium", "high"])
+
+    expect(
+      resolveReasoningEffortForTarget({
+        explicitEffort: undefined,
+        requestModel: "gpt-test",
+        targetModel: model,
+        defaultEffortResolver: () => undefined,
+      }),
+    ).toBeUndefined()
   })
 })

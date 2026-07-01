@@ -28,6 +28,15 @@ export interface ResolvedQuotaRefreshConfig {
   staggerMaxSeconds: number
 }
 
+export type ConfiguredReasoningEffort =
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max"
+
 export interface AppConfig {
   auth?: {
     apiKeys?: Array<string>
@@ -42,10 +51,7 @@ export interface AppConfig {
   responsesApiContextManagementModels?: Array<string>
   useResponsesApiContextManagement?: boolean
   modelResponsesApiCompactThresholds?: Record<string, number>
-  modelReasoningEfforts?: Record<
-    string,
-    "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
-  >
+  modelReasoningEfforts?: Record<string, ConfiguredReasoningEffort>
   modelAliases?: Record<string, { target: string; allowOriginal?: boolean }>
   allowOriginalModelNamesForAliases?: boolean
   modelMappings?: Record<string, string>
@@ -941,20 +947,21 @@ export function getModelResponsesApiCompactThreshold(
   return threshold
 }
 
-export function getReasoningEffortForModel(
+export function getConfiguredReasoningEffortForModel(
   model: string,
-): "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" {
+): ConfiguredReasoningEffort | undefined {
   const config = getConfig()
   const direct = config.modelReasoningEfforts?.[model]
   if (direct !== undefined) return direct
 
   const aliases = getModelAliases()
-  const fallback = getAliasFallbackValue(
-    config.modelReasoningEfforts,
-    model,
-    aliases,
-  )
-  return fallback ?? "high"
+  return getAliasFallbackValue(config.modelReasoningEfforts, model, aliases)
+}
+
+export function getReasoningEffortForModel(
+  model: string,
+): ConfiguredReasoningEffort {
+  return getConfiguredReasoningEffortForModel(model) ?? "high"
 }
 
 export function isForceAgentEnabled(): boolean {
