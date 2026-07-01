@@ -625,6 +625,11 @@
       "jsonPlaceholder": "{ \\\"gpt-5-mini\\\": \\\"low\\\" }",
       "emptyState": "没有推理覆盖。请在下方添加模型。",
       "itemHint": "覆盖该模型的推理强度。",
+      "aliasSupportHint": "使用 {{target}} 的推理强度选项。",
+      "noMetadataTitle": "缺少推理强度元数据",
+      "noMetadataDescription": "该模型当前没有声明支持的推理强度。",
+      "unsupportedEffortTitle": "推理强度会被规范化",
+      "unsupportedEffortDescription": "{{effort}} 会作为意图保留，并在运行时规范化。",
       "addButton": "添加模型覆盖"
     },
     "compactThresholds": {

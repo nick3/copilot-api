@@ -306,6 +306,53 @@ test("reasoning editor shows alias support inherited from target", () => {
   expect(html).toContain("xhigh")
 })
 
+test("reasoning editor disables effort choices when loaded metadata lacks model support", () => {
+  const html = renderToStaticMarkup(
+    <ReasoningEffortsCard
+      mode="form"
+      json="{}"
+      jsonIssue={null}
+      items={[{ id: "reasoning-1", model: "gemini-lite", effort: "medium" }]}
+      models={["gemini-lite"]}
+      reasoningSupportByModel={{}}
+      reasoningSupportLoaded
+      onToggleMode={() => {}}
+      onJsonChange={() => {}}
+      onAddItem={() => {}}
+      onRemoveItem={() => {}}
+      onUpdateItem={() => {}}
+    />,
+  )
+
+  expect(html).toContain('data-reasoning-effort-disabled="true"')
+  expect(html).toContain('data-reasoning-effort-options="medium"')
+  expect(html).toContain("No reasoning effort metadata")
+  expect(html).not.toContain("xhigh")
+})
+
+test("reasoning editor falls back without row warnings when metadata fails to load", () => {
+  const html = renderToStaticMarkup(
+    <ReasoningEffortsCard
+      mode="form"
+      json="{}"
+      jsonIssue={null}
+      items={[{ id: "reasoning-1", model: "gemini-lite", effort: "medium" }]}
+      models={["gemini-lite"]}
+      reasoningSupportByModel={{}}
+      reasoningSupportLoaded={false}
+      onToggleMode={() => {}}
+      onJsonChange={() => {}}
+      onAddItem={() => {}}
+      onRemoveItem={() => {}}
+      onUpdateItem={() => {}}
+    />,
+  )
+
+  expect(html).not.toContain("No reasoning effort metadata")
+  expect(html).not.toContain('data-reasoning-effort-disabled="true"')
+  expect(html).toContain("xhigh")
+})
+
 test("reasoning JSON validation accepts max", () => {
   expect(parseReasoningJson('{ "gpt-5.5": "max" }')).toEqual({
     record: {

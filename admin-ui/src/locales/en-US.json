@@ -625,6 +625,11 @@
       "jsonPlaceholder": "{ \"gpt-5-mini\": \"low\" }",
       "emptyState": "No reasoning overrides. Add a model below.",
       "itemHint": "Overrides reasoning effort for this model.",
+      "aliasSupportHint": "Uses {{target}} reasoning options.",
+      "noMetadataTitle": "No reasoning effort metadata",
+      "noMetadataDescription": "This model does not currently advertise reasoning effort support.",
+      "unsupportedEffortTitle": "Effort will be normalized",
+      "unsupportedEffortDescription": "{{effort}} is kept as intent and normalized at runtime.",
       "addButton": "Add model override"
     },
     "compactThresholds": {
