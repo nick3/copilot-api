@@ -1065,6 +1065,7 @@ describe("prepareMessagesApiPayload", () => {
       capabilities: {
         supports: {
           adaptive_thinking: true,
+          reasoning_effort: ["low", "medium", "high", "xhigh"],
         },
       },
     } as never)

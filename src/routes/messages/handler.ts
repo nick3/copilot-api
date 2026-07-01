@@ -36,6 +36,7 @@ import { createHandlerLogger, debugJson } from "~/lib/logger"
 import { findEndpointModel } from "~/lib/models"
 import { resolveExistingProviderModelAlias } from "~/lib/provider-model"
 import { checkRateLimit } from "~/lib/rate-limit"
+import { resolveReasoningEffortForTarget } from "~/lib/reasoning-effort"
 import {
   extractResponsesUsageFromResult,
   extractResponsesUsageFromStreamEvent,
@@ -211,6 +212,7 @@ type InstrumentationContext = {
   responsesItemOwnerLookupKeys?: ReadonlyArray<string>
   responsesItemOwnerRecordedKeys?: ReadonlyArray<string>
 
+  requestModel: string
   clientModel: string
 
   account: AccountRuntime
@@ -654,6 +656,7 @@ export async function handleCompletion(c: Context) {
     safetyIdentifier: normalizedSafetyIdentifier,
     promptCacheKey: normalizedPromptCacheKey,
     isSubagent: isSubagentRequest,
+    requestModel: requestedModel,
     clientModel,
     account,
     reservation,
@@ -737,6 +740,18 @@ const handleWithChatCompletions = async (params: {
     instr,
     compactType,
   } = params
+  const reasoningEffort = resolveReasoningEffortForTarget({
+    explicitEffort: openAIPayload.reasoning_effort,
+    requestModel: instr.requestModel,
+    targetModel: selectedModel,
+    targetModelId: selectedModel.id,
+  })
+  if (reasoningEffort) {
+    openAIPayload.reasoning_effort = reasoningEffort
+  } else {
+    delete openAIPayload.reasoning_effort
+  }
+
   debugJson(logger, "Translated OpenAI request payload:", openAIPayload)
 
   const ctx = toAccountContext(instr.account)
@@ -941,10 +956,17 @@ const handleWithResponsesApi = async (params: {
     instr,
     compactType,
   } = params
+  const reasoningEffort = resolveReasoningEffortForTarget({
+    explicitEffort: anthropicPayload.output_config?.effort,
+    requestModel: instr.requestModel,
+    targetModel: selectedModel,
+    targetModelId: selectedModel.id,
+  })
   const responsesPayload = translateAnthropicMessagesToResponsesPayload(
     anthropicPayload,
     {
       modelOverride: selectedModel.id,
+      reasoningEffort,
       subagentAgentId: subagentMarker?.agent_id,
     },
   )
@@ -2264,7 +2286,9 @@ const handleWithMessagesApi = async (params: {
     compactType,
   } = params
 
-  prepareMessagesApiPayload(anthropicPayload, selectedModel)
+  prepareMessagesApiPayload(anthropicPayload, selectedModel, {
+    requestModel: instr.requestModel,
+  })
 
   debugJson(logger, "Translated Messages payload:", anthropicPayload)
 

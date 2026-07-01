@@ -10,8 +10,11 @@ import {
   compactTextOnlyGuard,
   type CompactType,
 } from "~/lib/compact"
-import { getReasoningEffortForModel } from "~/lib/config"
 import { normalizeSdkModelId } from "~/lib/models"
+import {
+  type ReasoningEffort,
+  resolveReasoningEffortForTarget,
+} from "~/lib/reasoning-effort"
 
 import type {
   AnthropicAssistantContentBlock,
@@ -919,9 +922,31 @@ const filterAssistantThinkingBlocks = (
   }
 }
 
+type AnthropicOutputConfig = NonNullable<
+  AnthropicMessagesPayload["output_config"]
+>
+type AnthropicOutputEffort = AnthropicOutputConfig["effort"]
+
+const normalizeAdaptiveMessagesEffort = (
+  effort: ReasoningEffort | undefined,
+): AnthropicOutputEffort | undefined => {
+  if (!effort) return undefined
+
+  switch (effort) {
+    case "none":
+    case "minimal":
+      return "low"
+    default:
+      return effort
+  }
+}
+
 export const prepareMessagesApiPayload = (
   payload: AnthropicMessagesPayload,
   selectedModel?: Model,
+  options: {
+    requestModel?: string
+  } = {},
 ): void => {
   stripCacheControl(payload)
   applyTopLevelCacheControl(payload)
@@ -946,17 +971,24 @@ export const prepareMessagesApiPayload = (
     if (shouldSummarizeThinkingDisplayForModel(payload.model)) {
       payload.thinking.display = "summarized"
     }
-    let effort =
-      payload.output_config?.effort ?? getReasoningEffortForModel(payload.model)
-    if (effort === "none" || effort === "minimal") {
-      effort = "low"
-    }
-    const reasoningEffort = selectedModel.capabilities.supports.reasoning_effort
-    if (reasoningEffort && !reasoningEffort.includes(effort)) {
-      effort = reasoningEffort.at(-1) as "low" | "medium" | "high"
-    }
-    payload.output_config = {
-      effort: effort,
+    const effort = normalizeAdaptiveMessagesEffort(
+      resolveReasoningEffortForTarget({
+        explicitEffort: payload.output_config?.effort,
+        requestModel: options.requestModel ?? payload.model,
+        targetModel: selectedModel,
+        targetModelId: selectedModel.id,
+      }),
+    )
+    if (effort) {
+      payload.output_config = {
+        ...payload.output_config,
+        effort,
+      }
+    } else if (payload.output_config) {
+      delete payload.output_config.effort
+      if (Object.keys(payload.output_config).length === 0) {
+        delete payload.output_config
+      }
     }
   }
 
