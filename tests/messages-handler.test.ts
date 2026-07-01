@@ -688,6 +688,60 @@ describe("messages handler routing", () => {
     )
   })
 
+  test("compact small-model reroutes use routed model reasoning defaults", async () => {
+    await writeConfig({
+      modelReasoningEfforts: {
+        "original-model": "max",
+        [getSmallModel()]: "low",
+      },
+    })
+
+    let upstreamBody: Record<string, unknown> | undefined
+
+    const selection = buildSelection("/v1/messages", getSmallModel(), [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ])
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    const fetchMock = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = parseFetchBody(opts?.body)
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildAnthropicResponse(getSmallModel(), "compact")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          createPayload({
+            system:
+              "You are a helpful AI assistant tasked with summarizing conversations",
+          }),
+        ),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect((upstreamBody?.output_config as { effort?: string }).effort).toBe(
+      "low",
+    )
+  })
+
   test("records Copilot AIU from non-streaming Messages API responses", async () => {
     const selection = buildSelection("/v1/messages", "messages-model")
     accountsManager.selectAccountForRequest = () => Promise.resolve(selection)

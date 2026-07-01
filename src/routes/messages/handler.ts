@@ -482,10 +482,12 @@ export async function handleCompletion(c: Context) {
   const compactType = getCompactType(anthropicPayload)
   const isCompact = compactType !== 0
   const originalRequestModel = anthropicPayload.model
+  let usesInternalModelRewrite = false
 
   // Fix warmup probe: force small model for Claude Code warmup requests (CLAUDE_CODE_SUBAGENT_MODEL also works).
   if (anthropicBeta && isWarmupProbeRequest(anthropicPayload)) {
     anthropicPayload.model = getSmallModel()
+    usesInternalModelRewrite = true
   }
 
   if (compactType !== 0) {
@@ -498,6 +500,7 @@ export async function handleCompletion(c: Context) {
 
   if (compactType === COMPACT_REQUEST && shouldCompactUseSmallModel()) {
     anthropicPayload.model = getSmallModel()
+    usesInternalModelRewrite = true
   }
 
   stripToolReferenceTurnBoundary(anthropicPayload)
@@ -517,6 +520,7 @@ export async function handleCompletion(c: Context) {
   anthropicPayload.model = resolveModelAlias(anthropicPayload.model)
   if (webSearchRoute.kind === "responses") {
     anthropicPayload.model = webSearchRoute.model
+    usesInternalModelRewrite = true
   }
   const routingModel = anthropicPayload.model
   const streamRequested = Boolean(anthropicPayload.stream)
@@ -562,6 +566,8 @@ export async function handleCompletion(c: Context) {
 
   const endpointModel = findEndpointModel(routingModel)
   const resolvedClientModel = endpointModel?.id ?? routingModel
+  const reasoningRequestModel =
+    usesInternalModelRewrite ? resolvedClientModel : requestedModel
   const affinityModelId =
     routingModel !== originalRequestModel ?
       (findEndpointModel(originalRequestModel)?.id ?? originalRequestModel)
@@ -657,7 +663,7 @@ export async function handleCompletion(c: Context) {
     safetyIdentifier: normalizedSafetyIdentifier,
     promptCacheKey: normalizedPromptCacheKey,
     isSubagent: isSubagentRequest,
-    requestModel: requestedModel,
+    requestModel: reasoningRequestModel,
     clientModel,
     account,
     reservation,

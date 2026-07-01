@@ -438,6 +438,45 @@ describe("responses handler reasoning effort normalization", () => {
     expect(Object.hasOwn(reasoning ?? {}, "effort")).toBe(false)
   })
 
+  test("preserves explicit null Responses reasoning without injecting fallback", async () => {
+    await writeConfig({
+      modelReasoningEfforts: {
+        "gpt-test": "high",
+      },
+    })
+
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(
+        buildSelection("/responses", "gpt-test", ["low", "medium", "high"]),
+      )
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchHolder.fetch = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(JSON.stringify(buildResponsesResult("gpt-test", "ok")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+    }) as unknown as typeof fetch
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-test",
+          input: "hello",
+          reasoning: null,
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(upstreamBody?.reasoning).toBeNull()
+  })
+
   test("uses requested model configured fallback before modelMappings", async () => {
     await writeConfig({
       modelMappings: {
