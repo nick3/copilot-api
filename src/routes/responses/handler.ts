@@ -32,6 +32,7 @@ import {
   getRequestHistoryStore,
   type NormalizedUsage,
 } from "~/lib/request-history"
+import { resolveReasoningEffortForTarget } from "~/lib/reasoning-effort"
 import { state } from "~/lib/state"
 import {
   createCopilotTokenUsageRecorder,
@@ -200,6 +201,19 @@ export const handleResponses = async (c: Context) => {
   request.selectionReason = selection.selectionReason
 
   const upstreamPayload = { ...payload, model: selectedModel.id }
+  const reasoningEffort = resolveReasoningEffortForTarget({
+    explicitEffort: payload.reasoning?.effort,
+    requestModel: clientModel,
+    targetModel: selectedModel,
+  })
+  if (reasoningEffort) {
+    upstreamPayload.reasoning = {
+      ...(upstreamPayload.reasoning ?? {}),
+      effort: reasoningEffort,
+    }
+  } else if (upstreamPayload.reasoning) {
+    delete upstreamPayload.reasoning.effort
+  }
   removeUnsupportedTools(upstreamPayload)
 
   const sanitizedImageCount = sanitizeOversizedInputImages(

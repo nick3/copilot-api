@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 
+import "./shared-admin-db-test-home"
+
 import type { AccountRuntime } from "~/lib/types/account"
 import type { Model } from "~/services/copilot/get-models"
 
@@ -56,7 +58,10 @@ function buildAccount(): AccountRuntime {
   }
 }
 
-function buildModel(id: string): Model {
+function buildModel(
+  id: string,
+  reasoningEffort: Array<string> = ["low", "medium", "high", "xhigh"],
+): Model {
   return {
     id,
     name: id,
@@ -75,6 +80,7 @@ function buildModel(id: string): Model {
       supports: {
         adaptive_thinking: true,
         streaming: true,
+        reasoning_effort: reasoningEffort,
       },
       tokenizer: "o200k_base",
       type: "chat",
@@ -82,11 +88,14 @@ function buildModel(id: string): Model {
   }
 }
 
-function buildSelection(modelId: string): SelectionOk {
+function buildSelection(
+  modelId: string,
+  reasoningEffort?: Array<string>,
+): SelectionOk {
   return {
     ok: true,
     account: buildAccount(),
-    selectedModel: buildModel(modelId),
+    selectedModel: buildModel(modelId, reasoningEffort),
     endpoint: "/chat/completions",
     costUnits: 0,
     confirmAffinity: mock(() => {}),
@@ -95,7 +104,7 @@ function buildSelection(modelId: string): SelectionOk {
   }
 }
 
-const fetchMock = mock(() =>
+const fetchMock = mock((_url?: unknown, _opts?: { body?: unknown }) =>
   Promise.resolve(
     new Response(
       JSON.stringify({
@@ -347,5 +356,76 @@ describe("chat completions handler", () => {
       total_nano_aiu: 3_000_000_000,
       total_tokens: 14,
     })
+  })
+
+  test("normalizes explicit reasoning_effort to selected model support", async () => {
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("gpt-test", ["low", "medium", "high"]))
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchMock.mockImplementationOnce((_url, opts) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "chatcmpl-test",
+            object: "chat.completion",
+            created: 0,
+            model: "gpt-test",
+            choices: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+    })
+
+    const app = createApp()
+    const response = await app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-test",
+        messages: [{ role: "user", content: "hello" }],
+        reasoning_effort: "max",
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(upstreamBody?.reasoning_effort).toBe("high")
+  })
+
+  test("injects configured fallback effort for any supported chat model", async () => {
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("gpt-test", ["low", "medium"]))
+
+    let upstreamBody: Record<string, unknown> | undefined
+    fetchMock.mockImplementationOnce((_url, opts) => {
+      upstreamBody = JSON.parse(String(opts?.body)) as Record<string, unknown>
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "chatcmpl-test",
+            object: "chat.completion",
+            created: 0,
+            model: "gpt-test",
+            choices: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+    })
+
+    const app = createApp()
+    const response = await app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-test",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(upstreamBody?.reasoning_effort).toBe("medium")
   })
 })

@@ -25,6 +25,7 @@ import {
   normalizeChatCompletionsUsage,
   type NormalizedUsage,
 } from "~/lib/request-history"
+import { resolveReasoningEffortForTarget } from "~/lib/reasoning-effort"
 import { state } from "~/lib/state"
 import { getTokenCount } from "~/lib/tokenizer"
 import {
@@ -198,6 +199,16 @@ export async function handleCompletion(c: Context) {
     return unsupportedChatCompletionsModelResponse(c)
   }
   const upstreamPayload = { ...payload, model: selectedModel.id }
+  const reasoningEffort = resolveReasoningEffortForTarget({
+    explicitEffort: payload.reasoning_effort,
+    requestModel: clientModel,
+    targetModel: selectedModel,
+  })
+  if (reasoningEffort) {
+    upstreamPayload.reasoning_effort = reasoningEffort
+  } else {
+    delete upstreamPayload.reasoning_effort
+  }
 
   await logTokenCountForRequest({ payload: upstreamPayload, selectedModel })
 
