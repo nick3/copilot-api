@@ -99,7 +99,15 @@ export type ResponseIncludable =
   | "message.output_text.logprobs"
 
 export interface Reasoning {
-  effort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | null
+  effort?:
+    | "none"
+    | "minimal"
+    | "low"
+    | "medium"
+    | "high"
+    | "xhigh"
+    | "max"
+    | null
   summary?: "auto" | "concise" | "detailed" | null
 }
 
