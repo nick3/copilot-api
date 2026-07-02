@@ -314,7 +314,7 @@ describe("openai-compatible provider messages", () => {
 })
 
 describe("openai-compatible provider context cache", () => {
-  test("marks first system and last two non-system messages for OpenAI-compatible context cache", async () => {
+  test("marks first system and last non-system message for OpenAI-compatible context cache", async () => {
     const app = createApp()
     const response = await app.request("/dash/v1/messages", {
       method: "POST",
@@ -351,7 +351,7 @@ describe("openai-compatible provider context cache", () => {
         ),
     )
 
-    expect(markedMessages).toHaveLength(3)
+    expect(markedMessages).toHaveLength(2)
     expect(body.messages[0]).toEqual({
       role: "system",
       content: [
@@ -378,15 +378,7 @@ describe("openai-compatible provider context cache", () => {
     })
     expect(body.messages[4]).toEqual({
       role: "assistant",
-      content: [
-        {
-          type: "text",
-          text: "second answer",
-          cache_control: {
-            type: "ephemeral",
-          },
-        },
-      ],
+      content: "second answer",
     })
     expect(body.messages[5]).toEqual({
       role: "user",
@@ -739,15 +731,7 @@ describe("openai-compatible provider PDF message content", () => {
     expect(body.messages[0]).toEqual({
       role: "tool",
       tool_call_id: "tool_pdf",
-      content: [
-        {
-          type: "text",
-          text: "PDF file read: report.pdf",
-          cache_control: {
-            type: "ephemeral",
-          },
-        },
-      ],
+      content: "PDF file read: report.pdf",
     })
     expect(body.messages[1]).toEqual({
       role: "user",

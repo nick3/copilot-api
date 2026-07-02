@@ -98,7 +98,7 @@ afterEach(() => {
   Object.assign(responsesUtilsDependencies, defaultResponsesUtilsDependencies)
 })
 
-test("messages Chat Completions flow adds Copilot cache control to system and latest two non-system messages", async () => {
+test("messages Chat Completions flow adds Copilot cache control to system and latest non-system message", async () => {
   const payload: AnthropicMessagesPayload = {
     model: "gpt-test",
     max_tokens: 128,
@@ -160,9 +160,6 @@ test("messages Chat Completions flow adds Copilot cache control to system and la
     {
       role: "user",
       content: "latest user",
-      copilot_cache_control: {
-        type: "ephemeral",
-      },
     },
     {
       role: "assistant",
@@ -256,7 +253,7 @@ test("messages Chat Completions flow omits reasoning effort without model suppor
   expect(capturedPayload).not.toHaveProperty("reasoning_effort")
 })
 
-test("Copilot Chat Completions payload preparation marks two system and latest two non-system messages", () => {
+test("Copilot Chat Completions payload preparation marks two system and latest non-system message", () => {
   const payload: ChatCompletionsPayload = {
     model: "gpt-test",
     messages: [
@@ -302,9 +299,6 @@ test("Copilot Chat Completions payload preparation marks two system and latest t
     {
       role: "user",
       content: "latest user",
-      copilot_cache_control: {
-        type: "ephemeral",
-      },
     },
     {
       role: "assistant",

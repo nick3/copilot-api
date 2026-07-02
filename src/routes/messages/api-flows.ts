@@ -60,7 +60,7 @@ import {
 } from "./stream-translation"
 
 const COPILOT_CONTEXT_CACHE_SYSTEM_MARKER_LIMIT = 2
-const COPILOT_CONTEXT_CACHE_NON_SYSTEM_MARKER_LIMIT = 2
+const COPILOT_CONTEXT_CACHE_NON_SYSTEM_MARKER_LIMIT = 1
 const COPILOT_CONTEXT_CACHE_CONTROL = {
   type: "ephemeral",
 } as const

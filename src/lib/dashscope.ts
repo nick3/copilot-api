@@ -54,7 +54,7 @@ const selectContextCacheMessageIndexes = (
     .slice(0, 2)
   const finalIndexes = cacheableIndexes
     .filter((index) => messages[index]?.role !== "system")
-    .slice(-2)
+    .slice(-1)
   return uniqueIndexes([...systemIndexes, ...finalIndexes]).sort(
     (a, b) => a - b,
   )
