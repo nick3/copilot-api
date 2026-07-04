@@ -265,6 +265,19 @@ describe("reasoning effort normalization", () => {
     expect(getConfiguredReasoningEffortForModel("fast")).toBe("low")
   })
 
+  test("uses gpt-5.3+ fallback for alias targets", async () => {
+    await writeConfig({
+      modelAliases: {
+        fast: {
+          target: "gpt-5.4",
+        },
+      },
+      modelReasoningEfforts: {},
+    })
+
+    expect(getConfiguredReasoningEffortForModel("fast")).toBe("xhigh")
+  })
+
   test("uses direct alias configured default before alias target default", async () => {
     await writeConfig({
       modelAliases: {

@@ -458,11 +458,7 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
     },
     "modelMappings": {},
     "extraPrompts": {
-      "gpt-5-mini": "<built-in exploration prompt>",
-      "gpt-5.3-codex": "<built-in commentary prompt>",
-      "gpt-5.4-mini": "<built-in commentary prompt>",
-      "gpt-5.4": "<built-in commentary prompt>",
-      "gpt-5.5": "<built-in commentary prompt>"
+      "gpt-5-mini": "<built-in exploration prompt>"
     },
     "smallModel": "gpt-5-mini",
     "useResponsesApiContextManagement": true,
@@ -471,11 +467,7 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
       "gpt-5.5": 217600
     },
     "modelReasoningEfforts": {
-      "gpt-5-mini": "low",
-      "gpt-5.3-codex": "xhigh",
-      "gpt-5.4-mini": "xhigh",
-      "gpt-5.4": "xhigh",
-      "gpt-5.5": "xhigh"
+      "gpt-5-mini": "low"
     },
     "useMessagesApi": true,
     "useResponsesApiWebSocket": true,
@@ -486,8 +478,8 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
 - **auth.apiKeys：** 用于普通非 admin 路由的 API key。支持多个 key 轮换使用。请求可通过 `x-api-key: <key>` 或 `Authorization: Bearer <key>` 进行认证。若为空或省略，则普通路由的认证会被禁用。
 - **auth.adminApiKey：** 仅用于 `/admin/*` 路由的单个 admin key。若未配置，服务会在启动时自动生成一个随机 key，并回写到 `config.json`。它同样使用 `x-api-key` 或 `Authorization: Bearer` 这两种头，但普通 `auth.apiKeys` 不能访问 `/admin/*`。
 - **modelMappings：** 用于顶层 `POST /v1/messages`、`POST /v1/messages/count_tokens`、`POST /v1/responses` 和 `POST /v1/chat/completions` 请求的精确 `sourceModel -> targetModel` 重写映射，这几类接口共用同一份规则。省略该字段或保留为 `{}` 时，不会做模型重写。`source` 和 `target` 都必须是非空字符串。`target` 可以是普通模型 ID，也可以是 `provider/model` 形式的别名，例如 `dashscope/qwen3.6-plus`；重写发生在 provider alias 解析之前。这些映射不再按接口区分。Admin UI 的 Settings 页面和 `/api/admin/config` 会以 `modelMappings` 字段读写这项配置。
-- **extraPrompts：** `model -> prompt` 的映射。把 Anthropic 风格请求翻译给 Copilot 时，会将其附加到第一条 system prompt 后面。你可以借此为不同模型注入护栏或指引。缺失的默认项会自动补齐，但不会覆盖你自定义的 prompt。内置的 `gpt-5.3-codex` 和 `gpt-5.4` prompt 会启用带阶段感知的 commentary，让模型在工具调用或更深层推理前先发出简短的用户可见进度说明。
-- **providers：** 全局上游 provider 映射。每个 provider key（例如 `dashscope`）都会变成一个路由前缀（`/dashscope/v1/messages`）。支持 `type: "anthropic"`、`type: "openai-compatible"` 和 `type: "openai-responses"`。顶层客户端也可以在 `/v1/messages`、`/v1/messages/count_tokens`、`/v1/responses` 和 `/v1/chat/completions` 中使用 `model: "dashscope/model-id"`；AI gateway 会在转发上游前移除 `dashscope/` 前缀。`GET /v1/models` 会聚合 Copilot 模型、已配置别名以及已启用 provider 的模型列表；指定 provider 的模型列表仍可通过 `GET /dashscope/v1/models` 获取。
+- **extraPrompts：** `model -> prompt` 的映射。把 Anthropic 风格请求翻译为 Responses API 时，会将其附加到第一条 system prompt 后面。你可以借此为不同模型注入护栏或指引。缺失的默认项会自动补齐，但不会覆盖你自定义的 prompt。对于 GPT-5.3+ 模型（如 `gpt-5.3-codex`、`gpt-5.4`、`gpt-5.5`），未显式配置时会自动使用内置的 commentary prompt。内置 prompt 会启用带阶段感知的 commentary，让模型在工具调用或更深层推理前先发出简短的用户可见进度说明。
+- **providers：** 全局上游 provider 映射。每个 provider key（例如 `dashscope`）都会变成一个路由前缀（`/dashscope/v1/messages`）。支持 `type: "anthropic"`、`type: "openai-compatible"` 和 `type: "openai-responses"`。顶层客户端也可以在 `/v1/messages`、`/v1/messages/count_tokens`、`/v1/responses` 和 `/v1/chat/completions` 中使用 `model: "dashscope/model-id"`；AI gateway 会在转发上游前移除 `dashscope/` 前缀。`openai-compatible` provider 同时支持 chat 和 Messages 流程：`/v1/chat/completions` 会直连上游 `/v1/chat/completions`，而 `/v1/messages` 和 `/:provider/v1/messages` 会先翻译为上游 Chat Completions，再把响应翻译回 Anthropic Messages。`GET /v1/models` 会聚合 Copilot 模型、已配置别名以及已启用 provider 的模型列表，并以 `provider/model-id` 形式返回 provider 模型；指定 provider 的模型列表仍可通过 `GET /dashscope/v1/models` 获取。
   - `enabled`：可选，若省略则默认为 `true`。
   - `baseUrl`：provider API 的基础 URL，不要带最终 endpoint。Anthropic provider 不要带 `/v1/messages`；OpenAI 兼容 provider 不要带 `/v1/chat/completions`；Responses provider 不要带 `/v1/responses`。
   - `apiKey`：作为上游凭据值使用。
@@ -510,7 +502,7 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
 - **smallModel：** 用于无工具预热消息、compact/background 请求以及其他短小维护型轮次（例如 Claude Code 或 OpenCode 发出的 housekeeping 请求）的回退模型，用来避免消耗 premium requests；默认是 `gpt-5-mini`。如果原始模型名被屏蔽，而这里指向的是某个别名目标模型，则会解析为首选别名。
 - **accountAffinity：** 是否根据 session 标识启用粘性账号路由。开启后，同一 session 针对同一模型的请求会优先路由到上次成功处理它的账号。该策略同时适用于免费模型和付费模型。默认值为 `true`。设为 `false` 则所有模型都改为顺序路由。
 - **apiKey（已弃用）：** 兼容迁移的旧单 key 字段。优先使用 `auth.apiKeys`。当 `auth.apiKeys` 为空时，服务端会回退到 `COPILOT_API_KEY`，再回退到 `apiKey`。
-- **modelReasoningEfforts：** 按模型配置发送到 Copilot Responses API 的 `reasoning.effort`。可选值包括 `none`、`minimal`、`low`、`medium`、`high` 和 `xhigh`。若某模型未配置，则默认使用 `high`。
+- **modelReasoningEfforts：** 按模型配置发送到 Responses API 的 `reasoning.effort`。可选值包括 `none`、`minimal`、`low`、`medium`、`high`、`xhigh` 和 `max`。若某模型未显式配置，大多数模型默认不发送 effort；GPT-5.3+ 模型会回退为 `xhigh`。解析有效 effort 时会同时考虑别名 key 和别名目标。
 - **modelAliases：** `alias -> { target, allowOriginal? }` 的映射（也仍然接受旧的字符串写法）。别名 key 会先做标准化（trim + lowercase），且不能为空；别名不能映射回自己（大小写不敏感），冲突的标准化别名会被拒绝。`allowOriginal` 可为单个别名覆盖全局默认值。如果多个别名映射到同一个 target，只要其中任意一个设置了 `allowOriginal: true`，原始模型名就会被允许（allow-wins）。Admin UI/API 会拒绝被屏蔽的键（`__proto__`、`constructor`、`prototype`）。下游请求可以直接使用这些别名，target 也可以是 `provider/model` 形式，用于顶层 `/v1/messages` 与 `/v1/messages/count_tokens` 路由。
 - **allowOriginalModelNamesForAliases：** 对未显式设置 `allowOriginal` 的别名所采用的全局默认值。当其为 `false`（默认）时，target 原名默认被屏蔽，除非某个别名显式允许；当其为 `true` 时，target 原名默认可用，除非所有别名都显式阻止。
 - **forceAgent：** 当为 `true` 时，只要 `POST /v1/responses` 的任一 input item 带有 `role: "assistant"`，就会把请求视为由 agent 发起；当为 `false`（默认）时，只检查最后一个 input item。

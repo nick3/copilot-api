@@ -135,6 +135,24 @@ export interface ResolvedProviderConfig {
   adjustInputTokens?: boolean
 }
 
+const GPT_MODEL_PATTERN = /^gpt-(\d+)(?:\.(\d+))?/
+
+function isGpt53OrAbove(model: string): boolean {
+  const match = GPT_MODEL_PATTERN.exec(model)
+  if (!match) {
+    return false
+  }
+  const majorVersion = Number.parseInt(match[1], 10)
+  if (majorVersion > 5) {
+    return true
+  }
+  if (majorVersion !== 5) {
+    return false
+  }
+  const minorVersion = match[2] ? Number.parseInt(match[2], 10) : 0
+  return minorVersion >= 3
+}
+
 const gpt5ExplorationPrompt = `## Exploration and reading files
 - **Think first.** Before any tool call, decide ALL files/resources you will need.
 - **Batch everything.** If you need multiple files (even from different places), read them together.
@@ -184,10 +202,6 @@ const defaultConfig: AppConfig = {
   providers: {},
   extraPrompts: {
     "gpt-5-mini": gpt5ExplorationPrompt,
-    "gpt-5.3-codex": gpt5CommentaryPrompt,
-    "gpt-5.4-mini": gpt5CommentaryPrompt,
-    "gpt-5.4": gpt5CommentaryPrompt,
-    "gpt-5.5": gpt5CommentaryPrompt,
   },
   smallModel: "gpt-5-mini",
   accountAffinity: true,
@@ -195,10 +209,6 @@ const defaultConfig: AppConfig = {
   modelResponsesApiCompactThresholds,
   modelReasoningEfforts: {
     "gpt-5-mini": "low",
-    "gpt-5.3-codex": "xhigh",
-    "gpt-5.4-mini": "xhigh",
-    "gpt-5.4": "xhigh",
-    "gpt-5.5": "xhigh",
   },
   allowOriginalModelNamesForAliases: false,
   modelMappings: {},
@@ -820,7 +830,15 @@ export function getExtraPromptForModel(model: string): string {
 
   const aliases = getModelAliases()
   const fallback = getAliasFallbackValue(config.extraPrompts, model, aliases)
-  return fallback ?? ""
+  if (fallback !== undefined) return fallback
+
+  const normalizedModel = normalizeAliasKey(model)
+  const aliasTarget = normalizedModel ? aliases[normalizedModel] : undefined
+  if (aliasTarget && isGpt53OrAbove(aliasTarget)) {
+    return gpt5CommentaryPrompt
+  }
+
+  return isGpt53OrAbove(model) ? gpt5CommentaryPrompt : ""
 }
 
 export function getModelMappings(): Record<string, string> {
@@ -982,7 +1000,9 @@ export function getConfiguredReasoningEffortForModel(
   const aliasFallback = getAliasFallbackValue(efforts, model, aliases)
   if (aliasFallback !== undefined) return aliasFallback
 
-  return undefined
+  if (aliasTarget && isGpt53OrAbove(aliasTarget)) return "xhigh"
+
+  return isGpt53OrAbove(model) ? "xhigh" : undefined
 }
 
 function getReasoningEffortRecordValue(

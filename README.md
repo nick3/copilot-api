@@ -449,11 +449,7 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
     },
     "modelMappings": {},
     "extraPrompts": {
-      "gpt-5-mini": "<built-in exploration prompt>",
-      "gpt-5.3-codex": "<built-in commentary prompt>",
-      "gpt-5.4-mini": "<built-in commentary prompt>",
-      "gpt-5.4": "<built-in commentary prompt>",
-      "gpt-5.5": "<built-in commentary prompt>"
+      "gpt-5-mini": "<built-in exploration prompt>"
     },
     "smallModel": "gpt-5-mini",
     "useResponsesApiContextManagement": true,
@@ -462,11 +458,7 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
       "gpt-5.5": 217600
     },
     "modelReasoningEfforts": {
-      "gpt-5-mini": "low",
-      "gpt-5.3-codex": "xhigh",
-      "gpt-5.4-mini": "xhigh",
-      "gpt-5.4": "xhigh",
-      "gpt-5.5": "xhigh"
+      "gpt-5-mini": "low"
     },
     "useMessagesApi": true,
     "useResponsesApiWebSocket": true,
@@ -477,8 +469,8 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
 - **auth.apiKeys:** API keys used for request authentication on non-admin routes. Supports multiple keys for rotation. Requests can authenticate with either `x-api-key: <key>` or `Authorization: Bearer <key>`. If empty or omitted, authentication for non-admin routes is disabled.
 - **auth.adminApiKey:** Single admin key used only for `/admin/*` routes. If missing, the server generates a random key at startup and writes it back to `config.json`. Requests use the same `x-api-key` or `Authorization: Bearer` headers, but regular `auth.apiKeys` never grant access to `/admin/*`.
 - **modelMappings:** Exact `sourceModel -> targetModel` rewrites shared by top-level `POST /v1/messages`, `POST /v1/messages/count_tokens`, `POST /v1/responses`, and `POST /v1/chat/completions` requests. Omit it or leave it as `{}` to disable rewrites. Both the source and target must be non-empty strings. Targets can be regular model IDs or `provider/model` aliases such as `dashscope/qwen3.6-plus`, and the rewrite happens before provider alias parsing. These mappings are not split per interface. The Admin UI Settings page and `/api/admin/config` read and update this field as `modelMappings`.
-- **extraPrompts:** Map of `model -> prompt` appended to the first system prompt when translating Anthropic-style requests to Copilot. Use this to inject guardrails or guidance per model. Missing default entries are auto-added without overwriting your custom prompts. The built-in prompts for `gpt-5.3-codex` and `gpt-5.4` enable phase-aware commentary, which lets the model emit a short user-facing progress update before tools or deeper reasoning.
-- **providers:** Global upstream provider map. Each provider key (for example `dashscope`) becomes a route prefix (`/dashscope/v1/messages`). Supports `type: "anthropic"`, `type: "openai-compatible"`, and `type: "openai-responses"`. Top-level clients can also use `model: "dashscope/model-id"` with `/v1/messages`, `/v1/messages/count_tokens`, `/v1/responses`, and `/v1/chat/completions`; the gateway strips the `dashscope/` prefix before forwarding upstream. `GET /v1/models` aggregates Copilot models, configured aliases, and enabled provider model lists; provider-specific lists remain available at `GET /dashscope/v1/models`.
+- **extraPrompts:** Map of `model -> prompt` appended to the first system prompt when translating Anthropic-style requests to Responses API. Use this to inject guardrails or guidance per model. Missing default entries are auto-added without overwriting your custom prompts. For GPT-5.3+ models (e.g. `gpt-5.3-codex`, `gpt-5.4`, `gpt-5.5`), a built-in commentary prompt is used as fallback when not explicitly configured. The built-in prompts enable phase-aware commentary, which lets the model emit a short user-facing progress update before tools or deeper reasoning.
+- **providers:** Global upstream provider map. Each provider key (for example `dashscope`) becomes a route prefix (`/dashscope/v1/messages`). Supports `type: "anthropic"`, `type: "openai-compatible"`, and `type: "openai-responses"`. Top-level clients can also use `model: "dashscope/model-id"` with `/v1/messages`, `/v1/messages/count_tokens`, `/v1/responses`, and `/v1/chat/completions`; the gateway strips the `dashscope/` prefix before forwarding upstream. `openai-compatible` providers support both chat and Messages flows: `/v1/chat/completions` is proxied to upstream `/v1/chat/completions`, while `/v1/messages` and `/:provider/v1/messages` are translated to upstream chat completions and translated back to Anthropic Messages responses. `GET /v1/models` aggregates Copilot models, configured aliases, and enabled provider model lists with `provider/model-id` IDs; provider-specific lists remain available at `GET /dashscope/v1/models`.
   - `enabled` defaults to `true` if omitted.
   - `baseUrl` should be provider API base URL without the final endpoint. For Anthropic providers, omit `/v1/messages`; for OpenAI-compatible providers, omit `/v1/chat/completions`; for Responses providers, omit `/v1/responses`.
   - `apiKey` is used as the upstream credential value.
@@ -501,7 +493,7 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
 - **smallModel:** Fallback model used for tool-less warmup messages, compact/background requests, and other short housekeeping turns (for example from Claude Code or OpenCode) to avoid spending premium requests; defaults to `gpt-5-mini`. If original names are blocked and this points to an aliased target, it resolves to the preferred alias.
 - **accountAffinity:** Enable sticky account routing based on session identity. When enabled, requests from the same session for the same model are routed to the account that last handled them successfully. Applies to both free and premium models. Defaults to `true`. Set to `false` to use sequential routing for all models.
 - **apiKey (deprecated):** Legacy single-key field kept for migration compatibility. Prefer `auth.apiKeys`. When `auth.apiKeys` is empty, the server falls back to `COPILOT_API_KEY` and then `apiKey`.
-- **modelReasoningEfforts:** Per-model `reasoning.effort` sent to the Copilot Responses API. Allowed values are `none`, `minimal`, `low`, `medium`, `high`, and `xhigh`. If a model isn’t listed, `high` is used by default.
+- **modelReasoningEfforts:** Per-model `reasoning.effort` sent to the Responses API. Allowed values are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. If a model is not explicitly configured, most models omit a default effort while GPT-5.3+ models fall back to `xhigh`. Alias keys and alias targets are both considered when resolving the effective effort.
 - **modelAliases:** Map of `alias -> { target, allowOriginal? }` (legacy string values are still accepted). Alias keys are normalized (trim + lowercase) and must be non-empty; aliases cannot map to themselves (case-insensitive), and conflicting normalized aliases are rejected. `allowOriginal` overrides the global default per alias. If multiple aliases map to the same target, original names are allowed when any alias sets `allowOriginal: true` (allow-wins). Admin UI/API rejects blocked keys (`__proto__`, `constructor`, `prototype`). Aliases can be used in downstream requests, and targets may be configured `provider/model` aliases for top-level `/v1/messages` and `/v1/messages/count_tokens` routing.
 - **allowOriginalModelNamesForAliases:** Global default for aliases that omit `allowOriginal`. When `false` (default), targets are blocked unless an alias explicitly allows them; when `true`, targets are allowed unless all aliases explicitly block them.
 - **forceAgent:** When `true`, `POST /v1/responses` treats a request as agent-initiated if **any** input item has `role: "assistant"`. When `false` (default), only the **last** input item is checked.

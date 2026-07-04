@@ -8,8 +8,6 @@ export function enableSystemCACompat() {
       const defaultCerts = tls.getCACertificates("default")
       const systemCerts = tls.getCACertificates("system")
       tls.setDefaultCACertificates([...defaultCerts, ...systemCerts])
-
-      consola.log("[tls] system ca enabled")
     } catch {
       consola.log("[tls] system ca not available")
     }
