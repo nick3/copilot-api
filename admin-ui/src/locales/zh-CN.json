@@ -697,14 +697,16 @@
       "copilotModelSuggestionsLabel": "Copilot 模型建议",
       "providerModelSuggestionsLabel": "已配置 provider/model 建议",
       "messageApiWebSearchCustomValue": "已接受自定义值：{{value}}",
-      "useResponsesApiContextManagementLabel": "启用 Responses API 上下文管理",
-      "useResponsesApiContextManagementHint": "默认启用。启用后，代理会为长任务自动附加 context_management 压缩指令。",
+      "contextManagementMessagesLabel": "为 Messages 路由启用上下文管理",
+      "contextManagementMessagesHint": "默认启用。作用于被翻译成 Responses API 的 Anthropic Messages 请求。",
+      "contextManagementResponsesLabel": "为原生 Responses 启用上下文管理",
+      "contextManagementResponsesHint": "默认关闭。作用于 /v1/responses 和 provider/model Responses 路由；仅建议在客户端支持 Responses 压缩时开启。",
       "contextManagementInactiveTitle": "上下文管理已关闭",
       "contextManagementInactiveHint": "该旧模型列表会被保存，但在上下文管理关闭时不会生效。",
       "compactThresholdsInactiveHint": "压缩阈值覆盖会被保存，但在上下文管理关闭时不会生效。",
       "responsesApiContextManagementModelsLabel": "旧版上下文管理模型",
       "responsesApiContextManagementModelsPlaceholder": "每行一个 model id",
-      "responsesApiContextManagementModelsDeprecatedHint": "已弃用的旧 allowlist。推荐使用全局 Responses API 上下文管理开关。"
+      "responsesApiContextManagementModelsDeprecatedHint": "已弃用的旧 allowlist。推荐使用按端点拆分的上下文管理开关。"
     },
     "devMode": {
       "title": "开发者模式",

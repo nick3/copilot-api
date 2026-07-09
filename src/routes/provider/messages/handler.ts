@@ -328,11 +328,16 @@ const handleOpenAIResponsesProviderWebSearchMessages = async (
   })
   responsesPayload.stream = true
 
-  applyResponsesApiContextManagement(
+  const shouldCompactInput = applyResponsesApiContextManagement(
     responsesPayload,
     selectedModel?.capabilities.limits.max_prompt_tokens,
+    {
+      source: "messages",
+    },
   )
-  compactInputByLatestCompaction(responsesPayload)
+  if (shouldCompactInput) {
+    compactInputByLatestCompaction(responsesPayload)
+  }
 
   debugJson(logger, "provider.messages.responses.web_search.request", {
     payload: responsesPayload,
@@ -442,11 +447,16 @@ const handleOpenAIResponsesProviderMessages = async (
     },
   )
 
-  applyResponsesApiContextManagement(
+  const shouldCompactInput = applyResponsesApiContextManagement(
     responsesPayload,
     selectedModel?.capabilities.limits.max_prompt_tokens,
+    {
+      source: "messages",
+    },
   )
-  compactInputByLatestCompaction(responsesPayload)
+  if (shouldCompactInput) {
+    compactInputByLatestCompaction(responsesPayload)
+  }
 
   debugJson(logger, "provider.messages.responses.request", {
     payload: responsesPayload,

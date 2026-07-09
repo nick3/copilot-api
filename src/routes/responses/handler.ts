@@ -116,7 +116,6 @@ export const handleResponses = async (c: Context) => {
   if (!isResponsesApiWebSearchEnabled()) {
     removeWebSearchTool(payload)
   }
-  compactInputByLatestCompaction(payload)
 
   const streamRequested = Boolean(payload.stream)
   const { initiator: inferredInitiator } = getResponsesRequestOptions(payload)
@@ -231,11 +230,17 @@ export const handleResponses = async (c: Context) => {
     )
   }
 
-  applyResponsesApiContextManagement(
+  const shouldCompactInput = applyResponsesApiContextManagement(
     upstreamPayload,
     selectedModel.capabilities.limits.max_prompt_tokens,
+    {
+      compactThresholdRatio: 0.8,
+      source: "responses",
+    },
   )
-  compactInputByLatestCompaction(upstreamPayload)
+  if (shouldCompactInput) {
+    compactInputByLatestCompaction(upstreamPayload)
+  }
 
   const premiumRemainingBefore = account.premiumRemaining
   const premiumUnlimitedBefore = account.unlimited

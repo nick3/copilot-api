@@ -17,6 +17,7 @@ import {
   applyResponsesApiContextManagement,
   compactInputByLatestCompaction,
 } from "~/routes/responses/utils"
+
 import type {
   ResponsesPayload,
   ResponsesResult,
@@ -79,17 +80,23 @@ export async function handleProviderResponsesForProvider(
       getCodexModels().data.find((model) => model.id === payload.model)
     : undefined
 
-  const maxPromptTokens = model?.capabilities.limits.max_prompt_tokens ?? 0
-  // Smaller than the client compaction threshold, use server-side compaction to maintain cache hit rate
-  applyResponsesApiContextManagement(payload, maxPromptTokens, 0.8)
+  // Smaller than the client compaction threshold, use server-side compaction to maintain cache hit rate.
+  const shouldCompactInput = applyResponsesApiContextManagement(
+    payload,
+    model?.capabilities.limits.max_prompt_tokens,
+    {
+      compactThresholdRatio: 0.8,
+      source: "responses",
+    },
+  )
+  if (shouldCompactInput) {
+    compactInputByLatestCompaction(payload)
+  }
 
-  const contextManagement = payload.context_management
   debugJson(logger, "Translated Responses request payload:", {
-    contextManagement,
+    contextManagement: payload.context_management,
     provider,
   })
-
-  compactInputByLatestCompaction(payload)
 
   if (effectiveProviderConfig.name === "codex") {
     const upstreamResponse = await forwardCodexResponses(

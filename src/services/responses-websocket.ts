@@ -357,11 +357,13 @@ const createWebSocketMessageStream = async function* <TChunk>(
   }
 
   const onClose = () => {
+    consola.debug("WebSocket closed")
     closed = true
     wake()
   }
 
   const onError = (event: WebSocketErrorEvent) => {
+    consola.error("WebSocket error:", event, event.error)
     error = createWebSocketError(options.streamErrorMessage, event)
     wake()
   }

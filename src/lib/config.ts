@@ -42,9 +42,11 @@ export interface AppConfig {
   accountAffinity?: boolean
   /** @deprecated */
   apiKey?: string
-  /** @deprecated use useResponsesApiContextManagement */
+  /** @deprecated use contextManagement */
   responsesApiContextManagementModels?: Array<string>
+  /** @deprecated use contextManagement */
   useResponsesApiContextManagement?: boolean
+  contextManagement?: ContextManagementConfig
   modelResponsesApiCompactThresholds?: Record<string, number>
   modelReasoningEfforts?: Record<string, ConfiguredReasoningEffort>
   modelAliases?: Record<string, { target: string; allowOriginal?: boolean }>
@@ -71,6 +73,11 @@ export interface AppConfig {
   devMode?: DevModeConfig
   quotaRefresh?: QuotaRefreshConfig
   copilotUseLocalModels?: boolean
+}
+
+export interface ContextManagementConfig {
+  messages?: boolean
+  responses?: boolean
 }
 
 export interface ModelConfig {
@@ -195,6 +202,11 @@ const modelResponsesApiCompactThresholds = {
   "gpt-5.5": 272_000 * 0.8,
 }
 
+const defaultContextManagement = {
+  messages: true,
+  responses: false,
+} satisfies Required<ContextManagementConfig>
+
 const defaultConfig: AppConfig = {
   auth: {
     apiKeys: [],
@@ -205,7 +217,7 @@ const defaultConfig: AppConfig = {
   },
   smallModel: "gpt-5-mini",
   accountAffinity: true,
-  useResponsesApiContextManagement: true,
+  contextManagement: defaultContextManagement,
   modelResponsesApiCompactThresholds,
   modelReasoningEfforts: {
     "gpt-5-mini": "low",
@@ -372,6 +384,8 @@ function mergeDefaultConfig(config: AppConfig): {
   const defaultModelReasoningEfforts = defaultConfig.modelReasoningEfforts ?? {}
   const hasForceAgent = typeof config.forceAgent === "boolean"
   const defaultForceAgent = defaultConfig.forceAgent ?? false
+  const contextManagement = normalizeContextManagementConfig(config)
+  const defaultContextManagementConfig = defaultConfig.contextManagement ?? {}
 
   const missingExtraPromptModels = Object.keys(defaultExtraPrompts).filter(
     (model) => !Object.hasOwn(extraPrompts, model),
@@ -383,18 +397,23 @@ function mergeDefaultConfig(config: AppConfig): {
   const missingResponsesApiCompactThresholdModels = Object.keys(
     defaultResponsesApiCompactThresholds,
   ).filter((model) => !Object.hasOwn(responsesApiCompactThresholds, model))
+  const missingContextManagementKeys = Object.keys(
+    defaultContextManagementConfig,
+  ).filter((key) => !Object.hasOwn(contextManagement, key))
 
   const hasExtraPromptChanges = missingExtraPromptModels.length > 0
   const hasReasoningEffortChanges = missingReasoningEffortModels.length > 0
   const hasForceAgentChanges = !hasForceAgent
   const hasResponsesApiCompactThresholdChanges =
     missingResponsesApiCompactThresholdModels.length > 0
+  const hasContextManagementChanges = missingContextManagementKeys.length > 0
 
   if (
     !hasExtraPromptChanges
     && !hasReasoningEffortChanges
     && !hasForceAgentChanges
     && !hasResponsesApiCompactThresholdChanges
+    && !hasContextManagementChanges
   ) {
     return { mergedConfig: config, changed: false }
   }
@@ -402,6 +421,10 @@ function mergeDefaultConfig(config: AppConfig): {
   return {
     mergedConfig: {
       ...config,
+      contextManagement: {
+        ...defaultContextManagementConfig,
+        ...contextManagement,
+      },
       extraPrompts: {
         ...defaultExtraPrompts,
         ...extraPrompts,
@@ -417,6 +440,36 @@ function mergeDefaultConfig(config: AppConfig): {
       forceAgent: hasForceAgent ? config.forceAgent : defaultForceAgent,
     },
     changed: true,
+  }
+}
+
+function normalizeContextManagementConfig(
+  config: AppConfig,
+): ContextManagementConfig {
+  const value = config.contextManagement
+  if (!value || typeof value !== "object") {
+    return normalizeLegacyContextManagementConfig(config)
+  }
+
+  return {
+    ...(typeof value.messages === "boolean" ?
+      { messages: value.messages }
+    : {}),
+    ...(typeof value.responses === "boolean" ?
+      { responses: value.responses }
+    : {}),
+  }
+}
+
+function normalizeLegacyContextManagementConfig(
+  config: AppConfig,
+): ContextManagementConfig {
+  if (typeof config.useResponsesApiContextManagement !== "boolean") {
+    return {}
+  }
+
+  return {
+    messages: config.useResponsesApiContextManagement,
   }
 }
 
@@ -959,9 +1012,21 @@ export function shouldCompactUseSmallModel(): boolean {
   return config.compactUseSmallModel ?? true
 }
 
-export function isResponsesApiContextManagementEnabled(): boolean {
+export function isContextManagementEnabledForMessages(): boolean {
   const config = getConfig()
-  return config.useResponsesApiContextManagement ?? true
+  return config.contextManagement?.messages ?? defaultContextManagement.messages
+}
+
+export function isContextManagementEnabledForResponses(): boolean {
+  const config = getConfig()
+  return (
+    config.contextManagement?.responses ?? defaultContextManagement.responses
+  )
+}
+
+/** @deprecated use endpoint-specific context management helpers */
+export function isResponsesApiContextManagementEnabled(): boolean {
+  return isContextManagementEnabledForMessages()
 }
 
 export function getModelResponsesApiCompactThreshold(

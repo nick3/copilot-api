@@ -87,6 +87,11 @@ beforeEach(() => {
   responsesApiWebSocketEnabled = true
   messagesApiFlowDependencies.createChatCompletions = createChatCompletions
   messagesApiFlowDependencies.createResponses = createResponses
+  responsesUtilsDependencies.getModelResponsesApiCompactThreshold = () =>
+    undefined
+  responsesUtilsDependencies.isContextManagementEnabledForMessages = () => true
+  responsesUtilsDependencies.isContextManagementEnabledForResponses = () =>
+    false
   responsesUtilsDependencies.isResponsesApiWebSocketEnabled = () =>
     responsesApiWebSocketEnabled
   createChatCompletions.mockClear()
@@ -326,6 +331,29 @@ test("messages Responses flow uses websocket transport by default for dual-endpo
   expect(response.status).toBe(200)
   expect(createResponses).toHaveBeenCalledTimes(1)
   expect(capturedResponsesOptions?.transport).toBe("websocket")
+})
+
+test("messages Responses flow adds context management by default", async () => {
+  const payload: AnthropicMessagesPayload = {
+    max_tokens: 128,
+    messages: [{ role: "user", content: "hello" }],
+    model: "gpt-test",
+  }
+
+  const response = await handleWithResponsesApi(createContext(), payload, {
+    logger,
+    requestId: "request-1",
+    selectedModel: createModel(["/responses"]),
+  })
+
+  expect(response.status).toBe(200)
+  expect(createResponses).toHaveBeenCalledTimes(1)
+  expect(capturedResponsesPayload?.context_management).toEqual([
+    {
+      type: "compaction",
+      compact_threshold: 108800,
+    },
+  ])
 })
 
 test("messages Responses flow keeps HTTP transport for dual-endpoint models when websocket is disabled", async () => {

@@ -18,7 +18,8 @@ import {
 test("Responses API settings exposes transport toggles and context management", () => {
   const html = renderToStaticMarkup(
     <ResponsesApiSettingsCard
-      useResponsesApiContextManagement
+      contextManagementMessages
+      contextManagementResponses={false}
       useResponsesApiWebSearch
       useResponsesApiWebSocket={false}
       messageApiWebSearchModelValue="search/gpt-search"
@@ -35,7 +36,8 @@ test("Responses API settings exposes transport toggles and context management", 
       onCompactThresholdsUpdateItem={() => {}}
       onMessageApiWebSearchModelChange={() => {}}
       onResponsesApiContextManagementModelsChange={() => {}}
-      onToggleUseResponsesApiContextManagement={() => {}}
+      onToggleContextManagementMessages={() => {}}
+      onToggleContextManagementResponses={() => {}}
       onToggleUseResponsesApiWebSearch={() => {}}
       onToggleUseResponsesApiWebSocket={() => {}}
     />,
@@ -45,7 +47,8 @@ test("Responses API settings exposes transport toggles and context management", 
   expect(html).toContain("ws:/responses")
   expect(html).toContain("Messages web search model")
   expect(html).toContain("search/gpt-search")
-  expect(html).toContain("Enable Responses API context management")
+  expect(html).toContain("Enable context management for Messages routes")
+  expect(html).toContain("Enable context management for native Responses")
   expect(html).toContain("Default: enabled")
   expect(html).toContain("Legacy context management models")
   expect(html).toContain('aria-checked="false"')
@@ -54,7 +57,8 @@ test("Responses API settings exposes transport toggles and context management", 
 test("Responses API settings marks dependent fields inactive when context management is off", () => {
   const html = renderToStaticMarkup(
     <ResponsesApiSettingsCard
-      useResponsesApiContextManagement={false}
+      contextManagementMessages={false}
+      contextManagementResponses={false}
       useResponsesApiWebSearch
       useResponsesApiWebSocket
       messageApiWebSearchModelValue="gpt-5-mini"
@@ -71,7 +75,8 @@ test("Responses API settings marks dependent fields inactive when context manage
       onCompactThresholdsUpdateItem={() => {}}
       onMessageApiWebSearchModelChange={() => {}}
       onResponsesApiContextManagementModelsChange={() => {}}
-      onToggleUseResponsesApiContextManagement={() => {}}
+      onToggleContextManagementMessages={() => {}}
+      onToggleContextManagementResponses={() => {}}
       onToggleUseResponsesApiWebSearch={() => {}}
       onToggleUseResponsesApiWebSocket={() => {}}
     />,
@@ -85,7 +90,8 @@ test("Responses API settings marks dependent fields inactive when context manage
 test("compact threshold form validation rejects decimals", () => {
   const html = renderToStaticMarkup(
     <ResponsesApiSettingsCard
-      useResponsesApiContextManagement
+      contextManagementMessages
+      contextManagementResponses={false}
       useResponsesApiWebSearch
       useResponsesApiWebSocket
       messageApiWebSearchModelValue="gpt-5-mini"
@@ -108,7 +114,8 @@ test("compact threshold form validation rejects decimals", () => {
       onCompactThresholdsUpdateItem={() => {}}
       onMessageApiWebSearchModelChange={() => {}}
       onResponsesApiContextManagementModelsChange={() => {}}
-      onToggleUseResponsesApiContextManagement={() => {}}
+      onToggleContextManagementMessages={() => {}}
+      onToggleContextManagementResponses={() => {}}
       onToggleUseResponsesApiWebSearch={() => {}}
       onToggleUseResponsesApiWebSocket={() => {}}
     />,
@@ -142,7 +149,8 @@ test("provider model suggestions are derived from configured providers", () => {
 test("Messages web search model renders Copilot and provider suggestions", () => {
   const html = renderToStaticMarkup(
     <ResponsesApiSettingsCard
-      useResponsesApiContextManagement
+      contextManagementMessages
+      contextManagementResponses={false}
       useResponsesApiWebSearch
       useResponsesApiWebSocket
       messageApiWebSearchModelValue="gpt-5-mini"
@@ -160,7 +168,8 @@ test("Messages web search model renders Copilot and provider suggestions", () =>
       onCompactThresholdsUpdateItem={() => {}}
       onMessageApiWebSearchModelChange={() => {}}
       onResponsesApiContextManagementModelsChange={() => {}}
-      onToggleUseResponsesApiContextManagement={() => {}}
+      onToggleContextManagementMessages={() => {}}
+      onToggleContextManagementResponses={() => {}}
       onToggleUseResponsesApiWebSearch={() => {}}
       onToggleUseResponsesApiWebSocket={() => {}}
     />,
@@ -176,7 +185,8 @@ test("Messages web search model renders Copilot and provider suggestions", () =>
 test("Messages web search model keeps custom values visible", () => {
   const html = renderToStaticMarkup(
     <ResponsesApiSettingsCard
-      useResponsesApiContextManagement
+      contextManagementMessages
+      contextManagementResponses={false}
       useResponsesApiWebSearch
       useResponsesApiWebSocket
       messageApiWebSearchModelValue="custom-search-model"
@@ -194,7 +204,8 @@ test("Messages web search model keeps custom values visible", () => {
       onCompactThresholdsUpdateItem={() => {}}
       onMessageApiWebSearchModelChange={() => {}}
       onResponsesApiContextManagementModelsChange={() => {}}
-      onToggleUseResponsesApiContextManagement={() => {}}
+      onToggleContextManagementMessages={() => {}}
+      onToggleContextManagementResponses={() => {}}
       onToggleUseResponsesApiWebSearch={() => {}}
       onToggleUseResponsesApiWebSocket={() => {}}
     />,
@@ -207,7 +218,8 @@ test("Messages web search model keeps custom values visible", () => {
 test("Messages web search model input can stay empty", () => {
   const html = renderToStaticMarkup(
     <ResponsesApiSettingsCard
-      useResponsesApiContextManagement
+      contextManagementMessages
+      contextManagementResponses={false}
       useResponsesApiWebSearch
       useResponsesApiWebSocket
       messageApiWebSearchModelValue=""
@@ -224,7 +236,8 @@ test("Messages web search model input can stay empty", () => {
       onCompactThresholdsUpdateItem={() => {}}
       onMessageApiWebSearchModelChange={() => {}}
       onResponsesApiContextManagementModelsChange={() => {}}
-      onToggleUseResponsesApiContextManagement={() => {}}
+      onToggleContextManagementMessages={() => {}}
+      onToggleContextManagementResponses={() => {}}
       onToggleUseResponsesApiWebSearch={() => {}}
       onToggleUseResponsesApiWebSocket={() => {}}
     />,

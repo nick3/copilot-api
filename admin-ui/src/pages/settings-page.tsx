@@ -370,6 +370,23 @@ function getAuthApiKeysFromConfig(config: AdminConfig): Array<string> {
   return legacyApiKey ? [legacyApiKey] : []
 }
 
+type ContextManagementDraft = {
+  messages: boolean
+  responses: boolean
+}
+
+function getContextManagementFromConfig(
+  config: AdminConfig,
+): ContextManagementDraft {
+  return {
+    messages:
+      config.contextManagement?.messages
+      ?? config.useResponsesApiContextManagement
+      ?? true,
+    responses: config.contextManagement?.responses ?? false,
+  }
+}
+
 function parseAuthApiKeysInput(value: string): Array<string> {
   return parseStringListInput(value)
 }
@@ -3054,7 +3071,8 @@ type ResponsesApiSettingsCardProps = {
   useResponsesApiWebSocket: boolean
   useResponsesApiWebSearch: boolean
   messageApiWebSearchModelValue: string
-  useResponsesApiContextManagement: boolean
+  contextManagementMessages: boolean
+  contextManagementResponses: boolean
   responsesApiContextManagementModelsValue: string
   compactThresholdsMode: JsonMode
   compactThresholdsJson: string
@@ -3065,7 +3083,8 @@ type ResponsesApiSettingsCardProps = {
   onToggleUseResponsesApiWebSocket: (value: boolean) => void
   onToggleUseResponsesApiWebSearch: (value: boolean) => void
   onMessageApiWebSearchModelChange: (value: string) => void
-  onToggleUseResponsesApiContextManagement: (value: boolean) => void
+  onToggleContextManagementMessages: (value: boolean) => void
+  onToggleContextManagementResponses: (value: boolean) => void
   onResponsesApiContextManagementModelsChange: (value: string) => void
   onCompactThresholdsToggleMode: (next: boolean) => void
   onCompactThresholdsJsonChange: (value: string) => void
@@ -3081,7 +3100,8 @@ export function ResponsesApiSettingsCard({
   useResponsesApiWebSocket,
   useResponsesApiWebSearch,
   messageApiWebSearchModelValue,
-  useResponsesApiContextManagement,
+  contextManagementMessages,
+  contextManagementResponses,
   responsesApiContextManagementModelsValue,
   compactThresholdsMode,
   compactThresholdsJson,
@@ -3092,7 +3112,8 @@ export function ResponsesApiSettingsCard({
   onToggleUseResponsesApiWebSocket,
   onToggleUseResponsesApiWebSearch,
   onMessageApiWebSearchModelChange,
-  onToggleUseResponsesApiContextManagement,
+  onToggleContextManagementMessages,
+  onToggleContextManagementResponses,
   onResponsesApiContextManagementModelsChange,
   onCompactThresholdsToggleMode,
   onCompactThresholdsJsonChange,
@@ -3234,18 +3255,37 @@ export function ResponsesApiSettingsCard({
           <div className="space-y-1">
             <div className="text-sm font-medium">
               {t(
-                "settingsPage.responsesApi.useResponsesApiContextManagementLabel",
+                "settingsPage.responsesApi.contextManagementMessagesLabel",
               )}
             </div>
             <div className="text-muted-foreground text-xs">
               {t(
-                "settingsPage.responsesApi.useResponsesApiContextManagementHint",
+                "settingsPage.responsesApi.contextManagementMessagesHint",
               )}
             </div>
           </div>
           <Switch
-            checked={useResponsesApiContextManagement}
-            onCheckedChange={onToggleUseResponsesApiContextManagement}
+            checked={contextManagementMessages}
+            onCheckedChange={onToggleContextManagementMessages}
+          />
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="text-sm font-medium">
+              {t(
+                "settingsPage.responsesApi.contextManagementResponsesLabel",
+              )}
+            </div>
+            <div className="text-muted-foreground text-xs">
+              {t(
+                "settingsPage.responsesApi.contextManagementResponsesHint",
+              )}
+            </div>
+          </div>
+          <Switch
+            checked={contextManagementResponses}
+            onCheckedChange={onToggleContextManagementResponses}
           />
         </div>
 
@@ -3260,7 +3300,9 @@ export function ResponsesApiSettingsCard({
           </div>
           <CompactThresholdsCard
             embedded
-            contextManagementEnabled={useResponsesApiContextManagement}
+            contextManagementEnabled={
+              contextManagementMessages || contextManagementResponses
+            }
             mode={compactThresholdsMode}
             json={compactThresholdsJson}
             jsonIssue={compactThresholdsJsonIssue}
@@ -3287,7 +3329,7 @@ export function ResponsesApiSettingsCard({
                 "settingsPage.responsesApi.responsesApiContextManagementModelsDeprecatedHint",
               )}
             </div>
-            {!useResponsesApiContextManagement ? (
+            {!contextManagementMessages && !contextManagementResponses ? (
               <div className="text-muted-foreground text-xs">
                 {t("settingsPage.responsesApi.contextManagementInactiveHint")}
               </div>
@@ -4333,13 +4375,15 @@ type SettingsPageViewProps = {
   useResponsesApiWebSocket: boolean
   useResponsesApiWebSearch: boolean
   messageApiWebSearchModelValue: string
-  useResponsesApiContextManagement: boolean
+  contextManagementMessages: boolean
+  contextManagementResponses: boolean
   responsesApiContextManagementModelsValue: string
   onUseMessagesApiToggle: (value: boolean) => void
   onUseResponsesApiWebSocketToggle: (value: boolean) => void
   onUseResponsesApiWebSearchToggle: (value: boolean) => void
   onMessageApiWebSearchModelChange: (value: string) => void
-  onUseResponsesApiContextManagementToggle: (value: boolean) => void
+  onContextManagementMessagesToggle: (value: boolean) => void
+  onContextManagementResponsesToggle: (value: boolean) => void
   onResponsesApiContextManagementModelsChange: (value: string) => void
   providersItems: Array<ProviderItem>
   providersIssue: string | null
@@ -4506,11 +4550,15 @@ function useSettingsPageState(): SettingsPageViewProps {
       const mappingItems = modelMappingItemsFromRecord(configData.modelMappings)
       const normalizedMappings = modelMappingRecordFromItems(mappingItems)
       const normalizedAuthApiKeys = getAuthApiKeysFromConfig(configData)
+      const contextManagement = getContextManagementFromConfig(configData)
+      const configWithoutDeprecatedContextManagement = { ...configData }
+      delete configWithoutDeprecatedContextManagement.useResponsesApiContextManagement
 
       setConfigPath(_configPath ?? null)
       const normalizedDraft = {
-        ...configData,
+        ...configWithoutDeprecatedContextManagement,
         auth: { apiKeys: normalizedAuthApiKeys },
+        contextManagement,
         modelAliases: normalizedAliases,
         modelMappings: normalizedMappings,
       }
@@ -4783,11 +4831,32 @@ function useSettingsPageState(): SettingsPageViewProps {
     [setDraft],
   )
 
-  const handleUseResponsesApiContextManagementToggle = useCallback(
-    (value: boolean) => {
-      setDraft((prev) => ({ ...prev, useResponsesApiContextManagement: value }))
+  const updateContextManagement = useCallback(
+    (patch: Partial<ContextManagementDraft>) => {
+      setDraft((prev) => ({
+        ...prev,
+        contextManagement: {
+          ...getContextManagementFromConfig(prev),
+          ...patch,
+        },
+        useResponsesApiContextManagement: undefined,
+      }))
     },
     [setDraft],
+  )
+
+  const handleContextManagementMessagesToggle = useCallback(
+    (value: boolean) => {
+      updateContextManagement({ messages: value })
+    },
+    [updateContextManagement],
+  )
+
+  const handleContextManagementResponsesToggle = useCallback(
+    (value: boolean) => {
+      updateContextManagement({ responses: value })
+    },
+    [updateContextManagement],
   )
 
   const handleResponsesApiContextManagementModelsChange = useCallback(
@@ -4898,8 +4967,7 @@ function useSettingsPageState(): SettingsPageViewProps {
   const useResponsesApiWebSocket = draft.useResponsesApiWebSocket ?? true
   const useResponsesApiWebSearch = draft.useResponsesApiWebSearch ?? true
   const messageApiWebSearchModelValue = draft.messageApiWebSearchModel ?? ""
-  const useResponsesApiContextManagement =
-    draft.useResponsesApiContextManagement ?? true
+  const contextManagement = getContextManagementFromConfig(draft)
   const providerModelSuggestions = deriveProviderModelSuggestions(providersItems)
 
   return {
@@ -4991,13 +5059,15 @@ function useSettingsPageState(): SettingsPageViewProps {
     useResponsesApiWebSocket,
     useResponsesApiWebSearch,
     messageApiWebSearchModelValue,
-    useResponsesApiContextManagement,
+    contextManagementMessages: contextManagement.messages,
+    contextManagementResponses: contextManagement.responses,
     responsesApiContextManagementModelsValue,
     onUseMessagesApiToggle: handleUseMessagesApiToggle,
     onUseResponsesApiWebSocketToggle: handleUseResponsesApiWebSocketToggle,
     onUseResponsesApiWebSearchToggle: handleUseResponsesApiWebSearchToggle,
     onMessageApiWebSearchModelChange: handleMessageApiWebSearchModelChange,
-    onUseResponsesApiContextManagementToggle: handleUseResponsesApiContextManagementToggle,
+    onContextManagementMessagesToggle: handleContextManagementMessagesToggle,
+    onContextManagementResponsesToggle: handleContextManagementResponsesToggle,
     onResponsesApiContextManagementModelsChange:
       handleResponsesApiContextManagementModelsChange,
     providersItems,
@@ -5107,13 +5177,15 @@ function SettingsPageView({
   useResponsesApiWebSocket,
   useResponsesApiWebSearch,
   messageApiWebSearchModelValue,
-  useResponsesApiContextManagement,
+  contextManagementMessages,
+  contextManagementResponses,
   responsesApiContextManagementModelsValue,
   onUseMessagesApiToggle,
   onUseResponsesApiWebSocketToggle,
   onUseResponsesApiWebSearchToggle,
   onMessageApiWebSearchModelChange,
-  onUseResponsesApiContextManagementToggle,
+  onContextManagementMessagesToggle,
+  onContextManagementResponsesToggle,
   onResponsesApiContextManagementModelsChange,
   providersItems,
   providersIssue,
@@ -5303,7 +5375,8 @@ function SettingsPageView({
               useResponsesApiWebSocket={useResponsesApiWebSocket}
               useResponsesApiWebSearch={useResponsesApiWebSearch}
               messageApiWebSearchModelValue={messageApiWebSearchModelValue}
-              useResponsesApiContextManagement={useResponsesApiContextManagement}
+              contextManagementMessages={contextManagementMessages}
+              contextManagementResponses={contextManagementResponses}
               responsesApiContextManagementModelsValue={
                 responsesApiContextManagementModelsValue
               }
@@ -5316,8 +5389,11 @@ function SettingsPageView({
               onToggleUseResponsesApiWebSocket={onUseResponsesApiWebSocketToggle}
               onToggleUseResponsesApiWebSearch={onUseResponsesApiWebSearchToggle}
               onMessageApiWebSearchModelChange={onMessageApiWebSearchModelChange}
-              onToggleUseResponsesApiContextManagement={
-                onUseResponsesApiContextManagementToggle
+              onToggleContextManagementMessages={
+                onContextManagementMessagesToggle
+              }
+              onToggleContextManagementResponses={
+                onContextManagementResponsesToggle
               }
               onResponsesApiContextManagementModelsChange={
                 onResponsesApiContextManagementModelsChange

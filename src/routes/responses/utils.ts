@@ -13,19 +13,23 @@ import { COMPACT_REQUEST, type CompactType } from "~/lib/compact"
 import {
   getModelResponsesApiCompactThreshold as getConfiguredModelResponsesApiCompactThreshold,
   isForceAgentEnabled,
-  isResponsesApiContextManagementEnabled as isConfiguredResponsesApiContextManagementEnabled,
+  isContextManagementEnabledForMessages as isConfiguredContextManagementEnabledForMessages,
+  isContextManagementEnabledForResponses as isConfiguredContextManagementEnabledForResponses,
   isResponsesApiWebSocketEnabled as isConfiguredResponsesApiWebSocketEnabled,
 } from "~/lib/config"
 
 export const RESPONSES_ENDPOINT = "/responses"
 export const RESPONSES_WS_ENDPOINT = "ws:/responses"
-export const DEFAULT_RESPONSES_COMPACT_THRESHOLD_RATIO = 0.9
+export const DEFAULT_RESPONSES_COMPACT_THRESHOLD_RATIO = 0.85
+export type ResponsesApiContextManagementSource = "messages" | "responses"
 
 export const responsesUtilsDependencies = {
   getModelResponsesApiCompactThreshold:
     getConfiguredModelResponsesApiCompactThreshold,
-  isResponsesApiContextManagementEnabled:
-    isConfiguredResponsesApiContextManagementEnabled,
+  isContextManagementEnabledForMessages:
+    isConfiguredContextManagementEnabledForMessages,
+  isContextManagementEnabledForResponses:
+    isConfiguredContextManagementEnabledForResponses,
   isResponsesApiWebSocketEnabled: isConfiguredResponsesApiWebSocketEnabled,
 }
 
@@ -309,19 +313,22 @@ const createCompactionContextManagement = (
 
 export const applyResponsesApiContextManagement = (
   payload: ResponsesPayload,
-  maxPromptTokens?: number,
-  compactThresholdRatio = DEFAULT_RESPONSES_COMPACT_THRESHOLD_RATIO,
-): void => {
+  maxPromptTokens: number | undefined,
+  options: {
+    compactThresholdRatio?: number
+    source: ResponsesApiContextManagementSource
+  },
+): boolean => {
   if (hasTerminalCompactionTrigger(payload)) {
-    return
+    return isContextManagementEnabledForSource(options.source)
   }
 
   if (payload.context_management !== undefined) {
-    return
+    return true
   }
 
-  if (!responsesUtilsDependencies.isResponsesApiContextManagementEnabled()) {
-    return
+  if (!isContextManagementEnabledForSource(options.source)) {
+    return false
   }
 
   const modelCompactThreshold = getModelResponsesApiCompactThreshold(
@@ -331,9 +338,21 @@ export const applyResponsesApiContextManagement = (
     modelCompactThreshold
       ?? resolveResponsesCompactThreshold(
         maxPromptTokens,
-        compactThresholdRatio,
+        options.compactThresholdRatio
+          ?? DEFAULT_RESPONSES_COMPACT_THRESHOLD_RATIO,
       ),
   )
+  return true
+}
+
+const isContextManagementEnabledForSource = (
+  source: ResponsesApiContextManagementSource,
+): boolean => {
+  if (source === "messages") {
+    return responsesUtilsDependencies.isContextManagementEnabledForMessages()
+  }
+
+  return responsesUtilsDependencies.isContextManagementEnabledForResponses()
 }
 
 const hasTerminalCompactionTrigger = (payload: ResponsesPayload): boolean => {

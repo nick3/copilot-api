@@ -37,6 +37,27 @@ const CODEX_MODELS: Array<CodexModelDefinition> = [
     maxTokens: 128_000,
     name: "GPT-5.5",
   },
+  {
+    contextWindow: 272_000,
+    id: "gpt-5.6-sol",
+    input: ["text", "image"],
+    maxTokens: 128_000,
+    name: "GPT-5.6 Sol",
+  },
+  {
+    contextWindow: 272_000,
+    id: "gpt-5.6-terra",
+    input: ["text", "image"],
+    maxTokens: 128_000,
+    name: "GPT-5.6 Terra",
+  },
+  {
+    contextWindow: 272_000,
+    id: "gpt-5.6-luna",
+    input: ["text", "image"],
+    maxTokens: 128_000,
+    name: "GPT-5.6 Luna",
+  },
 ]
 
 function normalizeCodexModel(model: CodexModelDefinition): Model {

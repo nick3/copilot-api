@@ -62,10 +62,7 @@ const originalSelect =
 const originalFinalize = accountsManager.finalizeQuota.bind(accountsManager)
 const originalMarkFailed =
   accountsManager.markAccountFailed.bind(accountsManager)
-const originalContextManagementEnabled =
-  responsesUtilsDependencies.isResponsesApiContextManagementEnabled
-const originalModelCompactThreshold =
-  responsesUtilsDependencies.getModelResponsesApiCompactThreshold
+const defaultResponsesUtilsDependencies = { ...responsesUtilsDependencies }
 const DB_PATH_ENV = "COPILOT_API_SQLITE_DB_PATH"
 let configBeforeTest: string | null | undefined
 let dbPathBeforeTest: string | undefined
@@ -217,6 +214,11 @@ beforeEach(async () => {
   accountsManager.markAccountFailed = () => {}
 
   setModelMappings({})
+  responsesUtilsDependencies.getModelResponsesApiCompactThreshold = () =>
+    undefined
+  responsesUtilsDependencies.isContextManagementEnabledForMessages = () => true
+  responsesUtilsDependencies.isContextManagementEnabledForResponses = () =>
+    false
 })
 
 afterEach(async () => {
@@ -232,10 +234,7 @@ afterEach(async () => {
   }
   dbPathBeforeTest = undefined
 
-  responsesUtilsDependencies.isResponsesApiContextManagementEnabled =
-    originalContextManagementEnabled
-  responsesUtilsDependencies.getModelResponsesApiCompactThreshold =
-    originalModelCompactThreshold
+  Object.assign(responsesUtilsDependencies, defaultResponsesUtilsDependencies)
 
   if (configBeforeTest !== undefined) {
     await restoreConfigText(configBeforeTest)
@@ -945,6 +944,12 @@ describe("responses handler provider alias routing", () => {
 
 describe("responses handler context management", () => {
   test("uses configured model compact threshold before max token fallback", async () => {
+    responsesUtilsDependencies.getModelResponsesApiCompactThreshold = (
+      model,
+    ) => (model === "gpt-5.4" ? 217600 : undefined)
+    responsesUtilsDependencies.isContextManagementEnabledForResponses = () =>
+      true
+
     accountsManager.selectAccountForRequest = () =>
       Promise.resolve(buildSelection("/responses", "gpt-5.4"))
 
@@ -982,10 +987,7 @@ describe("responses handler context management", () => {
     ])
   })
 
-  test("does not add context_management when disabled", async () => {
-    responsesUtilsDependencies.isResponsesApiContextManagementEnabled = () =>
-      false
-
+  test("does not add context_management to native Responses API by default", async () => {
     accountsManager.selectAccountForRequest = () =>
       Promise.resolve(buildSelection("/responses", "gpt-5.4"))
 
@@ -1018,7 +1020,9 @@ describe("responses handler context management", () => {
     expect(forwardedPayload?.context_management).toBeUndefined()
   })
 
-  test("does not add context management when input ends with compaction trigger", async () => {
+  test("compacts input ending with compaction trigger when Responses context management is enabled", async () => {
+    responsesUtilsDependencies.isContextManagementEnabledForResponses = () =>
+      true
     accountsManager.selectAccountForRequest = () =>
       Promise.resolve(buildSelection("/responses", "gpt-5.4"))
 
@@ -1036,6 +1040,14 @@ describe("responses handler context management", () => {
     // @ts-expect-error test mock only implements the used subset
     fetchHolder.fetch = fetchMock
 
+    const latestInput = {
+      content: "Continue after the latest compaction.",
+      role: "user",
+    }
+    const compactionTrigger = {
+      type: "compaction_trigger",
+    }
+
     const response = await responsesRoutes.fetch(
       new Request("http://local/", {
         method: "POST",
@@ -1043,6 +1055,15 @@ describe("responses handler context management", () => {
         body: JSON.stringify({
           model: "gpt-5.4",
           input: [
+            {
+              content: "old content before compaction",
+              role: "user",
+            },
+            {
+              encrypted_content: "cipher",
+              id: "compaction-1",
+              type: "compaction",
+            },
             {
               content: [
                 {
@@ -1054,9 +1075,8 @@ describe("responses handler context management", () => {
               role: "assistant",
               type: "message",
             },
-            {
-              type: "compaction_trigger",
-            },
+            latestInput,
+            compactionTrigger,
           ],
         }),
       }),
@@ -1064,12 +1084,82 @@ describe("responses handler context management", () => {
 
     expect(response.status).toBe(200)
     expect(forwardedPayload?.context_management).toBeUndefined()
+    expect(forwardedPayload?.input).toEqual([
+      {
+        encrypted_content: "cipher",
+        id: "compaction-1",
+        type: "compaction",
+      },
+      {
+        content: [
+          {
+            text: "Completed the review for the latest two commits.",
+            type: "output_text",
+          },
+        ],
+        phase: "final_answer",
+        role: "assistant",
+        type: "message",
+      },
+      latestInput,
+      compactionTrigger,
+    ])
+  })
+
+  test("does not compact input ending with compaction trigger when Responses context management is disabled", async () => {
+    accountsManager.selectAccountForRequest = () =>
+      Promise.resolve(buildSelection("/responses", "gpt-5.4"))
+
+    let forwardedPayload: ResponsesPayload | undefined
+    const fetchMock = mock((_url: string, options?: FetchOptions) => {
+      forwardedPayload = JSON.parse(options?.body as string) as ResponsesPayload
+      return Promise.resolve(
+        new Response(JSON.stringify(buildResponsesResult("gpt-5.4", "ok")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const input = [
+      {
+        content: "old content before compaction",
+        role: "user",
+      },
+      {
+        encrypted_content: "cipher",
+        id: "compaction-1",
+        type: "compaction",
+      },
+      {
+        content: "Continue after the latest compaction.",
+        role: "user",
+      },
+      {
+        type: "compaction_trigger",
+      },
+    ]
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-5.4",
+          input,
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(forwardedPayload?.context_management).toBeUndefined()
+    expect(forwardedPayload?.input).toEqual(input)
   })
 
   test("preserves request-provided context_management", async () => {
-    responsesUtilsDependencies.isResponsesApiContextManagementEnabled = () =>
-      true
-
     accountsManager.selectAccountForRequest = () =>
       Promise.resolve(buildSelection("/responses", "gpt-5.4"))
 

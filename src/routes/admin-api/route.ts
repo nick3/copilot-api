@@ -24,6 +24,7 @@ import {
   mergeConfigWithDefaults,
   SUPPORTED_PROVIDER_TYPES,
   type AppConfig,
+  type ContextManagementConfig,
   type DevModeConfig,
   type LogLevel,
   type ModelConfig,
@@ -222,6 +223,7 @@ const CONFIG_KEYS = new Set<keyof AppConfig>([
   "anthropicApiKey",
   "providers",
   "responsesApiContextManagementModels",
+  "contextManagement",
   "modelReasoningEfforts",
   "modelResponsesApiCompactThresholds",
   "modelAliases",
@@ -1401,6 +1403,71 @@ function applyModelResponsesApiCompactThresholds(
   return undefined
 }
 
+const CONTEXT_MANAGEMENT_KEYS = new Set(["messages", "responses"])
+
+function parseContextManagementConfig(
+  value: unknown,
+): ParseFieldResult<ContextManagementConfig> {
+  if (value === null || value === undefined) return { clear: true }
+  if (!isPlainObject(value)) {
+    return { error: "contextManagement must be an object" }
+  }
+
+  for (const key of Object.keys(value)) {
+    if (!CONTEXT_MANAGEMENT_KEYS.has(key)) {
+      return { error: `contextManagement.${key} is not supported` }
+    }
+  }
+
+  const parsed: ContextManagementConfig = {}
+  for (const key of ["messages", "responses"] as const) {
+    if (!Object.hasOwn(value, key)) continue
+
+    const result = parseOptionalBoolean(value[key], `contextManagement.${key}`)
+    if ("error" in result) return result
+    if ("value" in result) parsed[key] = result.value
+  }
+
+  return { value: parsed }
+}
+
+function applyContextManagementConfig(
+  next: AppConfig,
+  value: unknown,
+): string | undefined {
+  const parsed = parseContextManagementConfig(value)
+  if ("error" in parsed) return parsed.error
+  if ("clear" in parsed) {
+    delete next.contextManagement
+    return undefined
+  }
+
+  next.contextManagement = {
+    ...next.contextManagement,
+    ...parsed.value,
+  }
+  return undefined
+}
+
+function applyLegacyResponsesApiContextManagement(
+  next: AppConfig,
+  value: unknown,
+): string | undefined {
+  const parsed = parseOptionalBoolean(value, "useResponsesApiContextManagement")
+  if ("error" in parsed) return parsed.error
+  delete next.useResponsesApiContextManagement
+  if ("clear" in parsed) {
+    delete next.contextManagement
+    return undefined
+  }
+
+  next.contextManagement = {
+    messages: parsed.value,
+    responses: parsed.value,
+  }
+  return undefined
+}
+
 function applyModelAliases(
   next: AppConfig,
   value: unknown,
@@ -1599,6 +1666,7 @@ const CONFIG_PATCH_HANDLERS: Partial<Record<string, ConfigPatchHandler>> = {
     applyOptionalString(next, "anthropicApiKey", value),
   providers: applyProvidersConfig,
   responsesApiContextManagementModels: applyResponsesApiContextManagementModels,
+  contextManagement: applyContextManagementConfig,
   modelReasoningEfforts: applyReasoningEfforts,
   modelResponsesApiCompactThresholds: applyModelResponsesApiCompactThresholds,
   modelAliases: applyModelAliases,
@@ -1622,8 +1690,7 @@ const CONFIG_PATCH_HANDLERS: Partial<Record<string, ConfigPatchHandler>> = {
     applyOptionalBoolean(next, "useResponsesApiWebSearch", value),
   messageApiWebSearchModel: (next, value) =>
     applyOptionalString(next, "messageApiWebSearchModel", value),
-  useResponsesApiContextManagement: (next, value) =>
-    applyOptionalBoolean(next, "useResponsesApiContextManagement", value),
+  useResponsesApiContextManagement: applyLegacyResponsesApiContextManagement,
   copilotUseLocalModels: (next, value) =>
     applyOptionalBoolean(next, "copilotUseLocalModels", value),
   devMode: applyDevModeConfig,
@@ -1682,11 +1749,19 @@ adminApiRoutes.get("/meta", (c) => {
 })
 
 function applyAdminConfigResponseDefaults(config: AppConfig): AppConfig {
+  const contextManagement = {
+    messages:
+      config.contextManagement?.messages
+      ?? config.useResponsesApiContextManagement
+      ?? true,
+    responses: config.contextManagement?.responses ?? false,
+  }
+
   return {
     ...config,
+    contextManagement,
     modelMappings: config.modelMappings ?? {},
-    useResponsesApiContextManagement:
-      config.useResponsesApiContextManagement ?? true,
+    useResponsesApiContextManagement: contextManagement.messages,
   }
 }
 

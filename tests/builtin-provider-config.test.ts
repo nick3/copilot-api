@@ -6,11 +6,14 @@ import { fileURLToPath } from "node:url"
 
 interface ConfigFileShape {
   builtinProviders?: Record<string, unknown>
+  contextManagement?: {
+    messages?: boolean
+    responses?: boolean
+  }
   extraPrompts?: Record<string, string>
   modelAliases?: Record<string, { target: string; allowOriginal?: boolean }>
   modelReasoningEfforts?: Record<string, string>
   modelResponsesApiCompactThresholds?: Record<string, number>
-  useResponsesApiContextManagement?: boolean
   providers?: Record<
     string,
     {
@@ -86,33 +89,43 @@ describe("builtin provider config", () => {
     expect(readConfigFile(configPath).builtinProviders).toBeUndefined()
   })
 
-  test("enables Responses API context management by default", () => {
+  test("uses context management defaults by endpoint", () => {
     const tempDir = createTempConfigDir()
     const configPath = path.join(tempDir, "config.json")
 
     const output = runScript(
       tempDir,
-      'const { isResponsesApiContextManagementEnabled } = await import("./src/lib/config"); console.log(JSON.stringify({ enabled: isResponsesApiContextManagementEnabled() }));',
+      'const { isContextManagementEnabledForMessages, isContextManagementEnabledForResponses } = await import("./src/lib/config"); console.log(JSON.stringify({ messages: isContextManagementEnabledForMessages(), responses: isContextManagementEnabledForResponses() }));',
     )
 
-    expect(JSON.parse(output)).toEqual({ enabled: true })
-    expect(readConfigFile(configPath).useResponsesApiContextManagement).toBe(
-      true,
-    )
+    expect(JSON.parse(output)).toEqual({
+      messages: true,
+      responses: false,
+    })
+    expect(readConfigFile(configPath).contextManagement).toEqual({
+      messages: true,
+      responses: false,
+    })
   })
 
-  test("allows disabling Responses API context management", () => {
+  test("allows overriding context management per endpoint", () => {
     const tempDir = createTempConfigDir()
     writeConfigFile(tempDir, {
-      useResponsesApiContextManagement: false,
+      contextManagement: {
+        messages: false,
+        responses: true,
+      },
     })
 
     const output = runScript(
       tempDir,
-      'const { isResponsesApiContextManagementEnabled } = await import("./src/lib/config"); console.log(JSON.stringify({ enabled: isResponsesApiContextManagementEnabled() }));',
+      'const { isContextManagementEnabledForMessages, isContextManagementEnabledForResponses } = await import("./src/lib/config"); console.log(JSON.stringify({ messages: isContextManagementEnabledForMessages(), responses: isContextManagementEnabledForResponses() }));',
     )
 
-    expect(JSON.parse(output)).toEqual({ enabled: false })
+    expect(JSON.parse(output)).toEqual({
+      messages: false,
+      responses: true,
+    })
   })
 
   test("adds model Responses API compact thresholds by default", () => {

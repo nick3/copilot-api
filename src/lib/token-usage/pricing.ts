@@ -65,6 +65,21 @@ const BUILTIN_PROVIDER_PRICING: Record<
       input: 5,
       output: 30,
     },
+    "gpt-5.6-sol": {
+      cachedInput: 0.5,
+      input: 5,
+      output: 30,
+    },
+    "gpt-5.6-terra": {
+      cachedInput: 0.25,
+      input: 2.5,
+      output: 15,
+    },
+    "gpt-5.6-luna": {
+      cachedInput: 0.1,
+      input: 1,
+      output: 6,
+    },
   },
   dashscope: {
     "glm-5.1": {

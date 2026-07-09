@@ -385,8 +385,12 @@ export type AdminConfig = {
   /** @deprecated */
   apiKey?: string
   anthropicApiKey?: string
-  /** @deprecated use useResponsesApiContextManagement */
+  /** @deprecated use contextManagement */
   responsesApiContextManagementModels?: Array<string>
+  contextManagement?: {
+    messages?: boolean
+    responses?: boolean
+  }
   modelReasoningEfforts?: Record<string, ReasoningEffort>
   modelResponsesApiCompactThresholds?: Record<string, number>
   modelAliases?: Record<string, ModelAliasSpec | string>
@@ -401,6 +405,7 @@ export type AdminConfig = {
   useResponsesApiWebSocket?: boolean
   useResponsesApiWebSearch?: boolean
   messageApiWebSearchModel?: string
+  /** @deprecated use contextManagement */
   useResponsesApiContextManagement?: boolean
   copilotUseLocalModels?: boolean
 }
@@ -764,6 +769,7 @@ const ADMIN_CONFIG_KEYS = new Set<keyof AdminConfig>([
   "apiKey",
   "anthropicApiKey",
   "responsesApiContextManagementModels",
+  "contextManagement",
   "modelReasoningEfforts",
   "modelResponsesApiCompactThresholds",
   "modelAliases",

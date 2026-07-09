@@ -67,7 +67,7 @@ Compared with routing everything through plain Chat Completions compatibility, t
 - **Custom Data Directory**: Change the default data directory (where tokens and config are stored) by setting `COPILOT_API_HOME` environment variable or using `--api-home=/path/to/dir` command line option.
 - **Multi-Provider Messages Proxy Routes**: Add global provider configs and call external Anthropic-compatible or OpenAI-compatible APIs via `/:provider/v1/messages` and `/:provider/v1/models`, or send `model: "provider/model"` to the top-level `/v1/messages` API.
 - **Accurate Claude Token Counting**: Optionally forward `/v1/messages/count_tokens` requests for Claude models to Anthropic's free token counting endpoint for exact counts instead of GPT tokenizer estimation.
-- **GPT Context Management**: Configurable context compaction for long-running GPT conversations via `responsesApiContextManagementModels`, reducing unnecessary premium requests when approaching token limits. See [Configuration](#configuration-configjson) for details.
+- **GPT Context Management**: Endpoint-specific Responses API context compaction via `contextManagement.messages` and `contextManagement.responses`, reducing unnecessary premium requests when approaching token limits. See [Configuration](#configuration-configjson) for details.
 
 ## Better Agent Semantics
 
@@ -363,7 +363,10 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
     },
     "smallModel": "gpt-5-mini",
     "accountAffinity": true,
-    "responsesApiContextManagementModels": [],
+    "contextManagement": {
+      "messages": true,
+      "responses": false
+    },
     "modelReasoningEfforts": {
       "gpt-5-mini": "low",
       "gpt-5.3-codex": "xhigh",
@@ -452,7 +455,10 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
       "gpt-5-mini": "<built-in exploration prompt>"
     },
     "smallModel": "gpt-5-mini",
-    "useResponsesApiContextManagement": true,
+    "contextManagement": {
+      "messages": true,
+      "responses": false
+    },
     "modelResponsesApiCompactThresholds": {
       "gpt-5.4": 217600,
       "gpt-5.5": 217600
@@ -487,13 +493,12 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
     - `contextCache` (optional): Explicit context cache control. When omitted, it defaults to `true` only for DashScope/Alibaba Cloud Model Studio OpenAI-compatible providers and to `false` for other upstreams. When enabled, it injects `cache_control: { "type": "ephemeral" }` on up to 4 content blocks using the DashScope Context Cache format. The cache breakpoint strategy matches opencode's main provider flow: the first 2 system messages plus the last 2 non-system messages. Marked string content is converted to text content part arrays for `system` / `user` / `assistant` / `tool` messages; existing array content is marked on the last part. Set this to `false` when the model already supports implicit caching, or when the upstream does not accept this explicit-cache extension field.
     - `supportPdf` (optional): Controls whether the model supports PDF/document content. Defaults to `false`; unsupported PDFs are converted to a text notice. Set it to `true` to send PDF/document blocks as OpenAI Chat Completions file parts.
     - `toolContentSupportType` (optional): Tool result content capabilities for that model, as an array of `array`, `image`, and `pdf`. Provider routes default to string-only tool content when omitted. If `supportPdf` is `true` but this list does not include `pdf`, file parts in tool results are moved to user role messages. This provider default does not change the Copilot main flow, which continues to support array + image and not PDF.
-- **responsesApiContextManagementModels:** Deprecated legacy list of GPT model IDs that should receive Responses API `context_management` compaction instructions. Prefer `useResponsesApiContextManagement`, which now defaults to `true`.
-- **useResponsesApiContextManagement:** When `true` (default), the proxy adds Responses API `context_management` compaction instructions. Set it to `false` to disable this globally. When enabled, the request includes `context_management` in the body and keeps only the latest compaction carrier on follow-up turns. This is especially useful for long-running tasks.
+- **contextManagement:** Controls whether the proxy adds Responses API `context_management` compaction instructions. `messages` applies when Anthropic-style `/v1/messages` requests are translated to Responses API, including `openai-responses` provider message routes, and defaults to `true`. `responses` applies to native `/v1/responses` traffic, including `provider/model` aliases and the built-in `codex` provider, and defaults to `false`. Enable `responses` only after checking that your client supports context management compaction. When enabled, the request includes `context_management` in the body and keeps only the latest compaction carrier on follow-up turns.
 - **modelResponsesApiCompactThresholds:** Per-model Responses API `compact_threshold` overrides used when the proxy adds `context_management`. These values take precedence over the fallback threshold from `resolveResponsesCompactThreshold` (`max_prompt_tokens * ratio`, or the default fallback). Defaults set `gpt-5.4` and `gpt-5.5` to `217600` (`272000 * 0.8`). Models not listed continue to use the normal fallback logic.
 - **smallModel:** Fallback model used for tool-less warmup messages, compact/background requests, and other short housekeeping turns (for example from Claude Code or OpenCode) to avoid spending premium requests; defaults to `gpt-5-mini`. If original names are blocked and this points to an aliased target, it resolves to the preferred alias.
 - **accountAffinity:** Enable sticky account routing based on session identity. When enabled, requests from the same session for the same model are routed to the account that last handled them successfully. Applies to both free and premium models. Defaults to `true`. Set to `false` to use sequential routing for all models.
 - **apiKey (deprecated):** Legacy single-key field kept for migration compatibility. Prefer `auth.apiKeys`. When `auth.apiKeys` is empty, the server falls back to `COPILOT_API_KEY` and then `apiKey`.
-- **modelReasoningEfforts:** Per-model `reasoning.effort` sent to the Responses API. Allowed values are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. If a model is not explicitly configured, most models omit a default effort while GPT-5.3+ models fall back to `xhigh`. Alias keys and alias targets are both considered when resolving the effective effort.
+- **modelReasoningEfforts:** Per-model reasoning effort applied to `/v1/messages` and `/v1/responses` requests. When routed to the Copilot native Messages API it sets `output_config.effort`; when translated to the Responses API or sent through native Responses it sets `reasoning.effort`. Allowed values are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. If a model is not explicitly configured, most models omit a default effort while GPT-5.3+ models fall back to `xhigh`. Alias keys and alias targets are both considered when resolving the effective effort.
 - **modelAliases:** Map of `alias -> { target, allowOriginal? }` (legacy string values are still accepted). Alias keys are normalized (trim + lowercase) and must be non-empty; aliases cannot map to themselves (case-insensitive), and conflicting normalized aliases are rejected. `allowOriginal` overrides the global default per alias. If multiple aliases map to the same target, original names are allowed when any alias sets `allowOriginal: true` (allow-wins). Admin UI/API rejects blocked keys (`__proto__`, `constructor`, `prototype`). Aliases can be used in downstream requests, and targets may be configured `provider/model` aliases for top-level `/v1/messages` and `/v1/messages/count_tokens` routing.
 - **allowOriginalModelNamesForAliases:** Global default for aliases that omit `allowOriginal`. When `false` (default), targets are blocked unless an alias explicitly allows them; when `true`, targets are allowed unless all aliases explicitly block them.
 - **forceAgent:** When `true`, `POST /v1/responses` treats a request as agent-initiated if **any** input item has `role: "assistant"`. When `false` (default), only the **last** input item is checked.

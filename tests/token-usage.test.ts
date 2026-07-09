@@ -322,6 +322,51 @@ describe("token usage storage", () => {
     expect(page.items[0]?.total_tokens).toBe(25)
   })
 
+  test("calculates built-in Codex GPT-5.6 prices with cached input discount", async () => {
+    const expectedCosts = [
+      { model: "gpt-5.6-sol", totalCostNanos: 96_000_000 },
+      { model: "gpt-5.6-terra", totalCostNanos: 48_000_000 },
+      { model: "gpt-5.6-luna", totalCostNanos: 19_200_000 },
+    ]
+
+    for (const { model } of expectedCosts) {
+      recordTokenUsageEvent({
+        cache_read_input_tokens: 2_000,
+        endpoint: "responses",
+        input_tokens: 1_000,
+        model,
+        output_tokens: 3_000,
+        providerName: "codex",
+        source: "provider",
+      })
+    }
+
+    const page = await fetchEventsPage(10)
+    const costsByModel = new Map(
+      page.items.map((item) => [item.model, item.cost]),
+    )
+
+    for (const { model, totalCostNanos } of expectedCosts) {
+      const cost = costsByModel.get(model)
+      expect(cost?.currency).toBe("USD")
+      expect(cost?.source).toBe("builtin")
+      expect(cost?.total_cost_nanos).toBe(totalCostNanos)
+    }
+
+    const response = await createTokenUsageApp().request(
+      "/token-usage?period=day",
+    )
+    expect(response.status).toBe(200)
+    const summary = (await response.json()) as TokenUsageSummary
+    expect(summary.totals.costs).toEqual([
+      {
+        amount: 0.1632,
+        currency: "USD",
+        total_cost_nanos: 163_200_000,
+      },
+    ])
+  })
+
   test("only falls back to interaction id when no real session id exists", async () => {
     const recordWithFallback = createCopilotTokenUsageRecorder({
       endpoint: "responses",

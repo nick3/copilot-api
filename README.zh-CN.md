@@ -72,7 +72,7 @@
 - **自定义数据目录**：可通过环境变量 `COPILOT_API_HOME` 或命令行参数 `--api-home=/path/to/dir` 修改默认数据目录（存放 token 和配置）。
 - **多 Provider Messages 代理路由**：可以添加全局 provider 配置，并通过 `/:provider/v1/messages` 与 `/:provider/v1/models` 调用外部 Anthropic 或 OpenAI 兼容 API，也可以把 `model` 写成 `"provider/model"` 后直接发到顶层 `/v1/messages`。
 - **精确的 Claude Token 计数**：可以选择将 Claude 模型的 `/v1/messages/count_tokens` 请求转发到 Anthropic 的免费 token counting 端点，以获得精确计数，而不是依赖 GPT tokenizer 估算。
-- **GPT 上下文管理**：可通过 `responsesApiContextManagementModels` 为长上下文 GPT 对话启用可配置的上下文压缩，在接近 token 限制时减少不必要的 Premium 请求。详见 [配置](#configuration-configjson)。
+- **GPT 上下文管理**：可通过 `contextManagement.messages` 和 `contextManagement.responses` 按端点启用 Responses API 上下文压缩，在接近 token 限制时减少不必要的 Premium 请求。详见 [配置](#configuration-configjson)。
 
 ## 更好的 Agent 语义
 
@@ -372,7 +372,10 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
     },
     "smallModel": "gpt-5-mini",
     "accountAffinity": true,
-    "responsesApiContextManagementModels": [],
+    "contextManagement": {
+      "messages": true,
+      "responses": false
+    },
     "modelReasoningEfforts": {
       "gpt-5-mini": "low",
       "gpt-5.3-codex": "xhigh",
@@ -461,7 +464,10 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
       "gpt-5-mini": "<built-in exploration prompt>"
     },
     "smallModel": "gpt-5-mini",
-    "useResponsesApiContextManagement": true,
+    "contextManagement": {
+      "messages": true,
+      "responses": false
+    },
     "modelResponsesApiCompactThresholds": {
       "gpt-5.4": 217600,
       "gpt-5.5": 217600
@@ -496,13 +502,12 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
     - `contextCache`：可选，显式 context cache 控制。省略时仅 DashScope/阿里云百炼 OpenAI 兼容 provider 默认 `true`，其他上游默认 `false`。启用后会按 DashScope Context Cache 格式，在最多 4 个 content block 上注入 `cache_control: { "type": "ephemeral" }`。缓存断点策略与 opencode 主链路保持一致：前 2 条 system 消息 + 最后 2 条非 system 消息。标记字符串 content 时会把 `system` / `user` / `assistant` / `tool` 消息转换为 text content part 数组；已有数组 content 则标记最后一个 part。如果模型本身已经支持隐式缓存，或上游不支持该显式缓存扩展字段，可在模型配置中设为 `false`。
     - `supportPdf`：可选，控制该模型是否支持 PDF/document content。默认 `false`，不支持时会把 PDF 转成提示文本；设为 `true` 时会把 PDF/document 转成 OpenAI Chat Completions 的 file part。
     - `toolContentSupportType`：可选，配置该模型的 tool result content 支持能力，值为 `array`、`image`、`pdf` 的数组。provider 侧未配置时默认只发送 string tool content。若 `supportPdf` 为 `true` 但这里不包含 `pdf`，tool result 里的 file part 会被转成 user role 消息。Copilot 主链路不使用这个 provider 默认，仍按 array + image 且不支持 PDF 的能力处理。
-- **responsesApiContextManagementModels：** 已弃用的旧配置，用于列出需要启用 Responses API `context_management` 压缩指令的 GPT 模型 ID。请优先使用 `useResponsesApiContextManagement`，该配置现在默认开启。
-- **useResponsesApiContextManagement：** 当为 `true`（默认）时，代理会为 Responses API 附加 `context_management` 压缩指令。如需全局关闭，可设为 `false`。启用后，请求体会带上 `context_management`，并在后续轮次中仅保留最新的压缩承载内容，因此特别适合长任务场景。
+- **contextManagement：** 控制代理是否为 Responses API 附加 `context_management` 压缩指令。`messages` 作用于被翻译成 Responses API 的 Anthropic 风格 `/v1/messages` 请求，包括 `openai-responses` provider 的 Messages 路由，默认值为 `true`。`responses` 作用于 native `/v1/responses` 流量，包括 `provider/model` 别名和内置 `codex` provider，默认值为 `false`。只有在确认客户端支持 context management compaction 后，才建议在 Responses API 下启用 `responses`。启用后，请求体会带上 `context_management`，并在后续轮次中仅保留最新的压缩承载内容。
 - **modelResponsesApiCompactThresholds：** 按模型覆盖 Responses API 的 `compact_threshold`，仅在代理自动附加 `context_management` 时使用。它的优先级高于 `resolveResponsesCompactThreshold` 基于 `max_prompt_tokens * ratio` 的兜底阈值。默认将 `gpt-5.4` 和 `gpt-5.5` 设为 `217600`（`272000 * 0.8`）。未列出的模型继续使用原有兜底逻辑。
 - **smallModel：** 用于无工具预热消息、compact/background 请求以及其他短小维护型轮次（例如 Claude Code 或 OpenCode 发出的 housekeeping 请求）的回退模型，用来避免消耗 premium requests；默认是 `gpt-5-mini`。如果原始模型名被屏蔽，而这里指向的是某个别名目标模型，则会解析为首选别名。
 - **accountAffinity：** 是否根据 session 标识启用粘性账号路由。开启后，同一 session 针对同一模型的请求会优先路由到上次成功处理它的账号。该策略同时适用于免费模型和付费模型。默认值为 `true`。设为 `false` 则所有模型都改为顺序路由。
 - **apiKey（已弃用）：** 兼容迁移的旧单 key 字段。优先使用 `auth.apiKeys`。当 `auth.apiKeys` 为空时，服务端会回退到 `COPILOT_API_KEY`，再回退到 `apiKey`。
-- **modelReasoningEfforts：** 按模型配置发送到 Responses API 的 `reasoning.effort`。可选值包括 `none`、`minimal`、`low`、`medium`、`high`、`xhigh` 和 `max`。若某模型未显式配置，大多数模型默认不发送 effort；GPT-5.3+ 模型会回退为 `xhigh`。解析有效 effort 时会同时考虑别名 key 和别名目标。
+- **modelReasoningEfforts：** 按模型配置应用于 `/v1/messages` 与 `/v1/responses` 请求的推理强度。当请求走 Copilot 原生 Messages API 时设置 `output_config.effort`；当请求被翻译为 Responses API 或通过 native Responses 发送时设置 `reasoning.effort`。可选值包括 `none`、`minimal`、`low`、`medium`、`high`、`xhigh` 和 `max`。若某模型未显式配置，大多数模型默认不发送 effort；GPT-5.3+ 模型会回退为 `xhigh`。解析有效 effort 时会同时考虑别名 key 和别名目标。
 - **modelAliases：** `alias -> { target, allowOriginal? }` 的映射（也仍然接受旧的字符串写法）。别名 key 会先做标准化（trim + lowercase），且不能为空；别名不能映射回自己（大小写不敏感），冲突的标准化别名会被拒绝。`allowOriginal` 可为单个别名覆盖全局默认值。如果多个别名映射到同一个 target，只要其中任意一个设置了 `allowOriginal: true`，原始模型名就会被允许（allow-wins）。Admin UI/API 会拒绝被屏蔽的键（`__proto__`、`constructor`、`prototype`）。下游请求可以直接使用这些别名，target 也可以是 `provider/model` 形式，用于顶层 `/v1/messages` 与 `/v1/messages/count_tokens` 路由。
 - **allowOriginalModelNamesForAliases：** 对未显式设置 `allowOriginal` 的别名所采用的全局默认值。当其为 `false`（默认）时，target 原名默认被屏蔽，除非某个别名显式允许；当其为 `true` 时，target 原名默认可用，除非所有别名都显式阻止。
 - **forceAgent：** 当为 `true` 时，只要 `POST /v1/responses` 的任一 input item 带有 `role: "assistant"`，就会把请求视为由 agent 发起；当为 `false`（默认）时，只检查最后一个 input item。
