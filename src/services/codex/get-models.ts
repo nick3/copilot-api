@@ -1,4 +1,8 @@
 import type { Model, ModelsResponse } from "~/services/copilot/get-models"
+import {
+  buildCodexRequestHeaders,
+  CODEX_API_BASE_URL,
+} from "~/services/codex/create-responses"
 
 interface CodexModelDefinition {
   contextWindow: number
@@ -38,27 +42,55 @@ const CODEX_MODELS: Array<CodexModelDefinition> = [
     name: "GPT-5.5",
   },
   {
-    contextWindow: 272_000,
+    contextWindow: 372_000,
     id: "gpt-5.6-sol",
     input: ["text", "image"],
     maxTokens: 128_000,
     name: "GPT-5.6 Sol",
   },
   {
-    contextWindow: 272_000,
+    contextWindow: 372_000,
     id: "gpt-5.6-terra",
     input: ["text", "image"],
     maxTokens: 128_000,
     name: "GPT-5.6 Terra",
   },
   {
-    contextWindow: 272_000,
+    contextWindow: 372_000,
     id: "gpt-5.6-luna",
     input: ["text", "image"],
     maxTokens: 128_000,
     name: "GPT-5.6 Luna",
   },
 ]
+
+export function resolveCodexModelsUrl(
+  requestUrl: string,
+  baseUrl: string = CODEX_API_BASE_URL,
+): string {
+  const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/u, "")
+  const codexBaseUrl = normalizedBaseUrl || CODEX_API_BASE_URL
+  const modelsUrl = `${codexBaseUrl.replace(/\/codex(?:\/models)?$/u, "")}/codex/models`
+  const upstreamUrl = new URL(modelsUrl)
+  upstreamUrl.search = new URL(requestUrl, "http://localhost").search
+  return upstreamUrl.toString()
+}
+
+export async function forwardCodexModels(
+  requestUrl: string,
+  requestHeaders: Headers,
+  baseUrl: string = CODEX_API_BASE_URL,
+): Promise<Response> {
+  const headers = buildCodexRequestHeaders(requestHeaders)
+  if (!headers.has("accept")) {
+    headers.set("accept", "application/json")
+  }
+
+  return await fetch(resolveCodexModelsUrl(requestUrl, baseUrl), {
+    method: "GET",
+    headers,
+  })
+}
 
 function normalizeCodexModel(model: CodexModelDefinition): Model {
   const supportsVision = model.input.includes("image")

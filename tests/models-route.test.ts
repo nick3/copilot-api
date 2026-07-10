@@ -23,12 +23,15 @@ await mock.module("~/lib/token", () => ({
 }))
 
 const { accountsManager } = await import("../src/lib/accounts-manager")
+const { state } = await import("../src/lib/state")
 const { adminApiRoutes } = await import("../src/routes/admin-api/route")
 const { modelRoutes } = await import("../src/routes/models/route")
 
 const originalFetch = globalThis.fetch
 const originalGetFirstAccountModels =
   accountsManager.getFirstAccountModels.bind(accountsManager)
+const originalCodexAccessToken = state.codexAccessToken
+const originalCodexAccountId = state.codexAccountId
 
 const createProviderConfig = (
   name: string,
@@ -72,6 +75,21 @@ const fetchMock = mock((url: string | URL | Request, _init?: RequestInit) => {
 
   if (requestUrl === "https://bad.example/v1/models") {
     return Promise.resolve(new Response("upstream failed", { status: 502 }))
+  }
+
+  if (
+    requestUrl
+    === "https://chatgpt.com/backend-api/codex/models?simulate=rate-limit"
+  ) {
+    return Promise.resolve(
+      Response.json(
+        { error: { message: "rate limited" } },
+        {
+          status: 429,
+          headers: { "x-request-id": "codex-request-123" },
+        },
+      ),
+    )
   }
 
   const providerModelIds: Record<string, string> = {
@@ -118,6 +136,8 @@ beforeEach(() => {
 afterEach(() => {
   ;(globalThis as unknown as { fetch: typeof fetch }).fetch = originalFetch
   accountsManager.getFirstAccountModels = originalGetFirstAccountModels
+  state.codexAccessToken = originalCodexAccessToken
+  state.codexAccountId = originalCodexAccountId
 })
 
 describe("model routes", () => {
@@ -197,6 +217,86 @@ describe("model routes", () => {
     expect(body.data.map((model) => model.id)).toContain("codex/gpt-5.4")
     expect(body.data.map((model) => model.id)).toContain("codex/gpt-5.6-sol")
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  test("proxies remote models for Codex clients with loaded credentials", async () => {
+    providerConfigs = {
+      codex: {
+        apiKey: "configured-token",
+        authType: "oauth2",
+        baseUrl: "https://chatgpt.com/backend-api",
+        name: "codex",
+        type: "openai-responses",
+      },
+    }
+    state.codexAccessToken = "loaded-token"
+    state.codexAccountId = "loaded-account"
+
+    const response = await createApp().request(
+      "/v1/models?client_version=1.2.3",
+      {
+        headers: {
+          authorization: "Bearer client-token",
+          "chatgpt-account-id": "client-account",
+          "user-agent": "Codex/1.2.3",
+        },
+      },
+    )
+
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as { data: Array<{ id: string }> }
+    expect(body.data.map((model) => model.id)).toEqual(["qwen-plus", ""])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://chatgpt.com/backend-api/codex/models?client_version=1.2.3",
+    )
+
+    const requestInit = fetchMock.mock.calls[0]?.[1]
+    const upstreamHeaders = new Headers(requestInit?.headers)
+    expect(requestInit?.method).toBe("GET")
+    expect(upstreamHeaders.get("authorization")).toBe("Bearer loaded-token")
+    expect(upstreamHeaders.get("chatgpt-account-id")).toBe("loaded-account")
+    expect(upstreamHeaders.get("user-agent")).toBe("Codex/1.2.3")
+  })
+
+  test("returns not found for Codex clients when the provider is unavailable", async () => {
+    const response = await createApp().request("/v1/models", {
+      headers: { "user-agent": "codex/1.2.3" },
+    })
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({
+      error: {
+        message: "Provider 'codex' not found or disabled",
+        type: "invalid_request_error",
+      },
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  test("preserves remote Codex model error responses", async () => {
+    providerConfigs = {
+      codex: {
+        apiKey: "configured-token",
+        authType: "oauth2",
+        baseUrl: "https://chatgpt.com/backend-api",
+        name: "codex",
+        type: "openai-responses",
+      },
+    }
+    state.codexAccessToken = "loaded-token"
+    state.codexAccountId = "loaded-account"
+
+    const response = await createApp().request(
+      "/v1/models?simulate=rate-limit",
+      { headers: { "user-agent": "codex/1.2.3" } },
+    )
+
+    expect(response.status).toBe(429)
+    expect(response.headers.get("x-request-id")).toBe("codex-request-123")
+    expect(await response.json()).toEqual({
+      error: { message: "rate limited" },
+    })
   })
 
   test("admin aggregated models mirror public runtime aggregation", async () => {

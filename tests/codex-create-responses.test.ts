@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 
 import { requestContext } from "~/lib/request-context"
 import { state } from "~/lib/state"
-import { getModels } from "~/services/codex/get-models"
+import { getModels, resolveCodexModelsUrl } from "~/services/codex/get-models"
 import {
   buildCodexResponsesWebSocketPayload,
   buildCodexResponsesWebSocketUrl,
@@ -35,6 +35,28 @@ describe("codex api helpers", () => {
         "https://chatgpt.com/backend-api/codex/responses",
       ),
     ).toBe("https://chatgpt.com/backend-api/codex/responses")
+  })
+
+  test("resolves the ChatGPT Codex models path and preserves query parameters", () => {
+    expect(
+      resolveCodexModelsUrl(
+        "http://localhost/v1/models?client_version=1.2.3&limit=20",
+      ),
+    ).toBe(
+      "https://chatgpt.com/backend-api/codex/models?client_version=1.2.3&limit=20",
+    )
+    expect(
+      resolveCodexModelsUrl(
+        "http://localhost/v1/models",
+        "https://chatgpt.com/backend-api/codex",
+      ),
+    ).toBe("https://chatgpt.com/backend-api/codex/models")
+    expect(
+      resolveCodexModelsUrl(
+        "http://localhost/v1/models",
+        "https://chatgpt.com/backend-api/codex/models/",
+      ),
+    ).toBe("https://chatgpt.com/backend-api/codex/models")
   })
 
   test("builds the ChatGPT Codex websocket responses path", () => {
@@ -142,7 +164,7 @@ describe("codex api helpers", () => {
     expect(headers.get("chatgpt-account-id")).toBe("codex-account")
     expect(headers.get("accept")).toBe("application/json")
     expect(headers.get("content-type")).toBe("application/json")
-    expect(headers.get("openai-beta")).toBe("responses=experimental")
+    expect(headers.get("openai-beta")).toBeNull()
     expect(headers.get("originator")).toBe("copilot-api")
     expect(headers.get("user-agent")).toBe("copilot-api")
   })
@@ -171,6 +193,7 @@ describe("codex api helpers", () => {
 
     expect(headers.get("accept")).toBe("text/event-stream")
     expect(headers.get("cf-ray")).toBeNull()
+    expect(headers.get("openai-beta")).toBe("responses_websockets=2026-02-06")
     expect(headers.get("originator")).toBe("opencode")
     expect(headers.get("session-id")).toBe("opencode-session")
   })
@@ -201,6 +224,9 @@ describe("codex api helpers", () => {
     expect(request.headers.accept).toBeUndefined()
     expect(request.headers["content-type"]).toBeUndefined()
     expect(request.headers.authorization).toBe("Bearer codex-token")
+    expect(request.headers["openai-beta"]).toBe(
+      "responses_websockets=2026-02-06",
+    )
   })
 
   test("returns the static codex model catalog", () => {
@@ -220,6 +246,14 @@ describe("codex api helpers", () => {
       models.data.every(
         (model) => !model.supported_endpoints?.includes("/v1/embeddings"),
       ),
+    ).toBe(true)
+    expect(
+      models.data
+        .filter((model) => model.id.startsWith("gpt-5.6-"))
+        .every(
+          (model) =>
+            model.capabilities.limits.max_context_window_tokens === 372_000,
+        ),
     ).toBe(true)
   })
 })
