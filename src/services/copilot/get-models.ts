@@ -110,11 +110,18 @@ interface ModelCapabilities {
   type: string
 }
 
-interface ModelTokenPrices {
-  batch_size?: number
+export interface ModelTokenPriceTier {
   cache_price?: number
+  cache_write_price?: number
+  context_max?: number
   input_price?: number
   output_price?: number
+}
+
+export interface ModelTokenPrices extends ModelTokenPriceTier {
+  batch_size?: number
+  default?: ModelTokenPriceTier
+  long_context?: ModelTokenPriceTier
 }
 
 interface ModelBilling {

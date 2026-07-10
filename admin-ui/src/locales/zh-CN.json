@@ -328,6 +328,9 @@
       "input": "输入",
       "cache": "缓存",
       "output": "输出",
+      "defaultTier": "默认",
+      "longContextTier": "长上下文 > {{tokenCount}} tokens",
+      "longContextTierNoThreshold": "长上下文",
       "tooltip": "此模型每 100 万 tokens 消耗的 AI Credits。",
       "batchSize": "计价批量：{{tokenCount}} tokens"
     },

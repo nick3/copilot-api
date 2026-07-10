@@ -13,7 +13,10 @@ import {
   refreshAllModels,
 } from "@/lib/admin-api"
 import { fmtNum } from "@/lib/format"
-import { isBillableModel } from "@/lib/model-billing"
+import {
+  getModelAiCreditsPriceTiers,
+  isBillableModel,
+} from "@/lib/model-billing"
 import { i18n } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -136,21 +139,13 @@ function makeFeaturesSortKey(
   return out.length > 0 ? out.join("|") : null
 }
 
-const AI_CREDITS_PRICE_SCALE = 1_000_000_000
-
-function toAiCreditsPrice(price?: number): number | undefined {
-  if (price == null || !Number.isFinite(price)) return undefined
-  return price / AI_CREDITS_PRICE_SCALE
-}
-
 function getInputCreditsPrice(model: AdminModelDetailsItem): number | undefined {
-  return toAiCreditsPrice(model.billing?.token_prices?.input_price)
+  return getModelAiCreditsPriceTiers(model.billing?.token_prices)[0]?.input
 }
 
 function formatAiCreditsPrice(price?: number): string {
-  const credits = toAiCreditsPrice(price)
-  if (credits == null) return "—"
-  return fmtNum(credits)
+  if (price == null || !Number.isFinite(price)) return "—"
+  return fmtNum(price)
 }
 
 function SortableTableHead({
@@ -390,46 +385,75 @@ function AliasesCell({
   )
 }
 
-function BillingCell({
+export function ModelBillingCell({
   billing,
 }: {
   billing: AdminModelDetailsItem["billing"]
 }): React.JSX.Element {
   const { t } = useTranslation()
   const prices = billing?.token_prices
+  const tiers = getModelAiCreditsPriceTiers(prices)
 
-  if (prices) {
-    const entries = [
-      {
-        key: "input",
-        label: t("modelsPage.billing.input"),
-        value: formatAiCreditsPrice(prices.input_price),
-      },
-      {
-        key: "cache",
-        label: t("modelsPage.billing.cache"),
-        value: formatAiCreditsPrice(prices.cache_price),
-      },
-      {
-        key: "output",
-        label: t("modelsPage.billing.output"),
-        value: formatAiCreditsPrice(prices.output_price),
-      },
-    ]
+  if (prices && tiers.length > 0) {
+    const defaultContextMax = tiers.find(
+      (tier) => tier.key === "default",
+    )?.contextMax
+    const showTierLabels =
+      tiers.length > 1 || tiers[0]?.key === "long_context"
 
     return (
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
-            className="grid cursor-help grid-cols-[auto_auto] gap-x-2 gap-y-0.5 text-left text-xs tabular-nums focus-visible:outline-none"
+            className="flex cursor-help flex-col gap-1.5 text-left text-xs tabular-nums focus-visible:outline-none"
           >
-            {entries.map((entry) => (
-              <span key={`${entry.key}-label`} className="contents">
-                <span className="text-muted-foreground">{entry.label}</span>
-                <span>{entry.value}</span>
-              </span>
-            ))}
+            {tiers.map((tier) => {
+              const entries = [
+                {
+                  key: "input",
+                  label: t("modelsPage.billing.input"),
+                  value: formatAiCreditsPrice(tier.input),
+                },
+                {
+                  key: "cache",
+                  label: t("modelsPage.billing.cache"),
+                  value: formatAiCreditsPrice(tier.cache),
+                },
+                {
+                  key: "output",
+                  label: t("modelsPage.billing.output"),
+                  value: formatAiCreditsPrice(tier.output),
+                },
+              ]
+              const tierLabel =
+                tier.key === "default" ?
+                  t("modelsPage.billing.defaultTier")
+                : defaultContextMax != null ?
+                  t("modelsPage.billing.longContextTier", {
+                    tokenCount: fmtNum(defaultContextMax),
+                  })
+                : t("modelsPage.billing.longContextTierNoThreshold")
+
+              return (
+                <span
+                  key={tier.key}
+                  className="grid grid-cols-[auto_auto] gap-x-2 gap-y-0.5"
+                >
+                  {showTierLabels ? (
+                    <span className="text-muted-foreground col-span-2 font-medium">
+                      {tierLabel}
+                    </span>
+                  ) : null}
+                  {entries.map((entry) => (
+                    <span key={entry.key} className="contents">
+                      <span className="text-muted-foreground">{entry.label}</span>
+                      <span>{entry.value}</span>
+                    </span>
+                  ))}
+                </span>
+              )
+            })}
           </button>
         </TooltipTrigger>
         <TooltipContent side="bottom" className="max-w-72">
@@ -983,7 +1007,7 @@ export function ModelsPage(): React.JSX.Element {
                         <FeatureBadges supports={model.capabilities.supports} />
                       </TableCell>
                       <TableCell>
-                        <BillingCell billing={model.billing} />
+                        <ModelBillingCell billing={model.billing} />
                       </TableCell>
                     </motion.tr>
                   ))}

@@ -114,6 +114,33 @@ test("normalizeAdminModelDetailsItem treats token prices as billable", () => {
   expect(normalized.billing?.tokenBasedBilling).toBe(true)
 })
 
+test("normalizeAdminModelDetailsItem treats tiered token prices as billable", () => {
+  const normalized = normalizeAdminModelDetailsItem({
+    id: "gpt-5-tiered-token-priced",
+    name: "gpt-5-tiered-token-priced",
+    preview: false,
+    billing: {
+      is_premium: false,
+      token_prices: {
+        batch_size: 1_000_000,
+        default: {
+          cache_price: 50,
+          input_price: 500,
+          output_price: 3_000,
+        },
+      },
+    },
+    supported_endpoints: ["/responses"],
+    capabilities: {
+      limits: {},
+      supports: {},
+    },
+    aliases: [],
+  })
+
+  expect(normalized.billing?.tokenBasedBilling).toBe(true)
+})
+
 test("normalizeAdminModelDetailsItem ignores empty token prices", () => {
   const normalized = normalizeAdminModelDetailsItem({
     id: "gpt-5-empty-prices",

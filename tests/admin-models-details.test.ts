@@ -135,13 +135,32 @@ test("GET /api/admin/models/details returns model details with aliases", async (
               is_premium: true,
               token_prices: {
                 batch_size: 1_000_000,
+                default: {
+                  cache_price: 50,
+                  cache_write_price: 625,
+                  context_max: 200_000,
+                  input_price: 500,
+                  output_price: 2_500,
+                },
+                long_context: {
+                  cache_price: 100,
+                  context_max: 936_000,
+                  input_price: 1_000,
+                  output_price: 4_500,
+                },
+              },
+            },
+          }),
+          buildModel("gpt-4", {
+            billing: {
+              token_prices: {
+                batch_size: 1_000_000,
                 cache_price: 50_000_000_000,
                 input_price: 500_000_000_000,
                 output_price: 3_000_000_000_000,
               },
             },
           }),
-          buildModel("gpt-4"),
         ],
         async () => {
           const { server } = await import("../src/server")
@@ -161,7 +180,14 @@ test("GET /api/admin/models/details returns model details with aliases", async (
                 is_premium?: boolean
                 multiplier?: number
                 token_based?: boolean
-                token_prices?: Record<string, number>
+                token_prices?: {
+                  batch_size?: number
+                  cache_price?: number
+                  default?: Record<string, number>
+                  input_price?: number
+                  long_context?: Record<string, number>
+                  output_price?: number
+                }
               }
               capabilities: {
                 limits: {
@@ -180,6 +206,15 @@ test("GET /api/admin/models/details returns model details with aliases", async (
           // Stable ordering by id.
           expect(body.items.map((m) => m.id)).toEqual(["gpt-4", "gpt-5-mini"])
 
+          const legacy = body.items.find((m) => m.id === "gpt-4")
+          expect(legacy?.billing?.token_based).toBe(true)
+          expect(legacy?.billing?.token_prices).toEqual({
+            batch_size: 1_000_000,
+            cache_price: 50_000_000_000,
+            input_price: 500_000_000_000,
+            output_price: 3_000_000_000_000,
+          })
+
           const mini = body.items.find((m) => m.id === "gpt-5-mini")
           expect(mini).toBeTruthy()
           expect(mini?.aliases).toEqual(["fast"])
@@ -192,9 +227,19 @@ test("GET /api/admin/models/details returns model details with aliases", async (
           expect(mini?.billing?.token_based).toBe(true)
           expect(mini?.billing?.token_prices).toEqual({
             batch_size: 1_000_000,
-            cache_price: 50_000_000_000,
-            input_price: 500_000_000_000,
-            output_price: 3_000_000_000_000,
+            default: {
+              cache_price: 50,
+              cache_write_price: 625,
+              context_max: 200_000,
+              input_price: 500,
+              output_price: 2_500,
+            },
+            long_context: {
+              cache_price: 100,
+              context_max: 936_000,
+              input_price: 1_000,
+              output_price: 4_500,
+            },
           })
           expect(mini?.capabilities.limits.max_context_window_tokens).toBe(
             128_000,
@@ -235,6 +280,59 @@ test("GET /api/admin/models/details de-duplicates duplicate ids", async () => {
 
           expect(body.items).toHaveLength(2)
           expect(body.items.map((m) => m.id)).toEqual(["gpt-4", "gpt-5-mini"])
+        },
+      )
+    },
+  )
+})
+
+test("GET /api/admin/models/details filters malformed token prices", async () => {
+  await withConfig(
+    {
+      modelAliases: {},
+      allowOriginalModelNamesForAliases: true,
+      smallModel: "gpt-5-mini",
+    },
+    async () => {
+      await withMockedModels(
+        [
+          buildModel("gpt-5-mini", {
+            billing: {
+              token_prices: {
+                batch_size: 1_000_000,
+                default: {
+                  cache_price: Number.NaN,
+                  cache_write_price: 0,
+                  context_max: "invalid",
+                  input_price: "500",
+                  output_price: Number.POSITIVE_INFINITY,
+                },
+              },
+            } as unknown as NonNullable<Model["billing"]>,
+          }),
+        ],
+        async () => {
+          const { server } = await import("../src/server")
+          const res = await server.fetch(
+            new Request("http://localhost/api/admin/models/details"),
+          )
+
+          expect(res.status).toBe(200)
+
+          const body = (await res.json()) as {
+            items: Array<{
+              billing?: {
+                token_based?: boolean
+                token_prices?: unknown
+              }
+            }>
+          }
+
+          expect(body.items[0]?.billing?.token_based).toBe(true)
+          expect(body.items[0]?.billing?.token_prices).toEqual({
+            batch_size: 1_000_000,
+            default: { cache_write_price: 0 },
+          })
         },
       )
     },

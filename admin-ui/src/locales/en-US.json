@@ -328,6 +328,9 @@
       "input": "In",
       "cache": "Cache",
       "output": "Out",
+      "defaultTier": "Default",
+      "longContextTier": "Long context > {{tokenCount}} tokens",
+      "longContextTierNoThreshold": "Long context",
       "tooltip": "AI Credits charged per 1 million tokens for this model.",
       "batchSize": "Price batch: {{tokenCount}} tokens"
     },

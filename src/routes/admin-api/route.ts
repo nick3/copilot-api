@@ -34,6 +34,7 @@ import {
   type TokenUsagePricingTier,
   type ToolContentSupportType,
 } from "~/lib/config"
+import { hasTokenPrices } from "~/lib/model-billing"
 import { PATHS } from "~/lib/paths"
 import { updateQuotaRefreshSchedulerFromConfig } from "~/lib/quota-refresh-scheduler-runtime"
 import {
@@ -57,6 +58,10 @@ import {
   type TokenUsagePeriod,
 } from "~/lib/token-usage"
 import { isAccountType } from "~/lib/types/account"
+import type {
+  ModelTokenPriceTier,
+  ModelTokenPrices,
+} from "~/services/copilot/get-models"
 
 import { getAggregatedModelsResponse } from "../models/route"
 import { authSessionManager } from "./auth-sessions"
@@ -1850,13 +1855,6 @@ adminApiRoutes.get("/models/aggregated", async (c) => {
   }
 })
 
-type AdminModelTokenPrices = {
-  batch_size?: number
-  cache_price?: number
-  input_price?: number
-  output_price?: number
-}
-
 type AdminModelDetailsItem = {
   id: string
   name: string
@@ -1865,7 +1863,7 @@ type AdminModelDetailsItem = {
     is_premium?: boolean
     multiplier?: number
     token_based?: boolean
-    token_prices?: AdminModelTokenPrices
+    token_prices?: ModelTokenPrices
   }
   supported_endpoints?: Array<string>
   capabilities: {
@@ -1912,17 +1910,33 @@ function parseStringArray(value: unknown): Array<string> | undefined {
   return out.length > 0 ? out : undefined
 }
 
-function parseTokenPrices(value: unknown): AdminModelTokenPrices | undefined {
+function parseTokenPriceTier(value: unknown): ModelTokenPriceTier | undefined {
   if (!isPlainObject(value)) return undefined
 
-  const token_prices: AdminModelTokenPrices = {
-    batch_size: parseOptionalFiniteNumber(value.batch_size),
+  const tier: ModelTokenPriceTier = {
     cache_price: parseOptionalFiniteNumber(value.cache_price),
+    cache_write_price: parseOptionalFiniteNumber(value.cache_write_price),
+    context_max: parseOptionalFiniteNumber(value.context_max),
     input_price: parseOptionalFiniteNumber(value.input_price),
     output_price: parseOptionalFiniteNumber(value.output_price),
   }
 
-  return Object.values(token_prices).some((price) => price !== undefined) ?
+  return Object.values(tier).some((field) => field !== undefined) ?
+      tier
+    : undefined
+}
+
+function parseTokenPrices(value: unknown): ModelTokenPrices | undefined {
+  if (!isPlainObject(value)) return undefined
+
+  const token_prices: ModelTokenPrices = {
+    ...parseTokenPriceTier(value),
+    batch_size: parseOptionalFiniteNumber(value.batch_size),
+    default: parseTokenPriceTier(value.default),
+    long_context: parseTokenPriceTier(value.long_context),
+  }
+
+  return Object.values(token_prices).some((field) => field !== undefined) ?
       token_prices
     : undefined
 }
@@ -1933,7 +1947,7 @@ function parseBilling(value: unknown): AdminModelDetailsItem["billing"] {
   const multiplier = parseOptionalFiniteNumber(value.multiplier)
   const is_premium = toBooleanOrUndefined(value.is_premium)
   const token_prices = parseTokenPrices(value.token_prices)
-  const token_based = token_prices !== undefined ? true : undefined
+  const token_based = hasTokenPrices(token_prices) ? true : undefined
 
   if (
     multiplier === undefined

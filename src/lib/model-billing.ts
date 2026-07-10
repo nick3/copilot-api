@@ -1,17 +1,28 @@
-import type { Model } from "~/services/copilot/get-models"
+import type {
+  ModelTokenPriceTier,
+  ModelTokenPrices,
+} from "~/services/copilot/get-models"
 
-type ModelTokenPrices = NonNullable<Model["billing"]>["token_prices"]
+function hasTierPrices(tier: ModelTokenPriceTier | null | undefined): boolean {
+  return (
+    tier != null
+    && [
+      tier.cache_price,
+      tier.cache_write_price,
+      tier.input_price,
+      tier.output_price,
+    ].some((price) => typeof price === "number" && Number.isFinite(price))
+  )
+}
 
 export function hasTokenPrices(
   tokenPrices: ModelTokenPrices | null | undefined,
 ): boolean {
   return (
     tokenPrices != null
-    && [
-      tokenPrices.cache_price,
-      tokenPrices.input_price,
-      tokenPrices.output_price,
-    ].some((price) => typeof price === "number" && Number.isFinite(price))
+    && [tokenPrices, tokenPrices.default, tokenPrices.long_context].some(
+      hasTierPrices,
+    )
   )
 }
 

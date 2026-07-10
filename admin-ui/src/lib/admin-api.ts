@@ -1,4 +1,5 @@
 import { readAdminToken } from "@/lib/admin-token"
+import { hasAdminModelTokenPrices } from "@/lib/model-billing"
 
 import type { SSEEvent } from "./sse"
 
@@ -435,11 +436,18 @@ export type AggregatedModelsResponse = {
   has_more: boolean
 }
 
-export type AdminModelTokenPrices = {
-  batch_size?: number
+export type AdminModelTokenPriceTier = {
   cache_price?: number
+  cache_write_price?: number
+  context_max?: number
   input_price?: number
   output_price?: number
+}
+
+export type AdminModelTokenPrices = AdminModelTokenPriceTier & {
+  batch_size?: number
+  default?: AdminModelTokenPriceTier
+  long_context?: AdminModelTokenPriceTier
 }
 
 export type AdminModelDetailsItem = {
@@ -479,17 +487,12 @@ export type AdminModelsDetailsResponse = {
 function normalizeAdminModelBilling(
   billing: NonNullable<AdminModelDetailsItem["billing"]>,
 ): NonNullable<AdminModelDetailsItem["billing"]> {
-  const prices = billing.token_prices
-  const hasTokenPrice =
-    prices !== undefined &&
-    [prices.cache_price, prices.input_price, prices.output_price].some(
-      (price) => typeof price === "number" && Number.isFinite(price),
-    )
-
   return {
     ...billing,
     tokenBasedBilling:
-      billing.tokenBasedBilling ?? billing.token_based ?? (hasTokenPrice ? true : undefined),
+      billing.tokenBasedBilling
+      ?? billing.token_based
+      ?? (hasAdminModelTokenPrices(billing.token_prices) ? true : undefined),
   }
 }
 

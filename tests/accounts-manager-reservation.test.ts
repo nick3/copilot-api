@@ -249,6 +249,24 @@ test("selectAccountForRequest treats token-priced models as billable", async () 
   expect(account.premiumReserved).toBe(1)
 })
 
+test("getCostUnits treats tiered token-priced models as billable", () => {
+  const model = makeModel({
+    id: "gpt-5-tiered-token-priced",
+    billing: {
+      token_prices: {
+        batch_size: 1_000_000,
+        default: {
+          cache_price: 50,
+          input_price: 500,
+          output_price: 3_000,
+        },
+      },
+    },
+  })
+
+  expect(getCostUnits(model)).toBe(1)
+})
+
 test("selectAccountForRequest allows request with overagePermitted=true when quota exhausted", async () => {
   const model = makeModel({
     id: "gpt-5",
@@ -718,6 +736,36 @@ test("getAccountStatus includes runtime billing metadata in returned status", ()
   expect(statuses[0].overagePermitted).toBe(true)
   expect(statuses[0].tokenBasedBilling).toBe(true)
   expect(statuses[0].unlimited).toBe(false)
+})
+
+test("getAccountStatus detects zero-valued tiered token pricing", () => {
+  const model = makeModel({
+    id: "gpt-5-tiered-zero-price",
+    billing: {
+      token_prices: {
+        batch_size: 0,
+        default: {
+          cache_price: 0,
+          input_price: 0,
+          output_price: 0,
+        },
+      },
+    },
+  })
+
+  const account: AccountRuntime = {
+    id: "enterprise-tiered-user",
+    accountType: "enterprise",
+    addedAt: Date.now(),
+    githubToken: "ghp_test",
+    vsCodeVersion: "1.0.0",
+    models: makeModelsResponse([model]),
+  }
+
+  const manager = setupManagerWithAccount(account)
+  const statuses = manager.getAccountStatus()
+
+  expect(statuses[0].tokenBasedBilling).toBe(true)
 })
 
 test("getCostUnits ignores empty token prices", () => {
