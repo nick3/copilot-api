@@ -154,13 +154,6 @@ export function buildCodexResponsesHeaders(
     options.stream ? "text/event-stream" : "application/json",
   )
   setDefaultCodexHeader(headers, "content-type", "application/json")
-  if (options.stream) {
-    setDefaultCodexHeader(
-      headers,
-      "openai-beta",
-      "responses_websockets=2026-02-06",
-    )
-  }
   return headers
 }
 
@@ -188,7 +181,12 @@ export function resolveCodexResponsesTransport(
 export function buildCodexResponsesWebSocketHeaders(
   requestHeaders: Headers,
 ): Record<string, string> {
-  const headers = buildCodexResponsesHeaders(requestHeaders, { stream: true })
+  const headers = buildCodexResponsesHeaders(requestHeaders)
+  setDefaultCodexHeader(
+    headers,
+    "openai-beta",
+    "responses_websockets=2026-02-06",
+  )
   for (const headerName of STRIPPED_CODEX_WEBSOCKET_HEADERS) {
     headers.delete(headerName)
   }

@@ -193,7 +193,7 @@ describe("codex api helpers", () => {
 
     expect(headers.get("accept")).toBe("text/event-stream")
     expect(headers.get("cf-ray")).toBeNull()
-    expect(headers.get("openai-beta")).toBe("responses_websockets=2026-02-06")
+    expect(headers.get("openai-beta")).toBeNull()
     expect(headers.get("originator")).toBe("opencode")
     expect(headers.get("session-id")).toBe("opencode-session")
   })
