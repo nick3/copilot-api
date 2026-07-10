@@ -35,7 +35,7 @@ jobs:
         run: bun run typecheck:admin
 
       - name: Run tests
-        run: bun test
+        run: bun test --isolate
 
       - name: Build
         run: bun run build
