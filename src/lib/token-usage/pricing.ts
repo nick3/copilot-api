@@ -51,34 +51,100 @@ const BUILTIN_PROVIDER_PRICING: Record<
       output: 14,
     },
     "gpt-5.4": {
-      cachedInput: 0.25,
-      input: 2.5,
-      output: 15,
+      tiers: [
+        {
+          cachedInput: 0.25,
+          input: 2.5,
+          maxInputTokens: 272_000,
+          output: 15,
+        },
+        {
+          cachedInput: 0.5,
+          input: 5,
+          output: 22.5,
+        },
+      ],
     },
     "gpt-5.4-mini": {
-      cachedInput: 0.075,
-      input: 0.75,
-      output: 4.5,
+      tiers: [
+        {
+          cachedInput: 0.075,
+          input: 0.75,
+          maxInputTokens: 272_000,
+          output: 4.5,
+        },
+        {
+          cachedInput: 0.15,
+          input: 1.5,
+          output: 6.75,
+        },
+      ],
     },
     "gpt-5.5": {
-      cachedInput: 0.5,
-      input: 5,
-      output: 30,
+      tiers: [
+        {
+          cachedInput: 0.5,
+          input: 5,
+          maxInputTokens: 272_000,
+          output: 30,
+        },
+        {
+          cachedInput: 1,
+          input: 10,
+          output: 45,
+        },
+      ],
     },
     "gpt-5.6-sol": {
-      cachedInput: 0.5,
-      input: 5,
-      output: 30,
+      tiers: [
+        {
+          cacheCreationInput: 6.25,
+          cachedInput: 0.5,
+          input: 5,
+          maxInputTokens: 272_000,
+          output: 30,
+        },
+        {
+          cacheCreationInput: 12.5,
+          cachedInput: 1,
+          input: 10,
+          output: 45,
+        },
+      ],
     },
     "gpt-5.6-terra": {
-      cachedInput: 0.25,
-      input: 2.5,
-      output: 15,
+      tiers: [
+        {
+          cacheCreationInput: 3.125,
+          cachedInput: 0.25,
+          input: 2.5,
+          maxInputTokens: 272_000,
+          output: 15,
+        },
+        {
+          cacheCreationInput: 6.25,
+          cachedInput: 0.5,
+          input: 5,
+          output: 22.5,
+        },
+      ],
     },
     "gpt-5.6-luna": {
-      cachedInput: 0.1,
-      input: 1,
-      output: 6,
+      tiers: [
+        {
+          cacheCreationInput: 1.25,
+          cachedInput: 0.1,
+          input: 1,
+          maxInputTokens: 272_000,
+          output: 6,
+        },
+        {
+          cacheCreationInput: 2.5,
+          cachedInput: 0.2,
+          input: 2,
+          output: 9,
+        },
+      ],
     },
   },
   dashscope: {
@@ -398,7 +464,10 @@ function resolveCacheReadPrice(
     && input.cache_creation_input_tokens !== null
 
   if (hasCacheCreationSignal) {
-    return normalizePrice(pricing.explicitCachedInput)
+    const explicitPrice = normalizePrice(pricing.explicitCachedInput)
+    if (explicitPrice !== null) {
+      return explicitPrice
+    }
   }
 
   return normalizePrice(pricing.cachedInput)

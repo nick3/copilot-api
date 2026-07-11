@@ -15,6 +15,7 @@ import {
   createCopilotTokenUsageRecorder,
   mergeCopilotAiuUsage,
   normalizeOpenAIUsage,
+  normalizeResponsesUsage,
   recordTokenUsageEvent,
   type TokenUsageDailySummary,
   type TokenUsageEventsPage,
@@ -95,6 +96,46 @@ describe("token usage storage", () => {
       cache_creation_input_tokens: 20,
       cache_read_input_tokens: 12,
       input_tokens: 68,
+      output_tokens: 10,
+      total_tokens: 110,
+    })
+  })
+
+  test("normalizes Responses cache write usage details", () => {
+    expect(
+      normalizeResponsesUsage({
+        input_tokens: 100,
+        input_tokens_details: {
+          cached_tokens: 12,
+          cache_write_tokens: 20,
+        },
+        output_tokens: 10,
+        total_tokens: 110,
+      }),
+    ).toEqual({
+      cache_creation_input_tokens: 20,
+      cache_read_input_tokens: 12,
+      input_tokens: 68,
+      output_tokens: 10,
+      total_tokens: 110,
+    })
+  })
+
+  test("preserves a zero Responses cache write signal", () => {
+    expect(
+      normalizeResponsesUsage({
+        input_tokens: 100,
+        input_tokens_details: {
+          cached_tokens: 12,
+          cache_write_tokens: 0,
+        },
+        output_tokens: 10,
+        total_tokens: 110,
+      }),
+    ).toEqual({
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 12,
+      input_tokens: 88,
       output_tokens: 10,
       total_tokens: 110,
     })
@@ -365,6 +406,44 @@ describe("token usage storage", () => {
         total_cost_nanos: 163_200_000,
       },
     ])
+  })
+
+  test("uses long-context Codex pricing for cache reads and writes", async () => {
+    const expectedCosts = [
+      { model: "gpt-5.4", totalCostNanos: 1_388_500_000 },
+      { model: "gpt-5.4-mini", totalCostNanos: 416_550_000 },
+      { model: "gpt-5.5", totalCostNanos: 2_777_000_000 },
+      { model: "gpt-5.6-sol", totalCostNanos: 2_814_500_000 },
+      { model: "gpt-5.6-terra", totalCostNanos: 1_407_250_000 },
+      { model: "gpt-5.6-luna", totalCostNanos: 562_900_000 },
+    ]
+
+    for (const { model } of expectedCosts) {
+      recordTokenUsageEvent({
+        cache_creation_input_tokens: 3_000,
+        cache_read_input_tokens: 2_000,
+        endpoint: "responses",
+        input_tokens: 273_000,
+        model,
+        output_tokens: 1_000,
+        providerName: "codex",
+        source: "provider",
+      })
+    }
+
+    const page = await fetchEventsPage(10)
+    const costsByModel = new Map(
+      page.items.map((item) => [item.model, item.cost]),
+    )
+
+    for (const { model, totalCostNanos } of expectedCosts) {
+      expect(costsByModel.get(model)).toEqual({
+        amount: totalCostNanos / 1_000_000_000,
+        currency: "USD",
+        source: "builtin",
+        total_cost_nanos: totalCostNanos,
+      })
+    }
   })
 
   test("only falls back to interaction id when no real session id exists", async () => {

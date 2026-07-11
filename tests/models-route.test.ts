@@ -23,6 +23,7 @@ await mock.module("~/lib/token", () => ({
 }))
 
 const { accountsManager } = await import("../src/lib/accounts-manager")
+const { resetLoggerRuntimeForTests } = await import("../src/lib/logger")
 const { state } = await import("../src/lib/state")
 const { adminApiRoutes } = await import("../src/routes/admin-api/route")
 const { modelRoutes } = await import("../src/routes/models/route")
@@ -32,6 +33,7 @@ const originalGetFirstAccountModels =
   accountsManager.getFirstAccountModels.bind(accountsManager)
 const originalCodexAccessToken = state.codexAccessToken
 const originalCodexAccountId = state.codexAccountId
+let codexModelsResponseCloneCount = 0
 
 const createProviderConfig = (
   name: string,
@@ -92,6 +94,21 @@ const fetchMock = mock((url: string | URL | Request, _init?: RequestInit) => {
     )
   }
 
+  if (
+    requestUrl
+    === "https://chatgpt.com/backend-api/codex/models?verify=lazy-log"
+  ) {
+    const response = Response.json({ object: "list", data: [] })
+    const originalClone = response.clone.bind(response)
+    Object.defineProperty(response, "clone", {
+      value: () => {
+        codexModelsResponseCloneCount += 1
+        return originalClone()
+      },
+    })
+    return Promise.resolve(response)
+  }
+
   const providerModelIds: Record<string, string> = {
     "first.example": "first-model",
     "second.example": "second-model",
@@ -128,6 +145,8 @@ beforeEach(() => {
   enabledProviders = []
   providerConfigs = {}
   accountsManager.getFirstAccountModels = () => undefined
+  codexModelsResponseCloneCount = 0
+  resetLoggerRuntimeForTests(undefined, "info")
   fetchMock.mockClear()
   ;(globalThis as unknown as { fetch: typeof fetch }).fetch =
     fetchMock as unknown as typeof fetch
@@ -138,6 +157,7 @@ afterEach(() => {
   accountsManager.getFirstAccountModels = originalGetFirstAccountModels
   state.codexAccessToken = originalCodexAccessToken
   state.codexAccountId = originalCodexAccountId
+  resetLoggerRuntimeForTests()
 })
 
 describe("model routes", () => {
@@ -219,12 +239,12 @@ describe("model routes", () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  test("proxies remote models for Codex clients with loaded credentials", async () => {
+  test("proxies remote models through the configured Codex base URL", async () => {
     providerConfigs = {
       codex: {
         apiKey: "configured-token",
         authType: "oauth2",
-        baseUrl: "https://chatgpt.com/backend-api",
+        baseUrl: "https://codex.example/backend-api",
         name: "codex",
         type: "openai-responses",
       },
@@ -236,6 +256,7 @@ describe("model routes", () => {
       "/v1/models?client_version=1.2.3",
       {
         headers: {
+          accept: "*/*",
           authorization: "Bearer client-token",
           "chatgpt-account-id": "client-account",
           "user-agent": "Codex/1.2.3",
@@ -248,7 +269,7 @@ describe("model routes", () => {
     expect(body.data.map((model) => model.id)).toEqual(["qwen-plus", ""])
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "https://chatgpt.com/backend-api/codex/models?client_version=1.2.3",
+      "https://codex.example/backend-api/codex/models?client_version=1.2.3",
     )
 
     const requestInit = fetchMock.mock.calls[0]?.[1]
@@ -257,6 +278,29 @@ describe("model routes", () => {
     expect(upstreamHeaders.get("authorization")).toBe("Bearer loaded-token")
     expect(upstreamHeaders.get("chatgpt-account-id")).toBe("loaded-account")
     expect(upstreamHeaders.get("user-agent")).toBe("Codex/1.2.3")
+    expect(upstreamHeaders.get("accept")).toBe("*/*")
+  })
+
+  test("does not clone Codex models responses when debug logging is disabled", async () => {
+    providerConfigs = {
+      codex: {
+        apiKey: "configured-token",
+        authType: "oauth2",
+        baseUrl: "https://chatgpt.com/backend-api",
+        name: "codex",
+        type: "openai-responses",
+      },
+    }
+    state.codexAccessToken = "loaded-token"
+    state.codexAccountId = "loaded-account"
+
+    const response = await createApp().request("/v1/models?verify=lazy-log", {
+      headers: { "user-agent": "Codex/1.2.3" },
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ object: "list", data: [] })
+    expect(codexModelsResponseCloneCount).toBe(0)
   })
 
   test("returns not found for Codex clients when the provider is unavailable", async () => {

@@ -9,6 +9,7 @@ import {
   isMcpHttpEnabledFromEnv,
 } from "~/mcp-http-config"
 import { handleStreamableHttpMcpRequest, mcpHttpCorsOptions } from "~/mcp-http"
+import { alphaSearchRoutes } from "~/routes/alpha-search/route"
 
 import { zstdDecompressionMiddleware } from "./lib/zstd-request"
 import { adminApiRoutes } from "./routes/admin-api/route"
@@ -74,6 +75,7 @@ export function createServer(options: CreateServerOptions = {}): Hono {
   app.route("/token-usage", tokenUsageRoute)
   app.route("/token", tokenRoute)
   app.route("/responses", responsesRoutes)
+  app.route("/alpha/search", alphaSearchRoutes)
 
   app.route("/admin", adminRoutes)
   app.route("/api/admin", adminApiRoutes)

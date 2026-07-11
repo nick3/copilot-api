@@ -461,7 +461,10 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
     },
     "modelResponsesApiCompactThresholds": {
       "gpt-5.4": 217600,
-      "gpt-5.5": 217600
+      "gpt-5.5": 217600,
+      "gpt-5.6-sol": 231200,
+      "gpt-5.6-terra": 231200,
+      "gpt-5.6-luna": 231200
     },
     "modelReasoningEfforts": {
       "gpt-5-mini": "low"
@@ -494,7 +497,7 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
     - `supportPdf` (optional): Controls whether the model supports PDF/document content. Defaults to `false`; unsupported PDFs are converted to a text notice. Set it to `true` to send PDF/document blocks as OpenAI Chat Completions file parts.
     - `toolContentSupportType` (optional): Tool result content capabilities for that model, as an array of `array`, `image`, and `pdf`. Provider routes default to string-only tool content when omitted. If `supportPdf` is `true` but this list does not include `pdf`, file parts in tool results are moved to user role messages. This provider default does not change the Copilot main flow, which continues to support array + image and not PDF.
 - **contextManagement:** Controls whether the proxy adds Responses API `context_management` compaction instructions. `messages` applies when Anthropic-style `/v1/messages` requests are translated to Responses API, including `openai-responses` provider message routes, and defaults to `true`. `responses` applies to native `/v1/responses` traffic, including `provider/model` aliases and the built-in `codex` provider, and defaults to `false`. Enable `responses` only after checking that your client supports context management compaction. When enabled, the request includes `context_management` in the body and keeps only the latest compaction carrier on follow-up turns.
-- **modelResponsesApiCompactThresholds:** Per-model Responses API `compact_threshold` overrides used when the proxy adds `context_management`. These values take precedence over the fallback threshold from `resolveResponsesCompactThreshold` (`max_prompt_tokens * ratio`, or the default fallback). Defaults set `gpt-5.4` and `gpt-5.5` to `217600` (`272000 * 0.8`). Models not listed continue to use the normal fallback logic.
+- **modelResponsesApiCompactThresholds:** Per-model Responses API `compact_threshold` overrides used when the proxy adds `context_management`. These values take precedence over the fallback threshold from `resolveResponsesCompactThreshold` (`max_prompt_tokens * ratio`, or the default fallback). Defaults set `gpt-5.4` and `gpt-5.5` to `217600` (`272000 * 0.8`), and `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` to `231200` (`272000 * 0.85`). Models not listed continue to use the normal fallback logic.
 - **smallModel:** Fallback model used for tool-less warmup messages, compact/background requests, and other short housekeeping turns (for example from Claude Code or OpenCode) to avoid spending premium requests; defaults to `gpt-5-mini`. If original names are blocked and this points to an aliased target, it resolves to the preferred alias.
 - **accountAffinity:** Enable sticky account routing based on session identity. When enabled, requests from the same session for the same model are routed to the account that last handled them successfully. Applies to both free and premium models. Defaults to `true`. Set to `false` to use sequential routing for all models.
 - **apiKey (deprecated):** Legacy single-key field kept for migration compatibility. Prefer `auth.apiKeys`. When `auth.apiKeys` is empty, the server falls back to `COPILOT_API_KEY` and then `apiKey`.
@@ -551,6 +554,12 @@ These endpoints mimic the OpenAI API structure.
 | `POST /v1/chat/completions` | `POST` | Creates a model response for the given chat conversation. Supports `provider/model` aliases for `openai-compatible` providers. |
 | `GET /v1/models`            | `GET`  | Lists Copilot models, configured aliases, and enabled provider models. |
 | `POST /v1/embeddings`       | `POST` | Creates an embedding vector representing the input text.         |
+
+### Codex Backend Proxy Endpoints
+
+| Endpoint             | Method | Description |
+| -------------------- | ------ | ----------- |
+| `POST /alpha/search` | `POST` | Transparently forwards the JSON body and query parameters to the Codex Alpha Search upstream. The gateway replaces client authorization and account headers with the active Codex login, forwards compatible headers such as `accept`, `content-type`, `originator`, `user-agent`, and `cookie`, and returns the upstream status, headers, and body unchanged. |
 
 ### Anthropic Compatible Endpoints
 

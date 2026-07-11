@@ -102,6 +102,25 @@ describe("translateAnthropicMessagesToResponsesPayload", () => {
     ])
   })
 
+  it("requests all-turn reasoning context when effort is provided", () => {
+    const result = translateAnthropicMessagesToResponsesPayload(samplePayload, {
+      reasoningEffort: "high",
+    })
+
+    expect(result.reasoning).toMatchObject({
+      context: "all_turns",
+      effort: "high",
+    })
+  })
+
+  it("requests all-turn reasoning context without an explicit effort", () => {
+    const result = translateAnthropicMessagesToResponsesPayload(samplePayload)
+
+    expect(result.reasoning).toMatchObject({
+      context: "all_turns",
+    })
+  })
+
   it("extracts identifiers from JSON-like user_id metadata", () => {
     const result = translateAnthropicMessagesToResponsesPayload({
       ...samplePayload,
@@ -910,6 +929,81 @@ describe("translateAnthropicMessagesToResponsesPayload", () => {
 })
 
 describe("translateResponsesResultToAnthropic", () => {
+  it("maps Responses cache writes to Anthropic cache creation usage", () => {
+    const responsesResult: ResponsesResult = {
+      id: "resp_cache_write",
+      object: "response",
+      created_at: 0,
+      model: "gpt-5.6-sol",
+      output: [],
+      output_text: "",
+      status: "completed",
+      usage: {
+        input_tokens: 100,
+        input_tokens_details: {
+          cached_tokens: 12,
+          cache_write_tokens: 20,
+        },
+        output_tokens: 10,
+        total_tokens: 110,
+      },
+      error: null,
+      incomplete_details: null,
+      instructions: null,
+      metadata: null,
+      parallel_tool_calls: false,
+      temperature: null,
+      tool_choice: null,
+      tools: [],
+      top_p: null,
+    }
+
+    const anthropicResponse =
+      translateResponsesResultToAnthropic(responsesResult)
+
+    expect(anthropicResponse.usage).toEqual({
+      cache_creation_input_tokens: 20,
+      cache_read_input_tokens: 12,
+      input_tokens: 68,
+      output_tokens: 10,
+    })
+  })
+
+  it("clamps regular input when Responses cache usage exceeds input", () => {
+    const responsesResult: ResponsesResult = {
+      id: "resp_cache_overflow",
+      object: "response",
+      created_at: 0,
+      model: "gpt-5.6-sol",
+      output: [],
+      output_text: "",
+      status: "completed",
+      usage: {
+        input_tokens: 10,
+        input_tokens_details: {
+          cached_tokens: 12,
+          cache_write_tokens: 20,
+        },
+        output_tokens: 0,
+        total_tokens: 10,
+      },
+      error: null,
+      incomplete_details: null,
+      instructions: null,
+      metadata: null,
+      parallel_tool_calls: false,
+      temperature: null,
+      tool_choice: null,
+      tools: [],
+      top_p: null,
+    }
+
+    const anthropicResponse =
+      translateResponsesResultToAnthropic(responsesResult)
+
+    expect(anthropicResponse.usage.input_tokens).toBe(0)
+  })
+
   it("handles reasoning and function call items", () => {
     const responsesResult: ResponsesResult = {
       id: "resp_123",

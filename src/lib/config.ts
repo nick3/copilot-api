@@ -200,6 +200,9 @@ You interact with the user through a terminal. You have 2 ways of communicating 
 const modelResponsesApiCompactThresholds = {
   "gpt-5.4": 272_000 * 0.8,
   "gpt-5.5": 272_000 * 0.8,
+  "gpt-5.6-sol": 272_000 * 0.85,
+  "gpt-5.6-terra": 272_000 * 0.85,
+  "gpt-5.6-luna": 272_000 * 0.85,
 }
 
 const defaultContextManagement = {

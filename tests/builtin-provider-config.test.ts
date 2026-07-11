@@ -134,12 +134,15 @@ describe("builtin provider config", () => {
 
     const output = runScript(
       tempDir,
-      'const { getModelResponsesApiCompactThreshold } = await import("./src/lib/config"); console.log(JSON.stringify({ gpt54: getModelResponsesApiCompactThreshold("gpt-5.4"), gpt55: getModelResponsesApiCompactThreshold("gpt-5.5"), unknown: getModelResponsesApiCompactThreshold("gpt-test") ?? null }));',
+      'const { getModelResponsesApiCompactThreshold } = await import("./src/lib/config"); console.log(JSON.stringify({ gpt54: getModelResponsesApiCompactThreshold("gpt-5.4"), gpt55: getModelResponsesApiCompactThreshold("gpt-5.5"), gpt56Sol: getModelResponsesApiCompactThreshold("gpt-5.6-sol"), gpt56Terra: getModelResponsesApiCompactThreshold("gpt-5.6-terra"), gpt56Luna: getModelResponsesApiCompactThreshold("gpt-5.6-luna"), unknown: getModelResponsesApiCompactThreshold("gpt-test") ?? null }));',
     )
 
     expect(JSON.parse(output)).toEqual({
       gpt54: 217600,
       gpt55: 217600,
+      gpt56Sol: 231200,
+      gpt56Terra: 231200,
+      gpt56Luna: 231200,
       unknown: null,
     })
     expect(
@@ -147,6 +150,9 @@ describe("builtin provider config", () => {
     ).toEqual({
       "gpt-5.4": 217600,
       "gpt-5.5": 217600,
+      "gpt-5.6-sol": 231200,
+      "gpt-5.6-terra": 231200,
+      "gpt-5.6-luna": 231200,
     })
   })
 

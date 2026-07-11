@@ -7,6 +7,7 @@ import { type LogLevel } from "../src/lib/config"
 import {
   createHandlerLogger,
   debugJson,
+  debugJsonLazy,
   debugJsonTail,
   getBufferedLogLinesForTests,
   normalizeLogTypeToLevel,
@@ -45,6 +46,35 @@ test("debugJson logs the serialized payload when logLevel is debug", () => {
 
   debugJson(logger as never, "payload", payload)
 
+  expect(logger.debug).toHaveBeenCalledWith("payload", JSON.stringify(payload))
+})
+
+test("debugJsonLazy skips async payload creation when logLevel is not debug", async () => {
+  resetLoggerRuntimeForTests(undefined, "info")
+
+  const logger = {
+    debug: mock(() => {}),
+  }
+  const factory = mock(() => Promise.resolve({ ok: true }))
+
+  await debugJsonLazy(logger as never, "payload", factory)
+
+  expect(factory).not.toHaveBeenCalled()
+  expect(logger.debug).not.toHaveBeenCalled()
+})
+
+test("debugJsonLazy logs async payloads when logLevel is debug", async () => {
+  resetLoggerRuntimeForTests(undefined, "debug")
+
+  const logger = {
+    debug: mock(() => {}),
+  }
+  const payload = { ok: true }
+  const factory = mock(() => Promise.resolve(payload))
+
+  await debugJsonLazy(logger as never, "payload", factory)
+
+  expect(factory).toHaveBeenCalledTimes(1)
   expect(logger.debug).toHaveBeenCalledWith("payload", JSON.stringify(payload))
 })
 

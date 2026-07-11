@@ -425,6 +425,9 @@ test("POST /api/admin/config updates modelResponsesApiCompactThresholds", async 
     expect(body.modelResponsesApiCompactThresholds).toEqual({
       "gpt-5.4": 123456,
       "gpt-5.5": 217600,
+      "gpt-5.6-sol": 231200,
+      "gpt-5.6-terra": 231200,
+      "gpt-5.6-luna": 231200,
     })
   })
 })
@@ -576,6 +579,9 @@ test("POST /api/admin/config clears modelResponsesApiCompactThresholds", async (
       expect(body.modelResponsesApiCompactThresholds).toEqual({
         "gpt-5.4": 217600,
         "gpt-5.5": 217600,
+        "gpt-5.6-sol": 231200,
+        "gpt-5.6-terra": 231200,
+        "gpt-5.6-luna": 231200,
       })
     },
   )

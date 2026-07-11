@@ -6,7 +6,7 @@ import {
   listEnabledProviders,
 } from "~/lib/config"
 import { forwardError } from "~/lib/error"
-import { createHandlerLogger } from "~/lib/logger"
+import { createHandlerLogger, debugJsonLazy } from "~/lib/logger"
 import { getAvailableModels, toClientModelId } from "~/lib/models"
 import { resolveProviderConfig } from "~/lib/provider-resolver"
 import type { Model } from "~/services/copilot/get-models"
@@ -194,11 +194,10 @@ export async function getAggregatedModelsResponse(requestHeaders: Headers) {
 
 async function logCodexModelsResponse(response: Response): Promise<void> {
   try {
-    const responseText = await response.clone().text()
-    logger.debug("models.codex.response", {
+    await debugJsonLazy(logger, "models.codex.response", async () => ({
       statusCode: response.status,
-      models: responseText,
-    })
+      models: await response.clone().text(),
+    }))
   } catch (error) {
     logger.warn("models.codex.response_log_error", { error })
   }

@@ -470,7 +470,10 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
     },
     "modelResponsesApiCompactThresholds": {
       "gpt-5.4": 217600,
-      "gpt-5.5": 217600
+      "gpt-5.5": 217600,
+      "gpt-5.6-sol": 231200,
+      "gpt-5.6-terra": 231200,
+      "gpt-5.6-luna": 231200
     },
     "modelReasoningEfforts": {
       "gpt-5-mini": "low"
@@ -503,7 +506,7 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
     - `supportPdf`：可选，控制该模型是否支持 PDF/document content。默认 `false`，不支持时会把 PDF 转成提示文本；设为 `true` 时会把 PDF/document 转成 OpenAI Chat Completions 的 file part。
     - `toolContentSupportType`：可选，配置该模型的 tool result content 支持能力，值为 `array`、`image`、`pdf` 的数组。provider 侧未配置时默认只发送 string tool content。若 `supportPdf` 为 `true` 但这里不包含 `pdf`，tool result 里的 file part 会被转成 user role 消息。Copilot 主链路不使用这个 provider 默认，仍按 array + image 且不支持 PDF 的能力处理。
 - **contextManagement：** 控制代理是否为 Responses API 附加 `context_management` 压缩指令。`messages` 作用于被翻译成 Responses API 的 Anthropic 风格 `/v1/messages` 请求，包括 `openai-responses` provider 的 Messages 路由，默认值为 `true`。`responses` 作用于 native `/v1/responses` 流量，包括 `provider/model` 别名和内置 `codex` provider，默认值为 `false`。只有在确认客户端支持 context management compaction 后，才建议在 Responses API 下启用 `responses`。启用后，请求体会带上 `context_management`，并在后续轮次中仅保留最新的压缩承载内容。
-- **modelResponsesApiCompactThresholds：** 按模型覆盖 Responses API 的 `compact_threshold`，仅在代理自动附加 `context_management` 时使用。它的优先级高于 `resolveResponsesCompactThreshold` 基于 `max_prompt_tokens * ratio` 的兜底阈值。默认将 `gpt-5.4` 和 `gpt-5.5` 设为 `217600`（`272000 * 0.8`）。未列出的模型继续使用原有兜底逻辑。
+- **modelResponsesApiCompactThresholds：** 按模型覆盖 Responses API 的 `compact_threshold`，仅在代理自动附加 `context_management` 时使用。它的优先级高于 `resolveResponsesCompactThreshold` 基于 `max_prompt_tokens * ratio` 的兜底阈值。默认将 `gpt-5.4` 和 `gpt-5.5` 设为 `217600`（`272000 * 0.8`），将 `gpt-5.6-sol`、`gpt-5.6-terra` 和 `gpt-5.6-luna` 设为 `231200`（`272000 * 0.85`）。未列出的模型继续使用原有兜底逻辑。
 - **smallModel：** 用于无工具预热消息、compact/background 请求以及其他短小维护型轮次（例如 Claude Code 或 OpenCode 发出的 housekeeping 请求）的回退模型，用来避免消耗 premium requests；默认是 `gpt-5-mini`。如果原始模型名被屏蔽，而这里指向的是某个别名目标模型，则会解析为首选别名。
 - **accountAffinity：** 是否根据 session 标识启用粘性账号路由。开启后，同一 session 针对同一模型的请求会优先路由到上次成功处理它的账号。该策略同时适用于免费模型和付费模型。默认值为 `true`。设为 `false` 则所有模型都改为顺序路由。
 - **apiKey（已弃用）：** 兼容迁移的旧单 key 字段。优先使用 `auth.apiKeys`。当 `auth.apiKeys` 为空时，服务端会回退到 `COPILOT_API_KEY`，再回退到 `apiKey`。
@@ -560,6 +563,12 @@ curl http://localhost:4141/v1/models \
 | `POST /v1/chat/completions` | `POST` | 为给定聊天对话创建模型响应。支持 `openai-compatible` provider 的 `provider/model` 别名。 |
 | `GET /v1/models` | `GET` | 列出 Copilot 模型、已配置别名以及已启用 provider 的模型。 |
 | `POST /v1/embeddings` | `POST` | 创建表示输入文本的向量嵌入。 |
+
+### Codex 后端代理端点
+
+| 端点 | 方法 | 说明 |
+| --- | --- | --- |
+| `POST /alpha/search` | `POST` | 将 JSON 请求体和查询参数透明转发到 Codex Alpha Search 上游。网关会使用当前 Codex 登录态覆盖客户端的 authorization 和 account header，透传 `accept`、`content-type`、`originator`、`user-agent`、`cookie` 等兼容 header，并原样返回上游状态码、响应头和响应体。 |
 
 ### Anthropic 兼容端点
 

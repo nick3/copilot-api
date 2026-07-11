@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test"
 
 import type { AnthropicStreamEventData } from "~/routes/messages/anthropic-types"
-import type { ResponseOutputItemAddedEvent } from "~/services/copilot/create-responses"
+import type {
+  ResponseCreatedEvent,
+  ResponseOutputItemAddedEvent,
+} from "~/services/copilot/create-responses"
 
 import {
   createResponsesStreamState,
@@ -264,6 +267,103 @@ describe("translateResponsesStreamEvent tool calls", () => {
         name: "tool_search_search",
         input: {},
       })
+    }
+  })
+})
+
+describe("translateResponsesStreamEvent usage", () => {
+  test("maps Responses cache writes in message_start usage", () => {
+    const state = createResponsesStreamState()
+    const event: ResponseCreatedEvent = {
+      type: "response.created",
+      sequence_number: 1,
+      response: {
+        id: "resp_cache_write",
+        object: "response",
+        created_at: 0,
+        model: "gpt-5.6-sol",
+        output: [],
+        output_text: "",
+        status: "in_progress",
+        usage: {
+          input_tokens: 100,
+          input_tokens_details: {
+            cached_tokens: 12,
+            cache_write_tokens: 20,
+          },
+          output_tokens: 0,
+          total_tokens: 100,
+        },
+        error: null,
+        incomplete_details: null,
+        instructions: null,
+        metadata: null,
+        parallel_tool_calls: false,
+        temperature: null,
+        tool_choice: null,
+        tools: [],
+        top_p: null,
+      },
+    }
+
+    const events = translateResponsesStreamEvent(event, state)
+    const messageStart = events.find(
+      (translatedEvent) => translatedEvent.type === "message_start",
+    )
+
+    expect(messageStart).toBeDefined()
+    if (messageStart?.type === "message_start") {
+      expect(messageStart.message.usage).toEqual({
+        cache_creation_input_tokens: 20,
+        cache_read_input_tokens: 12,
+        input_tokens: 68,
+        output_tokens: 0,
+      })
+    }
+  })
+
+  test("clamps message_start input when cache usage exceeds input", () => {
+    const state = createResponsesStreamState()
+    const event: ResponseCreatedEvent = {
+      type: "response.created",
+      sequence_number: 1,
+      response: {
+        id: "resp_cache_overflow",
+        object: "response",
+        created_at: 0,
+        model: "gpt-5.6-sol",
+        output: [],
+        output_text: "",
+        status: "in_progress",
+        usage: {
+          input_tokens: 10,
+          input_tokens_details: {
+            cached_tokens: 12,
+            cache_write_tokens: 20,
+          },
+          output_tokens: 0,
+          total_tokens: 10,
+        },
+        error: null,
+        incomplete_details: null,
+        instructions: null,
+        metadata: null,
+        parallel_tool_calls: false,
+        temperature: null,
+        tool_choice: null,
+        tools: [],
+        top_p: null,
+      },
+    }
+
+    const events = translateResponsesStreamEvent(event, state)
+    const messageStart = events.find(
+      (translatedEvent) => translatedEvent.type === "message_start",
+    )
+
+    expect(messageStart).toBeDefined()
+    if (messageStart?.type === "message_start") {
+      expect(messageStart.message.usage.input_tokens).toBe(0)
     }
   })
 })

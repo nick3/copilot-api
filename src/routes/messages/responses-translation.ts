@@ -156,9 +156,11 @@ export const translateAnthropicMessagesToResponsesPayload = (
         {
           effort: options.reasoningEffort,
           summary: "auto",
+          context: "all_turns",
         }
       : {
           summary: "auto",
+          context: "all_turns",
         },
     include: ["reasoning.encrypted_content"],
   }
@@ -1107,13 +1109,20 @@ const mapResponsesUsage = (
   const inputTokens = response.usage?.input_tokens ?? 0
   const outputTokens = response.usage?.output_tokens ?? 0
   const inputCachedTokens = response.usage?.input_tokens_details?.cached_tokens
+  const cacheWriteTokens =
+    response.usage?.input_tokens_details?.cache_write_tokens
 
   return {
-    input_tokens: inputTokens - (inputCachedTokens ?? 0),
+    input_tokens: Math.max(
+      0,
+      inputTokens - (inputCachedTokens ?? 0) - (cacheWriteTokens ?? 0),
+    ),
     output_tokens: outputTokens,
-    ...(response.usage?.input_tokens_details?.cached_tokens !== undefined && {
-      cache_read_input_tokens:
-        response.usage.input_tokens_details.cached_tokens,
+    ...(inputCachedTokens !== undefined && {
+      cache_read_input_tokens: inputCachedTokens,
+    }),
+    ...(cacheWriteTokens !== undefined && {
+      cache_creation_input_tokens: cacheWriteTokens,
     }),
   }
 }

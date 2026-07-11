@@ -285,6 +285,18 @@ export const debugJson = (
   debugLazy(logger, () => [label, JSON.stringify(value)])
 }
 
+export const debugJsonLazy = async (
+  logger: DebugLogger,
+  label: string,
+  factory: () => Promise<unknown>,
+): Promise<void> => {
+  if (!isDebugFileLoggingEnabled()) {
+    return
+  }
+
+  logger.debug(label, JSON.stringify(await factory()))
+}
+
 export const debugJsonTail = (
   logger: DebugLogger,
   label: string,

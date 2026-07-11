@@ -83,6 +83,26 @@ describe("normalizeResponsesUsage", () => {
       usageJson: JSON.stringify(usage),
     })
   })
+
+  test("subtracts cache write tokens from regular input", () => {
+    const usage: ResponseUsage = {
+      input_tokens: 50,
+      output_tokens: 10,
+      total_tokens: 60,
+      input_tokens_details: {
+        cached_tokens: 20,
+        cache_write_tokens: 15,
+      },
+    }
+
+    expect(normalizeResponsesUsage(usage)).toEqual({
+      tokensCachedInput: 20,
+      tokensInput: 15,
+      tokensOutput: 10,
+      tokensTotal: 60,
+      usageJson: JSON.stringify(usage),
+    })
+  })
 })
 
 describe("normalizeEmbeddingsUsage", () => {

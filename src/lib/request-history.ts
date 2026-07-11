@@ -110,13 +110,14 @@ export function normalizeResponsesUsage(
   if (!usage) return {}
 
   const cached = usage.input_tokens_details?.cached_tokens ?? 0
+  const cacheWrite = usage.input_tokens_details?.cache_write_tokens ?? 0
   const input = usage.input_tokens
   const output = usage.output_tokens ?? 0
   const total = usage.total_tokens
 
   return {
     tokensCachedInput: cached,
-    tokensInput: Math.max(0, input - cached),
+    tokensInput: Math.max(0, input - cached - cacheWrite),
     tokensOutput: output,
     tokensTotal: total,
     usageJson: JSON.stringify(usage),
