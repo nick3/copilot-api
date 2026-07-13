@@ -356,6 +356,24 @@ test("messages Responses flow adds context management by default", async () => {
   ])
 })
 
+test("messages Responses flow disables context management for gpt-5.6 models", async () => {
+  const payload: AnthropicMessagesPayload = {
+    max_tokens: 128,
+    messages: [{ role: "user", content: "hello" }],
+    model: "gpt-5.6-sol",
+  }
+
+  const response = await handleWithResponsesApi(createContext(), payload, {
+    logger,
+    requestId: "request-1",
+    selectedModel: createModel(["/responses"]),
+  })
+
+  expect(response.status).toBe(200)
+  expect(createResponses).toHaveBeenCalledTimes(1)
+  expect(capturedResponsesPayload?.context_management).toBeUndefined()
+})
+
 test("messages Responses flow keeps HTTP transport for dual-endpoint models when websocket is disabled", async () => {
   responsesApiWebSocketEnabled = false
   const payload: AnthropicMessagesPayload = {

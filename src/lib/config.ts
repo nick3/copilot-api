@@ -160,6 +160,22 @@ function isGpt53OrAbove(model: string): boolean {
   return minorVersion >= 3
 }
 
+export function isGpt56OrAbove(model: string): boolean {
+  const match = GPT_MODEL_PATTERN.exec(model)
+  if (!match) {
+    return false
+  }
+  const majorVersion = Number.parseInt(match[1], 10)
+  if (majorVersion > 5) {
+    return true
+  }
+  if (majorVersion !== 5) {
+    return false
+  }
+  const minorVersion = match[2] ? Number.parseInt(match[2], 10) : 0
+  return minorVersion >= 6
+}
+
 const gpt5ExplorationPrompt = `## Exploration and reading files
 - **Think first.** Before any tool call, decide ALL files/resources you will need.
 - **Batch everything.** If you need multiple files (even from different places), read them together.

@@ -200,4 +200,90 @@ describe("provider Responses context management", () => {
       },
     ])
   })
+
+  test("disables context management for gpt-5.6 models even when responses is enabled", async () => {
+    responsesUtilsDependencies.isContextManagementEnabledForResponses = () =>
+      true
+
+    const app = createApp()
+    const response = await app.request("/v1/responses", {
+      body: JSON.stringify({
+        input: [
+          {
+            content: "older",
+            role: "user",
+          },
+          {
+            encrypted_content: "cipher",
+            id: "compaction-1",
+            type: "compaction",
+          },
+          {
+            content: "latest",
+            role: "user",
+          },
+        ],
+        model: "openai/gpt-5.6-sol",
+      }),
+      headers: {
+        "content-type": "application/json",
+      },
+      method: "POST",
+    })
+
+    expect(response.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = parseJsonRequestBody((init as RequestInit).body) as {
+      context_management?: unknown
+      input: Array<unknown>
+    }
+
+    expect(body.context_management).toBeUndefined()
+    expect(body.input).toHaveLength(3)
+  })
+
+  test("disables context management for gpt-6 models even when responses is enabled", async () => {
+    responsesUtilsDependencies.isContextManagementEnabledForResponses = () =>
+      true
+
+    const app = createApp()
+    const response = await app.request("/v1/responses", {
+      body: JSON.stringify({
+        input: [
+          {
+            content: "older",
+            role: "user",
+          },
+          {
+            encrypted_content: "cipher",
+            id: "compaction-1",
+            type: "compaction",
+          },
+          {
+            content: "latest",
+            role: "user",
+          },
+        ],
+        model: "openai/gpt-6",
+      }),
+      headers: {
+        "content-type": "application/json",
+      },
+      method: "POST",
+    })
+
+    expect(response.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = parseJsonRequestBody((init as RequestInit).body) as {
+      context_management?: unknown
+      input: Array<unknown>
+    }
+
+    expect(body.context_management).toBeUndefined()
+    expect(body.input).toHaveLength(3)
+  })
 })

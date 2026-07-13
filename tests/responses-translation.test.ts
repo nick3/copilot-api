@@ -6,12 +6,14 @@ import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types
 import type {
   ResponseFunctionCallOutputItem,
   ResponseInputMessage,
+  ResponseInputReasoning,
   ResponseToolSearchCallItem,
   ResponseToolSearchOutputItem,
   ResponsesResult,
 } from "~/services/copilot/create-responses"
 
 import {
+  REASONING_SUMMARY_SEPARATOR,
   translateAnthropicMessagesToResponsesPayload,
   translateResponsesResultToAnthropic,
 } from "~/routes/messages/responses-translation"
@@ -80,7 +82,46 @@ const emptySessionUserId = JSON.stringify({
 
 const subagentAgentId = "agent-123"
 
+const translateThinking = (thinking: string): ResponseInputReasoning => {
+  const result = translateAnthropicMessagesToResponsesPayload({
+    ...samplePayload,
+    messages: [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "thinking",
+            thinking,
+            signature: "encrypted-content@reasoning-id",
+          },
+        ],
+      },
+    ],
+  })
+
+  return (result.input as Array<ResponseInputReasoning>)[0]
+}
+
 describe("translateAnthropicMessagesToResponsesPayload", () => {
+  it("restores marked summary boundaries and preserves unmarked history", () => {
+    const firstSummary =
+      "**Preparing to search online**\n\nI need to use web.run."
+    const secondSummary = "**Running the search**"
+    const unmarkedThinking =
+      "**Preparing**\n\nDescription\n\n**A bold body line**\n\nMore text"
+    const marked = translateThinking(
+      firstSummary + REASONING_SUMMARY_SEPARATOR + secondSummary,
+    )
+
+    expect(marked.summary).toEqual([
+      { type: "summary_text", text: firstSummary },
+      { type: "summary_text", text: secondSummary },
+    ])
+    expect(translateThinking(unmarkedThinking).summary).toEqual([
+      { type: "summary_text", text: unmarkedThinking },
+    ])
+  })
+
   it("converts anthropic text blocks into response input messages", () => {
     const result = translateAnthropicMessagesToResponsesPayload(samplePayload)
 
@@ -102,23 +143,41 @@ describe("translateAnthropicMessagesToResponsesPayload", () => {
     ])
   })
 
-  it("requests all-turn reasoning context when effort is provided", () => {
+  it("uses auto reasoning context for unsupported models when effort is provided", () => {
     const result = translateAnthropicMessagesToResponsesPayload(samplePayload, {
       reasoningEffort: "high",
     })
 
     expect(result.reasoning).toMatchObject({
-      context: "all_turns",
+      context: "auto",
       effort: "high",
     })
   })
 
-  it("requests all-turn reasoning context without an explicit effort", () => {
+  it("uses auto reasoning context without an explicit effort", () => {
     const result = translateAnthropicMessagesToResponsesPayload(samplePayload)
 
     expect(result.reasoning).toMatchObject({
-      context: "all_turns",
+      context: "auto",
     })
+  })
+
+  it("uses all-turn reasoning context for supported final models", () => {
+    for (const modelOverride of [
+      "gpt-5.4",
+      "gpt-5.4-mini",
+      "gpt-5.5",
+      "gpt-5.6-sol",
+      "gpt-6",
+    ]) {
+      const result = translateAnthropicMessagesToResponsesPayload(
+        samplePayload,
+        { modelOverride },
+      )
+
+      expect(result.model).toBe(modelOverride)
+      expect(result.reasoning?.context).toBe("all_turns")
+    }
   })
 
   it("extracts identifiers from JSON-like user_id metadata", () => {
@@ -1014,7 +1073,13 @@ describe("translateResponsesResultToAnthropic", () => {
         {
           id: "reason_1",
           type: "reasoning",
-          summary: [{ type: "summary_text", text: "Thinking about the task." }],
+          summary: [
+            {
+              type: "summary_text",
+              text: "**Thinking about the task**\n\nReviewing the request.",
+            },
+            { type: "summary_text", text: "**Preparing the tool call**" },
+          ],
           status: "completed",
           encrypted_content: "encrypted_reasoning_content",
         },
@@ -1069,7 +1134,11 @@ describe("translateResponsesResultToAnthropic", () => {
 
     expect(thinkingBlock.type).toBe("thinking")
     if (thinkingBlock.type === "thinking") {
-      expect(thinkingBlock.thinking).toContain("Thinking about the task")
+      expect(thinkingBlock.thinking).toBe(
+        "**Thinking about the task**\n\nReviewing the request."
+          + REASONING_SUMMARY_SEPARATOR
+          + "**Preparing the tool call**",
+      )
     }
 
     expect(toolUseBlock.type).toBe("tool_use")

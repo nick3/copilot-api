@@ -6,7 +6,10 @@ import "./shared-admin-db-test-home"
 
 import type { ResolvedProviderConfig } from "../src/lib/config"
 import type { RequestLogRow } from "../src/lib/request-history"
-import type { AnthropicResponse } from "../src/routes/messages/anthropic-types"
+import type {
+  AnthropicMessagesPayload,
+  AnthropicResponse,
+} from "../src/routes/messages/anthropic-types"
 import type { ResponsesResult } from "../src/services/copilot/create-responses"
 import type { Model } from "../src/services/copilot/get-models"
 
@@ -187,6 +190,28 @@ const makeResponsesResult = (
     ...overrides,
   }) as unknown as ResponsesResult
 
+const makePlainResponsesResult = (): ResponsesResult =>
+  makeResponsesResult({
+    id: "resp_provider_message",
+    model: "gpt-5.4",
+    output: [
+      {
+        id: "msg-provider-message",
+        type: "message",
+        role: "assistant",
+        status: "completed",
+        content: [
+          {
+            type: "output_text",
+            text: "Hello from Codex.",
+            annotations: [],
+          },
+        ],
+      },
+    ],
+    output_text: "Hello from Codex.",
+  })
+
 const makeChatCompletionResponse = () => ({
   id: "chatcmpl-web-search-stripped",
   object: "chat.completion",
@@ -308,9 +333,97 @@ const makeResponsesStreamResponse = (body: ResponsesResult) =>
     },
   )
 
+const makeCollectedResponsesStreamResponse = (body: ResponsesResult) => {
+  let sequenceNumber = 1
+  const chunks = [
+    "event: response.created",
+    `data: ${JSON.stringify({
+      response: {
+        ...body,
+        output: [],
+        output_text: "",
+        usage: null,
+      },
+      sequence_number: sequenceNumber,
+      type: "response.created",
+    })}`,
+    "",
+  ]
+
+  body.output.forEach((item, outputIndex) => {
+    if (item.type === "message") {
+      item.content?.forEach((content, contentIndex) => {
+        if (content.type !== "output_text") return
+
+        sequenceNumber += 1
+        chunks.push(
+          "event: response.output_text.delta",
+          `data: ${JSON.stringify({
+            content_index: contentIndex,
+            delta: content.text,
+            item_id: item.id,
+            output_index: outputIndex,
+            sequence_number: sequenceNumber,
+            type: "response.output_text.delta",
+          })}`,
+          "",
+        )
+
+        sequenceNumber += 1
+        chunks.push(
+          "event: response.output_text.done",
+          `data: ${JSON.stringify({
+            content_index: contentIndex,
+            item_id: item.id,
+            output_index: outputIndex,
+            sequence_number: sequenceNumber,
+            text: content.text,
+            type: "response.output_text.done",
+          })}`,
+          "",
+        )
+      })
+    }
+
+    sequenceNumber += 1
+    chunks.push(
+      "event: response.output_item.done",
+      `data: ${JSON.stringify({
+        item,
+        output_index: outputIndex,
+        sequence_number: sequenceNumber,
+        type: "response.output_item.done",
+      })}`,
+      "",
+    )
+  })
+
+  sequenceNumber += 1
+  chunks.push(
+    "event: response.completed",
+    `data: ${JSON.stringify({
+      response: {
+        ...body,
+        output: [],
+        output_text: "",
+      },
+      sequence_number: sequenceNumber,
+      type: "response.completed",
+    })}`,
+    "",
+    "data: [DONE]",
+    "",
+  )
+
+  return new Response(chunks.join("\n"), {
+    headers: { "content-type": "text/event-stream; charset=utf-8" },
+  })
+}
+
 const originalFetch = globalThis.fetch
 let nextResponsesAsJson = false
 let nextResponsesBody: ResponsesResult | undefined
+let responsesStreamFactory: ((body: ResponsesResult) => Response) | undefined
 
 const fetchMock = mock((url: string | URL | Request, init?: RequestInit) => {
   const urlString =
@@ -337,7 +450,9 @@ const fetchMock = mock((url: string | URL | Request, init?: RequestInit) => {
     && requestPayload.stream === true
     && !nextResponsesAsJson
   ) {
-    return Promise.resolve(makeResponsesStreamResponse(body))
+    return Promise.resolve(
+      responsesStreamFactory?.(body) ?? makeResponsesStreamResponse(body),
+    )
   }
 
   return Promise.resolve(
@@ -365,10 +480,38 @@ const webSearchTool = {
   },
 }
 
+const configureCodexProvider = (): void => {
+  writeProviderConfig({
+    search: searchProviderConfig(),
+    codex: {
+      name: "codex",
+      type: "openai-responses",
+      baseUrl: "https://codex.example/backend-api",
+      apiKey: "unused",
+      authType: "authorization",
+      models: {
+        "gpt-5.4": {
+          toolContentSupportType: [],
+        },
+      },
+    },
+  })
+}
+
+const createCodexMessagesPayload = (
+  overrides: Partial<AnthropicMessagesPayload> = {},
+): AnthropicMessagesPayload => ({
+  max_tokens: 128,
+  messages: [{ role: "user", content: "hello" }],
+  model: "gpt-5.4",
+  ...overrides,
+})
+
 beforeEach(() => {
   writeProviderConfig()
   nextResponsesAsJson = false
   nextResponsesBody = undefined
+  responsesStreamFactory = undefined
   state.githubToken = undefined
   state.copilotToken = undefined
   state.codexAccessToken = "codex-token"
@@ -433,6 +576,7 @@ afterEach(() => {
   accountsManager.finalizeQuota = originalFinalizeQuota
   accountsManager.markAccountFailed = originalMarkAccountFailed
   Object.assign(responsesUtilsDependencies, defaultResponsesUtilsDependencies)
+  responsesStreamFactory = undefined
   writeTestConfig({ auth: { apiKeys: [] }, providers: {} })
 })
 
@@ -1135,5 +1279,256 @@ describe("provider messages web_search", () => {
         },
       },
     ])
+  })
+
+  test("collects a Codex stream into JSON when stream is omitted", async () => {
+    configureCodexProvider()
+    nextResponsesBody = makePlainResponsesResult()
+    responsesStreamFactory = makeCollectedResponsesStreamResponse
+
+    const response = await createApp().request("/codex/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(createCodexMessagesPayload()),
+    })
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("content-type")).toContain("application/json")
+
+    const [, init] = fetchMock.mock.calls[0]
+    const upstreamBody = JSON.parse((init as RequestInit).body as string) as {
+      stream?: boolean
+    }
+    expect(upstreamBody.stream).toBe(true)
+    expect(new Headers((init as RequestInit).headers).get("accept")).toBe(
+      "text/event-stream",
+    )
+
+    const json = (await response.json()) as AnthropicResponse
+    expect(json.content).toEqual([{ type: "text", text: "Hello from Codex." }])
+    expect(json.stop_reason).toBe("end_turn")
+    expect(json.usage).toMatchObject({ input_tokens: 12, output_tokens: 7 })
+  })
+
+  test("collects a Codex stream into JSON when stream is false", async () => {
+    configureCodexProvider()
+    nextResponsesBody = makePlainResponsesResult()
+    responsesStreamFactory = makeCollectedResponsesStreamResponse
+
+    const response = await createApp().request("/codex/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(createCodexMessagesPayload({ stream: false })),
+    })
+
+    expect(response.status).toBe(200)
+    const [, init] = fetchMock.mock.calls[0]
+    const upstreamBody = JSON.parse((init as RequestInit).body as string) as {
+      stream?: boolean
+    }
+    expect(upstreamBody.stream).toBe(true)
+    expect((await response.json()) as AnthropicResponse).toMatchObject({
+      content: [{ type: "text", text: "Hello from Codex." }],
+      stop_reason: "end_turn",
+    })
+  })
+
+  test("collects a non-stream Codex tool call into Anthropic JSON", async () => {
+    configureCodexProvider()
+    nextResponsesBody = makeResponsesResult({
+      id: "resp_provider_tool_call",
+      model: "gpt-5.4",
+      output: [
+        {
+          id: "fc-provider-weather",
+          type: "function_call",
+          call_id: "call-provider-weather",
+          name: "get_weather",
+          arguments: '{"city":"Shanghai"}',
+          status: "completed",
+        },
+      ],
+      output_text: "",
+    })
+    responsesStreamFactory = makeCollectedResponsesStreamResponse
+
+    const response = await createApp().request("/codex/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        createCodexMessagesPayload({
+          tools: [
+            {
+              name: "get_weather",
+              description: "Get the current weather",
+              input_schema: {
+                type: "object",
+                properties: { city: { type: "string" } },
+                required: ["city"],
+              },
+            },
+          ],
+        }),
+      ),
+    })
+
+    expect(response.status).toBe(200)
+    const json = (await response.json()) as AnthropicResponse
+    expect(json.content).toEqual([
+      {
+        type: "tool_use",
+        id: "call-provider-weather",
+        name: "get_weather",
+        input: { city: "Shanghai" },
+      },
+    ])
+    expect(json.stop_reason).toBe("tool_use")
+  })
+
+  test("forces streaming for a Codex follow-up containing tool_result", async () => {
+    configureCodexProvider()
+    nextResponsesBody = makePlainResponsesResult()
+    responsesStreamFactory = makeCollectedResponsesStreamResponse
+
+    const response = await createApp().request("/codex/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        createCodexMessagesPayload({
+          messages: [
+            { role: "user", content: "What is the weather?" },
+            {
+              role: "assistant",
+              content: [
+                {
+                  type: "tool_use",
+                  id: "call-provider-weather",
+                  name: "get_weather",
+                  input: { city: "Shanghai" },
+                },
+              ],
+            },
+            {
+              role: "user",
+              content: [
+                {
+                  type: "tool_result",
+                  tool_use_id: "call-provider-weather",
+                  content: "Sunny, 30C",
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    })
+
+    expect(response.status).toBe(200)
+    const [, init] = fetchMock.mock.calls[0]
+    const upstreamBody = JSON.parse((init as RequestInit).body as string) as {
+      input?: Array<Record<string, unknown>>
+      stream?: boolean
+    }
+    expect(upstreamBody.stream).toBe(true)
+    expect(upstreamBody.input).toContainEqual({
+      type: "function_call_output",
+      call_id: "call-provider-weather",
+      output: "Sunny, 30C",
+      status: "completed",
+    })
+  })
+
+  test("keeps requested Codex streaming as Anthropic SSE", async () => {
+    configureCodexProvider()
+    nextResponsesBody = makePlainResponsesResult()
+    responsesStreamFactory = makeCollectedResponsesStreamResponse
+
+    const response = await createApp().request("/codex/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(createCodexMessagesPayload({ stream: true })),
+    })
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("content-type")).toContain("text/event-stream")
+    const body = await response.text()
+    expect(body).toContain("event: message_start")
+    expect(body).toContain("Hello from Codex.")
+    expect(body).toContain("event: message_stop")
+  })
+
+  test("fails non-stream Codex requests when the upstream stream errors", async () => {
+    configureCodexProvider()
+    responsesStreamFactory = () =>
+      new Response(
+        `data: ${JSON.stringify({
+          code: "upstream_error",
+          message: "Codex stream failed",
+          param: null,
+          sequence_number: 1,
+          type: "error",
+        })}\n\n`,
+        { headers: { "content-type": "text/event-stream" } },
+      )
+
+    const response = await createApp().request("/codex/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(createCodexMessagesPayload()),
+    })
+
+    expect(response.status).toBe(500)
+    expect(await response.text()).not.toContain('"type":"message"')
+  })
+
+  test("fails non-stream Codex requests when a terminal response reports failure", async () => {
+    configureCodexProvider()
+    const failedResponse = makePlainResponsesResult()
+    responsesStreamFactory = () =>
+      new Response(
+        `data: ${JSON.stringify({
+          response: {
+            ...failedResponse,
+            error: {
+              code: "upstream_error",
+              message: "Codex response failed",
+            },
+            output: [],
+            output_text: "",
+            status: "failed",
+          },
+          sequence_number: 1,
+          type: "response.failed",
+        })}\n\n`,
+        { headers: { "content-type": "text/event-stream" } },
+      )
+
+    const response = await createApp().request("/codex/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(createCodexMessagesPayload()),
+    })
+
+    expect(response.status).toBe(500)
+    const body = await response.text()
+    expect(body).toContain("Codex response failed")
+    expect(body).not.toContain('"type":"message"')
+  })
+
+  test("fails non-stream Codex requests without a terminal event", async () => {
+    configureCodexProvider()
+    responsesStreamFactory = () =>
+      new Response("data: [DONE]\n\n", {
+        headers: { "content-type": "text/event-stream" },
+      })
+
+    const response = await createApp().request("/codex/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(createCodexMessagesPayload()),
+    })
+
+    expect(response.status).toBe(500)
+    expect(await response.text()).not.toContain('"type":"message"')
   })
 })

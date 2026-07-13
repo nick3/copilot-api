@@ -4,12 +4,16 @@ import type { AnthropicStreamEventData } from "~/routes/messages/anthropic-types
 import type {
   ResponseCreatedEvent,
   ResponseOutputItemAddedEvent,
+  ResponseReasoningSummaryPartAddedEvent,
+  ResponseReasoningSummaryTextDeltaEvent,
+  ResponseReasoningSummaryTextDoneEvent,
 } from "~/services/copilot/create-responses"
 
 import {
   createResponsesStreamState,
   translateResponsesStreamEvent,
 } from "~/routes/messages/responses-stream-translation"
+import { REASONING_SUMMARY_SEPARATOR } from "~/routes/messages/responses-translation"
 
 const createFunctionCallAddedEvent = (): ResponseOutputItemAddedEvent => ({
   type: "response.output_item.added",
@@ -365,5 +369,92 @@ describe("translateResponsesStreamEvent usage", () => {
     if (messageStart?.type === "message_start") {
       expect(messageStart.message.usage.input_tokens).toBe(0)
     }
+  })
+})
+
+describe("translateResponsesStreamEvent reasoning summaries", () => {
+  test("separates delta and done-only summaries exactly once", () => {
+    const state = createResponsesStreamState()
+    const partAdded = (summaryIndex: number, sequenceNumber: number) =>
+      translateResponsesStreamEvent(
+        {
+          type: "response.reasoning_summary_part.added",
+          item_id: "reasoning-1",
+          output_index: 0,
+          summary_index: summaryIndex,
+          sequence_number: sequenceNumber,
+          part: { type: "summary_text", text: "" },
+        } satisfies ResponseReasoningSummaryPartAddedEvent,
+        state,
+      )
+
+    const events = [
+      partAdded(0, 1),
+      translateResponsesStreamEvent(
+        {
+          type: "response.reasoning_summary_text.done",
+          item_id: "reasoning-1",
+          output_index: 0,
+          summary_index: 0,
+          sequence_number: 2,
+          text: "**Preparing the request**",
+        } satisfies ResponseReasoningSummaryTextDoneEvent,
+        state,
+      ),
+      partAdded(1, 3),
+      translateResponsesStreamEvent(
+        {
+          type: "response.reasoning_summary_text.delta",
+          item_id: "reasoning-1",
+          output_index: 0,
+          summary_index: 1,
+          sequence_number: 4,
+          delta: "**Running ",
+        } satisfies ResponseReasoningSummaryTextDeltaEvent,
+        state,
+      ),
+      translateResponsesStreamEvent(
+        {
+          type: "response.reasoning_summary_text.delta",
+          item_id: "reasoning-1",
+          output_index: 0,
+          summary_index: 1,
+          sequence_number: 5,
+          delta: "the tool**",
+        } satisfies ResponseReasoningSummaryTextDeltaEvent,
+        state,
+      ),
+      partAdded(2, 6),
+      translateResponsesStreamEvent(
+        {
+          type: "response.reasoning_summary_text.done",
+          item_id: "reasoning-1",
+          output_index: 0,
+          summary_index: 2,
+          sequence_number: 7,
+          text: "**Finishing**",
+        } satisfies ResponseReasoningSummaryTextDoneEvent,
+        state,
+      ),
+    ].flat()
+
+    const thinking = events
+      .flatMap((event) =>
+        (
+          event.type === "content_block_delta"
+          && event.delta.type === "thinking_delta"
+        ) ?
+          [event.delta.thinking]
+        : [],
+      )
+      .join("")
+
+    expect(thinking).toBe(
+      "**Preparing the request**"
+        + REASONING_SUMMARY_SEPARATOR
+        + "**Running the tool**"
+        + REASONING_SUMMARY_SEPARATOR
+        + "**Finishing**",
+    )
   })
 })

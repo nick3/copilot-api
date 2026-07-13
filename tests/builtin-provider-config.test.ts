@@ -168,6 +168,26 @@ describe("builtin provider config", () => {
     expect(readConfigFile(configPath).providers).toEqual({})
   })
 
+  test("isGpt56OrAbove detects gpt-5.6 and above models", () => {
+    const tempDir = createTempConfigDir()
+
+    const output = runScript(
+      tempDir,
+      'const { isGpt56OrAbove } = await import("./src/lib/config"); console.log(JSON.stringify({ "gpt-5.5": isGpt56OrAbove("gpt-5.5"), "gpt-5.6": isGpt56OrAbove("gpt-5.6"), "gpt-5.6-sol": isGpt56OrAbove("gpt-5.6-sol"), "gpt-5.6-terra": isGpt56OrAbove("gpt-5.6-terra"), "gpt-5.6-luna": isGpt56OrAbove("gpt-5.6-luna"), "gpt-6": isGpt56OrAbove("gpt-6"), "gpt-5-mini": isGpt56OrAbove("gpt-5-mini"), "claude-opus": isGpt56OrAbove("claude-opus") }));',
+    )
+
+    expect(JSON.parse(output)).toEqual({
+      "gpt-5.5": false,
+      "gpt-5.6": true,
+      "gpt-5.6-sol": true,
+      "gpt-5.6-terra": true,
+      "gpt-5.6-luna": true,
+      "gpt-6": true,
+      "gpt-5-mini": false,
+      "claude-opus": false,
+    })
+  })
+
   test("does not add missing quick providers to existing provider config", () => {
     const tempDir = createTempConfigDir()
     const configPath = writeConfigFile(tempDir, {

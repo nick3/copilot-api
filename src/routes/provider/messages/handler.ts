@@ -56,6 +56,7 @@ import {
   createResponsesStreamState,
   translateResponsesStreamEvent,
 } from "~/routes/messages/responses-stream-translation"
+import { collectResponsesStreamResult } from "~/routes/messages/responses-stream-collection"
 import {
   translateAnthropicMessagesToResponsesPayload,
   translateResponsesResultToAnthropic,
@@ -435,6 +436,7 @@ const handleOpenAIResponsesProviderMessages = async (
     providerConfig.name === "codex" ?
       getCodexModels().data.find((model) => model.id === payload.model)
     : undefined
+  const wantsStream = payload.stream === true
   const reasoningEffort = resolveProviderResponsesReasoningEffort(
     payload,
     selectedModel,
@@ -446,6 +448,10 @@ const handleOpenAIResponsesProviderMessages = async (
       reasoningEffort,
     },
   )
+
+  if (providerConfig.name === "codex" && !wantsStream) {
+    responsesPayload.stream = true
+  }
 
   const shouldCompactInput = applyResponsesApiContextManagement(
     responsesPayload,
@@ -470,19 +476,36 @@ const handleOpenAIResponsesProviderMessages = async (
       providerConfig.baseUrl,
     )
 
-    if (responsesPayload.stream && isResponsesStream(upstreamResponse)) {
-      return streamResponsesProviderMessages({
-        c,
+    if (isResponsesStream(upstreamResponse)) {
+      if (wantsStream) {
+        return streamResponsesProviderMessages({
+          c,
+          instrumentation,
+          payload,
+          provider,
+          providerConfig,
+          upstreamResponse,
+        })
+      }
+
+      const body = await collectResponsesStreamResult({
+        errorMessagePrefix: `${provider} messages responses stream`,
+        parseEvent: (data) =>
+          parseResponsesProviderStreamChunk(data, providerConfig),
+        upstreamResponse,
+        logger,
+      })
+      return respondResponsesProviderMessagesJson(c, {
+        body,
         instrumentation,
         payload,
         provider,
         providerConfig,
-        upstreamResponse,
       })
     }
 
     return respondResponsesProviderMessagesJson(c, {
-      body: upstreamResponse as ResponsesResult,
+      body: upstreamResponse,
       instrumentation,
       payload,
       provider,

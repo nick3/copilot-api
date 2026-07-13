@@ -15,6 +15,7 @@ import {
   isForceAgentEnabled,
   isContextManagementEnabledForMessages as isConfiguredContextManagementEnabledForMessages,
   isContextManagementEnabledForResponses as isConfiguredContextManagementEnabledForResponses,
+  isGpt56OrAbove,
   isResponsesApiWebSocketEnabled as isConfiguredResponsesApiWebSocketEnabled,
 } from "~/lib/config"
 
@@ -30,6 +31,7 @@ export const responsesUtilsDependencies = {
     isConfiguredContextManagementEnabledForMessages,
   isContextManagementEnabledForResponses:
     isConfiguredContextManagementEnabledForResponses,
+  isGpt56OrAbove,
   isResponsesApiWebSocketEnabled: isConfiguredResponsesApiWebSocketEnabled,
 }
 
@@ -319,6 +321,10 @@ export const applyResponsesApiContextManagement = (
     source: ResponsesApiContextManagementSource
   },
 ): boolean => {
+  if (responsesUtilsDependencies.isGpt56OrAbove(payload.model)) {
+    return false
+  }
+
   if (hasTerminalCompactionTrigger(payload)) {
     return isContextManagementEnabledForSource(options.source)
   }

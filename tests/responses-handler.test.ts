@@ -1159,6 +1159,52 @@ describe("responses handler context management", () => {
     expect(forwardedPayload?.input).toEqual(input)
   })
 
+  for (const model of ["gpt-5.6-sol", "gpt-6"]) {
+    test(`does not automatically add context management for ${model}`, async () => {
+      responsesUtilsDependencies.isContextManagementEnabledForResponses = () =>
+        true
+      accountsManager.selectAccountForRequest = () =>
+        Promise.resolve(buildSelection("/responses", model))
+
+      let forwardedPayload: ResponsesPayload | undefined
+      const fetchMock = mock((_url: string, options?: FetchOptions) => {
+        forwardedPayload = JSON.parse(
+          options?.body as string,
+        ) as ResponsesPayload
+        return Promise.resolve(
+          new Response(JSON.stringify(buildResponsesResult(model, "ok")), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+        )
+      })
+
+      // @ts-expect-error test mock only implements the used subset
+      fetchHolder.fetch = fetchMock
+
+      const input = [
+        { content: "older", role: "user" },
+        {
+          encrypted_content: "cipher",
+          id: "compaction-1",
+          type: "compaction",
+        },
+        { content: "latest", role: "user" },
+      ]
+      const response = await responsesRoutes.fetch(
+        new Request("http://local/", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ model, input }),
+        }),
+      )
+
+      expect(response.status).toBe(200)
+      expect(forwardedPayload?.context_management).toBeUndefined()
+      expect(forwardedPayload?.input).toEqual(input)
+    })
+  }
+
   test("preserves request-provided context_management", async () => {
     accountsManager.selectAccountForRequest = () =>
       Promise.resolve(buildSelection("/responses", "gpt-5.4"))
