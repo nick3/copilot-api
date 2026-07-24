@@ -16,10 +16,14 @@ import { adminApiRoutes } from "./routes/admin-api/route"
 import { adminRoutes } from "./routes/admin/route"
 import { completionRoutes } from "./routes/chat-completions/route"
 import { embeddingRoutes } from "./routes/embeddings/route"
+import { imageRoutes } from "./routes/images/route"
 import { messageRoutes } from "./routes/messages/route"
 import { modelRoutes } from "./routes/models/route"
+import { providerAlphaSearchRoutes } from "./routes/provider/alpha-search/route"
+import { providerImageRoutes } from "./routes/provider/images/route"
 import { providerMessageRoutes } from "./routes/provider/messages/route"
 import { providerModelRoutes } from "./routes/provider/models/route"
+import { providerResponsesRoutes } from "./routes/provider/responses/route"
 import { responsesRoutes } from "./routes/responses/route"
 import { tokenRoute } from "./routes/token/route"
 import { tokenUsageRoute } from "./routes/token-usage/route"
@@ -76,6 +80,7 @@ export function createServer(options: CreateServerOptions = {}): Hono {
   app.route("/token", tokenRoute)
   app.route("/responses", responsesRoutes)
   app.route("/alpha/search", alphaSearchRoutes)
+  app.route("/images", imageRoutes)
 
   app.route("/admin", adminRoutes)
   app.route("/api/admin", adminApiRoutes)
@@ -84,11 +89,21 @@ export function createServer(options: CreateServerOptions = {}): Hono {
   app.route("/v1/models", modelRoutes)
   app.route("/v1/embeddings", embeddingRoutes)
   app.route("/v1/responses", responsesRoutes)
+  app.route("/v1/alpha/search", alphaSearchRoutes)
+  app.route("/v1/images", imageRoutes)
 
   app.route("/v1/messages", messageRoutes)
 
   app.route("/:provider/v1/messages", providerMessageRoutes)
   app.route("/:provider/v1/models", providerModelRoutes)
+  app.route("/:provider/v1/responses", providerResponsesRoutes)
+  app.route("/:provider/v1/alpha/search", providerAlphaSearchRoutes)
+  app.route("/:provider/v1/images", providerImageRoutes)
+
+  app.route("/:provider/models", providerModelRoutes)
+  app.route("/:provider/responses", providerResponsesRoutes)
+  app.route("/:provider/alpha/search", providerAlphaSearchRoutes)
+  app.route("/:provider/images", providerImageRoutes)
 
   return app
 }

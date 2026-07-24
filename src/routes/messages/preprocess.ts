@@ -36,7 +36,6 @@ const SYSTEM_REMINDER_START = "<system-reminder>"
 const SYSTEM_REMINDER_END = "</system-reminder>"
 const SUBAGENT_START_HOOK_ADDITIONAL_PREFIX = "SubagentStart hook additional"
 
-const IDE_EXECUTE_CODE_TOOL = "mcp__ide__executeCode"
 const IDE_GET_DIAGNOSTICS_TOOL = "mcp__ide__getDiagnostics"
 const IDE_GET_DIAGNOSTICS_DESCRIPTION =
   "Get language diagnostics from VS Code. Returns errors, warnings, information, and hints for files in the workspace."
@@ -752,10 +751,6 @@ export const sanitizeIdeTools = (payload: AnthropicMessagesPayload): void => {
   }
 
   payload.tools = payload.tools.flatMap((tool) => {
-    if (tool.name === IDE_EXECUTE_CODE_TOOL && !tool.defer_loading) {
-      return []
-    }
-
     if (tool.name === IDE_GET_DIAGNOSTICS_TOOL) {
       return [
         {

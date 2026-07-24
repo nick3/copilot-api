@@ -274,7 +274,7 @@ afterEach(async () => {
 })
 
 describe("messages handler sanitization", () => {
-  test("removes executeCode and rewrites getDiagnostics before forwarding tools", async () => {
+  test("preserves executeCode and rewrites getDiagnostics before forwarding tools", async () => {
     let upstreamBody: Record<string, unknown> | undefined
 
     const selection = buildSelection("/v1/messages", "messages-model")
@@ -327,6 +327,11 @@ describe("messages handler sanitization", () => {
 
     expect(response.status).toBe(200)
     expect(upstreamBody?.tools).toEqual([
+      {
+        name: "mcp__ide__executeCode",
+        description: "Execute code in VS Code",
+        input_schema: { type: "object" },
+      },
       {
         name: "mcp__ide__getDiagnostics",
         description:

@@ -65,7 +65,7 @@ Compared with routing everything through plain Chat Completions compatibility, t
 - **Opencode OAuth Support**: Use opencode GitHub Copilot authentication by setting `COPILOT_API_OAUTH_APP=opencode` environment variable or using `--oauth-app=opencode` command line option.
 - **GitHub Enterprise Support**: Connect to GHE.com by setting `COPILOT_API_ENTERPRISE_URL` environment variable (e.g., `company.ghe.com`) or using `--enterprise-url=company.ghe.com` command line option.
 - **Custom Data Directory**: Change the default data directory (where tokens and config are stored) by setting `COPILOT_API_HOME` environment variable or using `--api-home=/path/to/dir` command line option.
-- **Multi-Provider Messages Proxy Routes**: Add global provider configs and call external Anthropic-compatible or OpenAI-compatible APIs via `/:provider/v1/messages` and `/:provider/v1/models`, or send `model: "provider/model"` to the top-level `/v1/messages` API.
+- **Multi-Provider Proxy Routes**: Add global provider configs and call upstream Messages, Models, Responses, Alpha Search, and Images APIs through provider-scoped routes. Models, Responses, Alpha Search, and Images support both unversioned and `/v1` paths; Messages remain under `/v1`.
 - **Accurate Claude Token Counting**: Optionally forward `/v1/messages/count_tokens` requests for Claude models to Anthropic's free token counting endpoint for exact counts instead of GPT tokenizer estimation.
 - **GPT Context Management**: Endpoint-specific Responses API context compaction via `contextManagement.messages` and `contextManagement.responses`, reducing unnecessary premium requests when approaching token limits. See [Configuration](#configuration-configjson) for details.
 
@@ -479,7 +479,7 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
 - **auth.adminApiKey:** Single admin key used only for `/admin/*` routes. If missing, the server generates a random key at startup and writes it back to `config.json`. Requests use the same `x-api-key` or `Authorization: Bearer` headers, but regular `auth.apiKeys` never grant access to `/admin/*`.
 - **modelMappings:** Exact `sourceModel -> targetModel` rewrites shared by top-level `POST /v1/messages`, `POST /v1/messages/count_tokens`, `POST /v1/responses`, and `POST /v1/chat/completions` requests. Omit it or leave it as `{}` to disable rewrites. Both the source and target must be non-empty strings. Targets can be regular model IDs or `provider/model` aliases such as `dashscope/qwen3.6-plus`, and the rewrite happens before provider alias parsing. These mappings are not split per interface. The Admin UI Settings page and `/api/admin/config` read and update this field as `modelMappings`.
 - **extraPrompts:** Map of `model -> prompt` appended to the first system prompt when translating Anthropic-style requests to Responses API. Use this to inject guardrails or guidance per model. Missing default entries are auto-added without overwriting your custom prompts. For GPT-5.3+ models (e.g. `gpt-5.3-codex`, `gpt-5.4`, `gpt-5.5`), a built-in commentary prompt is used as fallback when not explicitly configured. The built-in prompts enable phase-aware commentary, which lets the model emit a short user-facing progress update before tools or deeper reasoning.
-- **providers:** Global upstream provider map. Each provider key (for example `dashscope`) becomes a route prefix (`/dashscope/v1/messages`). Supports `type: "anthropic"`, `type: "openai-compatible"`, and `type: "openai-responses"`. Top-level clients can also use `model: "dashscope/model-id"` with `/v1/messages`, `/v1/messages/count_tokens`, `/v1/responses`, and `/v1/chat/completions`; the gateway strips the `dashscope/` prefix before forwarding upstream. `openai-compatible` providers support both chat and Messages flows: `/v1/chat/completions` is proxied to upstream `/v1/chat/completions`, while `/v1/messages` and `/:provider/v1/messages` are translated to upstream chat completions and translated back to Anthropic Messages responses. `GET /v1/models` aggregates Copilot models, configured aliases, and enabled provider model lists with `provider/model-id` IDs; provider-specific lists remain available at `GET /dashscope/v1/models`.
+- **providers:** Global upstream provider map. Each provider key (for example `dashscope`) becomes a route prefix (`/dashscope/v1/messages`). Supports `type: "anthropic"`, `type: "openai-compatible"`, and `type: "openai-responses"`. Top-level clients can also use `model: "dashscope/model-id"` with `/v1/messages`, `/v1/messages/count_tokens`, `/v1/responses`, and `/v1/chat/completions`; the gateway strips the `dashscope/` prefix before forwarding upstream. `openai-compatible` providers support both chat and Messages flows: `/v1/chat/completions` is proxied to upstream `/v1/chat/completions`, while `/v1/messages` and `/:provider/v1/messages` are translated to upstream chat completions and translated back to Anthropic Messages responses. Provider-scoped Models, Responses, Alpha Search, and Images routes accept both unversioned and `/v1` forms. `GET /v1/models` aggregates Copilot models, configured aliases, and enabled provider model lists with `provider/model-id` IDs.
   - `enabled` defaults to `true` if omitted.
   - `baseUrl` should be provider API base URL without the final endpoint. For Anthropic providers, omit `/v1/messages`; for OpenAI-compatible providers, omit `/v1/chat/completions`; for Responses providers, omit `/v1/responses`.
   - `apiKey` is used as the upstream credential value.
@@ -491,6 +491,7 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
     - `topP` (optional): Default top_p value used when the request does not specify one.
     - `topK` (optional): Default top_k value used when the request does not specify one.
     - `pricing` (optional): Per-million-token pricing used by `/token-usage` cost calculation. Supports `input`, `output`, `cachedInput`, `cacheCreationInput`, `explicitCachedInput`, and tiered `tiers` entries with `maxInputTokens`.
+      Built-in OpenCode Go pricing now includes `grok-4.5`, `kimi-k3`, `minimax-m2.7`, and the updated `minimax-m3` tiers; user-defined pricing always takes precedence.
     - `type` (optional): Override the provider type for this specific model. Supports `anthropic`, `openai-compatible`, and `openai-responses`, and is useful when one upstream exposes different models through different API shapes.
     - `extraBody` (optional): Dynamic fields merged into the upstream request body for that model. Request body fields with the same name take precedence. OpenAI-compatible providers can use this for fields such as `enable_thinking`, `preserve_thinking`, `reasoning_effort`. For DashScope/Alibaba Cloud Model Studio providers, `thinking_budget` is translated from Anthropic `thinking.budget_tokens`; if configured in `extraBody`, it is forced after translation and overrides the request-derived budget. DashScope providers default `preserve_thinking` to `true` unless `extraBody` sets it explicitly. For non-DashScope providers, request-derived `thinking_budget` is not forwarded unless it is explicitly configured in `extraBody`.
     - `contextCache` (optional): Explicit context cache control. When omitted, it defaults to `true` only for DashScope/Alibaba Cloud Model Studio OpenAI-compatible providers and to `false` for other upstreams. When enabled, it injects `cache_control: { "type": "ephemeral" }` on up to 4 content blocks using the DashScope Context Cache format. The cache breakpoint strategy matches opencode's main provider flow: the first 2 system messages plus the last 2 non-system messages. Marked string content is converted to text content part arrays for `system` / `user` / `assistant` / `tool` messages; existing array content is marked on the last part. Set this to `false` when the model already supports implicit caching, or when the upstream does not accept this explicit-cache extension field.
@@ -510,7 +511,7 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
 - **modelRefreshIntervalHours:** Interval for refreshing account model lists in the background. Set to `0` to disable refresh. Defaults to `24`.
 - **sessionAffinityRetentionDays:** Number of days to retain session affinity bindings. Defaults to `7`.
 - **useMessagesApi:** When `true` (default), Claude-family models that support Copilot’s native `/v1/messages` endpoint may use the Messages API path. Set to `false` to skip the Messages API candidate and fall back to `/responses` (if supported) or `/chat/completions`.
-- **useResponsesApiWebSocket:** When `true` (default), outbound Copilot Responses API requests use Copilot’s WebSocket transport for models that advertise `ws:/responses`; models that only advertise `/responses` continue to use HTTP. Set to `false` to disable upstream WebSocket routing. This does not disable the inbound Codex-compatible WebSocket listener on `/v1/responses`.
+- **useResponsesApiWebSocket:** When `true` (default), outbound Copilot Responses API requests use Copilot’s WebSocket transport for models that advertise `ws:/responses`; models that only advertise `/responses` continue to use HTTP. Set to `false` to disable upstream WebSocket routing. This does not disable the inbound Codex-compatible WebSocket listener on `/v1/responses`. If the upstream WebSocket repeatedly closes, first test a different network or VPN node, then disable this option to verify the HTTP fallback.
 - **useResponsesApiWebSearch:** When `true` (default), `/v1/responses` keeps tools with `type: "web_search"` and forwards them upstream. Set to `false` to strip them before the Copilot request is sent.
 - **messageApiWebSearchModel:** Global fallback model used when a top-level Copilot `/v1/messages` request contains only Anthropic's server-side `web_search` tool. Defaults to `gpt-5-mini`. If the value is a `provider/model` alias, the request is routed to that provider's Messages API path with the provider prefix stripped. For Copilot GPT models, web search runs through `/responses`. Mixed `web_search` plus custom tools are not supported; the server-side `web_search` tool is stripped and the request continues normally.
 - **claudeTokenMultiplier:** Multiplier applied to the fallback GPT-tokenizer estimate for Claude `/v1/messages/count_tokens` requests. Defaults to `1.15`. Increase it if your client is still compacting too late. This setting is only used when the proxy is estimating Claude tokens locally; if `anthropicApiKey` is configured and Anthropic token counting succeeds, the exact Anthropic count is returned instead.
@@ -557,21 +558,31 @@ These endpoints mimic the OpenAI API structure.
 
 ### Codex Backend Proxy Endpoints
 
-| Endpoint             | Method | Description |
-| -------------------- | ------ | ----------- |
-| `POST /alpha/search` | `POST` | Transparently forwards the JSON body and query parameters to the Codex Alpha Search upstream. The gateway replaces client authorization and account headers with the active Codex login, forwards compatible headers such as `accept`, `content-type`, `originator`, `user-agent`, and `cookie`, and returns the upstream status, headers, and body unchanged. |
+These endpoints require an active Codex login and are available both without a version prefix and under `/v1`.
+
+| Endpoint | Method | Description |
+| --- | --- | --- |
+| `/alpha/search`<br>`/v1/alpha/search` | `POST` | Transparently forwards JSON and query parameters to the Codex Alpha Search upstream. |
+| `/images/generations`<br>`/v1/images/generations` | `POST` | Forwards a JSON image-generation request to Codex. |
+| `/images/edits`<br>`/v1/images/edits` | `POST` | Streams a multipart image-edit request to Codex while preserving its content type. |
+
+The gateway replaces client authorization and account headers with the active Codex login, honors the configured Codex provider `baseUrl`, preserves compatible request headers and query parameters, and returns the upstream response unchanged.
 
 ### Anthropic Compatible Endpoints
 
-These endpoints are designed to be compatible with the Anthropic Messages API.
+These endpoints are designed to be compatible with the Anthropic Messages API. Provider-scoped Models, Responses, Alpha Search, and Images routes accept both unversioned and `/v1` paths; Messages routes remain under `/v1`.
 
 | Endpoint                         | Method | Description                                                  |
 | -------------------------------- | ------ | ------------------------------------------------------------ |
 | `POST /v1/messages`              | `POST` | Creates a model response for a given conversation. Supports `provider/model` aliases for configured providers. |
 | `POST /v1/messages/count_tokens` | `POST` | Calculates the number of tokens for a given set of messages. Supports `provider/model` aliases for configured providers. |
 | `POST /:provider/v1/messages`       | `POST` | Proxies Anthropic Messages requests to the configured Anthropic or OpenAI-compatible provider. |
-| `GET /:provider/v1/models`          | `GET`  | Proxies model listing requests to the configured provider.   |
+| `GET /:provider/models`<br>`GET /:provider/v1/models` | `GET` | Proxies model listing requests. For `codex`, Codex clients are forwarded to the remote catalog while other clients receive the built-in catalog. |
 | `POST /:provider/v1/messages/count_tokens` | `POST` | Calculates tokens locally for provider route requests. |
+| `POST /:provider/responses`<br>`POST /:provider/v1/responses` | `POST` | Proxies OpenAI Responses requests to a configured `openai-responses` provider. |
+| `POST /:provider/alpha/search`<br>`POST /:provider/v1/alpha/search` | `POST` | Proxies Alpha Search requests to Codex or `{baseUrl}/v1/alpha/search`. |
+| `POST /:provider/images/generations`<br>`POST /:provider/v1/images/generations` | `POST` | Proxies image generation to Codex or `{baseUrl}/v1/images/generations`. |
+| `POST /:provider/images/edits`<br>`POST /:provider/v1/images/edits` | `POST` | Streams image edits to Codex or `{baseUrl}/v1/images/edits`. |
 
 ### Usage Monitoring Endpoints
 
@@ -811,7 +822,7 @@ To get started, run the `start` command with the `--claude-code` flag:
 bunx --bun @nick3/copilot-api@latest start --claude-code
 ```
 
-You will be prompted to select a primary model and a "small, fast" model for background tasks. After selecting the models, a command will be copied to your clipboard. This command sets the necessary environment variables for Claude Code to use the proxy.
+The gateway automatically picks the latest available Opus, Sonnet, and Haiku models from the first loaded Copilot account and copies a launch command to your clipboard. Missing model families are omitted from the generated environment.
 
 Paste and run this command in a new terminal to launch Claude Code.
 
@@ -829,6 +840,8 @@ Here is an example `.claude/settings.json` file:
     "ANTHROPIC_MODEL": "gpt-5.4",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "gpt-5.4",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-5-mini",
+    "CLAUDE_CODE_USE_VERTEX": "0",
+    "CLAUDE_CODE_USE_BEDROCK": "0",
     "DISABLE_NON_ESSENTIAL_MODEL_CALLS": "1",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
@@ -836,17 +849,12 @@ Here is an example `.claude/settings.json` file:
     "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "true",
     "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
     "CLAUDE_PLUGIN_ENABLE_QUESTION_RULES": "true"
-  },
-  "permissions": {
-    "deny": [
-      "WebSearch", 
-      "mcp__ide__executeCode"
-    ]
   }
 }
 ```
 
 - Replace `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, and `ANTHROPIC_DEFAULT_HAIKU_MODEL` according to your needs. After configuration, please install the claude code plugin [Plugin Integrations](#plugin-integrations).  
+- For a Codex provider model, avoid a client-facing `codex/` prefix because Claude Code may apply special handling that drops prior thinking blocks. Expose a plain name and route it with `modelMappings`, for example: `"gpt-5.6-sol": "codex/gpt-5.6-sol"`.
 - Setting CLAUDE_CODE_ATTRIBUTION_HEADER to 0 can prevent Claude code from adding billing and version information in system prompts, thereby avoiding prompt cache invalidation.
 - Turning off CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION and CLAUDE_CODE_ENABLE_AWAY_SUMMARY can prevent quota from being consumed unnecessarily.
 - Claude Code WebSearch is supported for pure search requests. For Copilot, keep `messageApiWebSearchModel` pointed at a Responses-capable GPT model or a `provider/model` alias. For provider routes, use a native Anthropic provider or an `openai-responses` provider. Add `WebSearch` to `permissions.deny` only if you want to forbid this traffic.

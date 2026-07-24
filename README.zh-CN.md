@@ -70,7 +70,7 @@
 - **支持 opencode OAuth**：可通过设置环境变量 `COPILOT_API_OAUTH_APP=opencode` 或使用命令行参数 `--oauth-app=opencode` 来启用 opencode GitHub Copilot 认证。
 - **支持 GitHub Enterprise**：可通过设置环境变量 `COPILOT_API_ENTERPRISE_URL`（例如 `company.ghe.com`）或命令行参数 `--enterprise-url=company.ghe.com` 连接到 GHE.com。
 - **自定义数据目录**：可通过环境变量 `COPILOT_API_HOME` 或命令行参数 `--api-home=/path/to/dir` 修改默认数据目录（存放 token 和配置）。
-- **多 Provider Messages 代理路由**：可以添加全局 provider 配置，并通过 `/:provider/v1/messages` 与 `/:provider/v1/models` 调用外部 Anthropic 或 OpenAI 兼容 API，也可以把 `model` 写成 `"provider/model"` 后直接发到顶层 `/v1/messages`。
+- **多 Provider 代理路由**：可以添加全局 provider 配置，并通过 provider 路由调用上游 Messages、Models、Responses、Alpha Search 与 Images API。Models、Responses、Alpha Search 和 Images 同时支持无版本前缀与 `/v1` 路径；Messages 仍使用 `/v1`。
 - **精确的 Claude Token 计数**：可以选择将 Claude 模型的 `/v1/messages/count_tokens` 请求转发到 Anthropic 的免费 token counting 端点，以获得精确计数，而不是依赖 GPT tokenizer 估算。
 - **GPT 上下文管理**：可通过 `contextManagement.messages` 和 `contextManagement.responses` 按端点启用 Responses API 上下文压缩，在接近 token 限制时减少不必要的 Premium 请求。详见 [配置](#configuration-configjson)。
 
@@ -488,7 +488,7 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
 - **auth.adminApiKey：** 仅用于 `/admin/*` 路由的单个 admin key。若未配置，服务会在启动时自动生成一个随机 key，并回写到 `config.json`。它同样使用 `x-api-key` 或 `Authorization: Bearer` 这两种头，但普通 `auth.apiKeys` 不能访问 `/admin/*`。
 - **modelMappings：** 用于顶层 `POST /v1/messages`、`POST /v1/messages/count_tokens`、`POST /v1/responses` 和 `POST /v1/chat/completions` 请求的精确 `sourceModel -> targetModel` 重写映射，这几类接口共用同一份规则。省略该字段或保留为 `{}` 时，不会做模型重写。`source` 和 `target` 都必须是非空字符串。`target` 可以是普通模型 ID，也可以是 `provider/model` 形式的别名，例如 `dashscope/qwen3.6-plus`；重写发生在 provider alias 解析之前。这些映射不再按接口区分。Admin UI 的 Settings 页面和 `/api/admin/config` 会以 `modelMappings` 字段读写这项配置。
 - **extraPrompts：** `model -> prompt` 的映射。把 Anthropic 风格请求翻译为 Responses API 时，会将其附加到第一条 system prompt 后面。你可以借此为不同模型注入护栏或指引。缺失的默认项会自动补齐，但不会覆盖你自定义的 prompt。对于 GPT-5.3+ 模型（如 `gpt-5.3-codex`、`gpt-5.4`、`gpt-5.5`），未显式配置时会自动使用内置的 commentary prompt。内置 prompt 会启用带阶段感知的 commentary，让模型在工具调用或更深层推理前先发出简短的用户可见进度说明。
-- **providers：** 全局上游 provider 映射。每个 provider key（例如 `dashscope`）都会变成一个路由前缀（`/dashscope/v1/messages`）。支持 `type: "anthropic"`、`type: "openai-compatible"` 和 `type: "openai-responses"`。顶层客户端也可以在 `/v1/messages`、`/v1/messages/count_tokens`、`/v1/responses` 和 `/v1/chat/completions` 中使用 `model: "dashscope/model-id"`；AI gateway 会在转发上游前移除 `dashscope/` 前缀。`openai-compatible` provider 同时支持 chat 和 Messages 流程：`/v1/chat/completions` 会直连上游 `/v1/chat/completions`，而 `/v1/messages` 和 `/:provider/v1/messages` 会先翻译为上游 Chat Completions，再把响应翻译回 Anthropic Messages。`GET /v1/models` 会聚合 Copilot 模型、已配置别名以及已启用 provider 的模型列表，并以 `provider/model-id` 形式返回 provider 模型；指定 provider 的模型列表仍可通过 `GET /dashscope/v1/models` 获取。
+- **providers：** 全局上游 provider 映射。每个 provider key（例如 `dashscope`）都会变成一个路由前缀（`/dashscope/v1/messages`）。支持 `type: "anthropic"`、`type: "openai-compatible"` 和 `type: "openai-responses"`。顶层客户端也可以在 `/v1/messages`、`/v1/messages/count_tokens`、`/v1/responses` 和 `/v1/chat/completions` 中使用 `model: "dashscope/model-id"`；AI gateway 会在转发上游前移除 `dashscope/` 前缀。`openai-compatible` provider 同时支持 chat 和 Messages 流程：`/v1/chat/completions` 会直连上游 `/v1/chat/completions`，而 `/v1/messages` 和 `/:provider/v1/messages` 会先翻译为上游 Chat Completions，再把响应翻译回 Anthropic Messages。Provider 级 Models、Responses、Alpha Search 和 Images 路由同时接受无版本前缀与 `/v1` 形式。`GET /v1/models` 会聚合 Copilot 模型、已配置别名以及已启用 provider 的模型列表，并以 `provider/model-id` 形式返回 provider 模型。
   - `enabled`：可选，若省略则默认为 `true`。
   - `baseUrl`：provider API 的基础 URL，不要带最终 endpoint。Anthropic provider 不要带 `/v1/messages`；OpenAI 兼容 provider 不要带 `/v1/chat/completions`；Responses provider 不要带 `/v1/responses`。
   - `apiKey`：作为上游凭据值使用。
@@ -500,6 +500,7 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
     - `topP`：可选，当请求未指定时使用的默认 `top_p`。
     - `topK`：可选，当请求未指定时使用的默认 `top_k`。
     - `pricing`：可选，供 `/token-usage` 成本计算使用的每百万 token 价格。支持 `input`、`output`、`cachedInput`、`cacheCreationInput`、`explicitCachedInput`，以及带 `maxInputTokens` 的阶梯 `tiers`。
+      内置 OpenCode Go 价格现已包含 `grok-4.5`、`kimi-k3`、`minimax-m2.7` 以及更新后的 `minimax-m3` 阶梯；用户自定义价格始终优先。
     - `type`：可选，覆盖该模型使用的 provider 类型。支持 `anthropic`、`openai-compatible` 和 `openai-responses`，适合一个上游同时暴露不同 API 形态模型的场景。
     - `extraBody`：可选，按模型合入上游请求体的动态字段；请求体显式同名字段优先。OpenAI 兼容 provider 可用它配置 `enable_thinking`、`preserve_thinking`、`reasoning_effort` 等字段。DashScope/阿里云百炼 provider 会从 Anthropic `thinking.budget_tokens` 翻译出 `thinking_budget`；若在 `extraBody` 中配置，则会在翻译后强制写入并覆盖请求派生出的预算值。DashScope provider 会默认把 `preserve_thinking` 设为 `true`，除非 `extraBody` 已显式配置。非 DashScope provider 不会转发请求派生出的 `thinking_budget`，除非它在 `extraBody` 中被显式配置。
     - `contextCache`：可选，显式 context cache 控制。省略时仅 DashScope/阿里云百炼 OpenAI 兼容 provider 默认 `true`，其他上游默认 `false`。启用后会按 DashScope Context Cache 格式，在最多 4 个 content block 上注入 `cache_control: { "type": "ephemeral" }`。缓存断点策略与 opencode 主链路保持一致：前 2 条 system 消息 + 最后 2 条非 system 消息。标记字符串 content 时会把 `system` / `user` / `assistant` / `tool` 消息转换为 text content part 数组；已有数组 content 则标记最后一个 part。如果模型本身已经支持隐式缓存，或上游不支持该显式缓存扩展字段，可在模型配置中设为 `false`。
@@ -519,7 +520,7 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
 - **modelRefreshIntervalHours：** 后台刷新账号模型列表的间隔小时数。设为 `0` 可关闭自动刷新。默认值为 `24`。
 - **sessionAffinityRetentionDays：** session affinity 绑定的保留天数。默认值为 `7`。
 - **useMessagesApi：** 当为 `true`（默认）时，支持 Copilot 原生 `/v1/messages` 端点的 Claude 系模型会走 Messages API 路径。设为 `false` 时，将跳过 Messages API 候选，回退到 `/responses`（如支持）或 `/chat/completions`。
-- **useResponsesApiWebSocket：** 当为 `true`（默认）时，发往上游 Copilot Responses API 的请求会对声明了 `ws:/responses` 的模型使用 Copilot WebSocket transport；仅声明 `/responses` 的模型仍走 HTTP。设为 `false` 可禁用上游 WebSocket 路由。该配置不会禁用 `/v1/responses` 上面向 Codex 的入站 WebSocket listener。
+- **useResponsesApiWebSocket：** 当为 `true`（默认）时，发往上游 Copilot Responses API 的请求会对声明了 `ws:/responses` 的模型使用 Copilot WebSocket transport；仅声明 `/responses` 的模型仍走 HTTP。设为 `false` 可禁用上游 WebSocket 路由。该配置不会禁用 `/v1/responses` 上面向 Codex 的入站 WebSocket listener。如果上游 WebSocket 反复断开，请先尝试其他网络或 VPN 节点，再关闭此选项验证 HTTP 回退路径。
 - **useResponsesApiWebSearch：** 当为 `true`（默认）时，`/v1/responses` 会保留 `type: "web_search"` 的工具并转发到上游。设为 `false` 则会在发送 Copilot 请求之前将其剥离。
 - **messageApiWebSearchModel：** 顶层 Copilot `/v1/messages` 请求只包含 Anthropic 服务端 `web_search` 工具时使用的全局回退模型，默认值为 `gpt-5-mini`。如果该值是 `provider/model` 别名，请求会进入对应 provider 的 Messages API 路径，并在转发前移除 provider 前缀。对于 Copilot GPT 模型，web search 会通过 `/responses` 执行。混合 `web_search` 与自定义工具的场景暂不支持，服务端会移除 server-side `web_search` 并让请求继续走普通链路。
 - **claudeTokenMultiplier：** 用于 Claude `/v1/messages/count_tokens` 请求在本地走 GPT tokenizer 估算时的乘数。默认值为 `1.15`。如果你的客户端仍然过晚触发上下文压缩，可以适当调大。这个配置只会在代理本地估算 Claude token 时生效；如果已经配置 `anthropicApiKey` 且 Anthropic token counting 调用成功，则会直接返回 Anthropic 的精确计数，不会使用这个乘数。
@@ -566,21 +567,31 @@ curl http://localhost:4141/v1/models \
 
 ### Codex 后端代理端点
 
+这些端点需要有效的 Codex 登录态，并且同时提供无版本前缀与 `/v1` 路径。
+
 | 端点 | 方法 | 说明 |
 | --- | --- | --- |
-| `POST /alpha/search` | `POST` | 将 JSON 请求体和查询参数透明转发到 Codex Alpha Search 上游。网关会使用当前 Codex 登录态覆盖客户端的 authorization 和 account header，透传 `accept`、`content-type`、`originator`、`user-agent`、`cookie` 等兼容 header，并原样返回上游状态码、响应头和响应体。 |
+| `/alpha/search`<br>`/v1/alpha/search` | `POST` | 将 JSON 请求体与查询参数透明转发到 Codex Alpha Search 上游。 |
+| `/images/generations`<br>`/v1/images/generations` | `POST` | 将 JSON 图片生成请求转发到 Codex。 |
+| `/images/edits`<br>`/v1/images/edits` | `POST` | 保留 content type，并以流式方式转发 multipart 图片编辑请求。 |
+
+网关会使用当前 Codex 登录态覆盖客户端的 authorization 与 account header，遵循 Codex provider 配置的 `baseUrl`，保留兼容请求头和查询参数，并原样返回上游响应。
 
 ### Anthropic 兼容端点
 
-这些端点设计为兼容 Anthropic Messages API。
+这些端点设计为兼容 Anthropic Messages API。Provider 级 Models、Responses、Alpha Search 和 Images 路由同时接受无版本前缀与 `/v1` 路径；Messages 路由仍使用 `/v1`。
 
 | 端点 | 方法 | 说明 |
 | --- | --- | --- |
 | `POST /v1/messages` | `POST` | 为给定对话创建模型响应。支持已配置 provider 的 `provider/model` 别名。 |
 | `POST /v1/messages/count_tokens` | `POST` | 计算一组消息的 token 数。支持已配置 provider 的 `provider/model` 别名。 |
 | `POST /:provider/v1/messages` | `POST` | 将 Anthropic Messages 请求代理到已配置的 Anthropic 或 OpenAI 兼容 provider。 |
-| `GET /:provider/v1/models` | `GET` | 将模型列表请求代理到已配置的 provider。 |
+| `GET /:provider/models`<br>`GET /:provider/v1/models` | `GET` | 代理模型列表请求。对于 `codex`，Codex 客户端会转发到远端目录，其他客户端返回内置目录。 |
 | `POST /:provider/v1/messages/count_tokens` | `POST` | 为 provider 路由请求在本地计算 token 数。 |
+| `POST /:provider/responses`<br>`POST /:provider/v1/responses` | `POST` | 将 OpenAI Responses 请求代理到已配置的 `openai-responses` provider。 |
+| `POST /:provider/alpha/search`<br>`POST /:provider/v1/alpha/search` | `POST` | 将 Alpha Search 请求代理到 Codex 或 `{baseUrl}/v1/alpha/search`。 |
+| `POST /:provider/images/generations`<br>`POST /:provider/v1/images/generations` | `POST` | 将图片生成请求代理到 Codex 或 `{baseUrl}/v1/images/generations`。 |
+| `POST /:provider/images/edits`<br>`POST /:provider/v1/images/edits` | `POST` | 将图片编辑请求以流式方式代理到 Codex 或 `{baseUrl}/v1/images/edits`。 |
 
 ### 使用量监控端点
 
@@ -821,7 +832,7 @@ codex -p copilot-api
 bunx --bun @nick3/copilot-api@latest start --claude-code
 ```
 
-你会被提示选择一个主模型，以及一个用于后台任务的 “small, fast” 模型。选择完成后，会有一条命令被复制到剪贴板中。该命令会设置 Claude Code 使用该代理所需的环境变量。
+网关会从第一个已加载的 Copilot 账号中自动选择最新可用的 Opus、Sonnet 和 Haiku 模型，并把启动命令复制到剪贴板。若某个模型家族不可用，对应环境变量会被省略。
 
 在新的终端中粘贴并执行这条命令，即可启动 Claude Code。
 
@@ -841,6 +852,8 @@ bunx --bun @nick3/copilot-api@latest start --claude-code
     "ANTHROPIC_MODEL": "gpt-5.4",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "gpt-5.4",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-5-mini",
+    "CLAUDE_CODE_USE_VERTEX": "0",
+    "CLAUDE_CODE_USE_BEDROCK": "0",
     "DISABLE_NON_ESSENTIAL_MODEL_CALLS": "1",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
@@ -848,17 +861,12 @@ bunx --bun @nick3/copilot-api@latest start --claude-code
     "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "true",
     "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
     "CLAUDE_PLUGIN_ENABLE_QUESTION_RULES": "true"
-  },
-  "permissions": {
-    "deny": [
-      "WebSearch", 
-      "mcp__ide__executeCode"
-    ]
   }
 }
 ```
 
 - 请根据需要替换 `ANTHROPIC_MODEL`、`ANTHROPIC_DEFAULT_OPUS_MODEL`、`ANTHROPIC_DEFAULT_SONNET_MODEL` 和 `ANTHROPIC_DEFAULT_HAIKU_MODEL`。配置完成后，请安装 claude code 插件，见 [插件集成](#plugin-integrations)。
+- 使用 Codex provider 模型时，建议不要把 `codex/` 前缀暴露给 Claude Code，因为它可能触发特殊处理并丢弃之前的 thinking block。可使用普通模型名，再通过 `modelMappings` 路由，例如：`"gpt-5.6-sol": "codex/gpt-5.6-sol"`。
 - 将 `CLAUDE_CODE_ATTRIBUTION_HEADER` 设为 `0` 可以阻止 Claude Code 在 system prompt 中附加计费和版本信息，从而避免 prompt cache 失效。
 - 关闭 `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` 和 `CLAUDE_CODE_ENABLE_AWAY_SUMMARY` 可以避免不必要地消耗额度。
 - Claude Code WebSearch 已支持纯搜索请求。Copilot 路径请保持 `messageApiWebSearchModel` 指向 Responses-capable GPT 模型或 `provider/model` 别名；provider 路由请使用原生 Anthropic provider 或 `openai-responses` provider。只有在你明确想禁止这类流量时，才需要把 `WebSearch` 加到 `permissions.deny`。

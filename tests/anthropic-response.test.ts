@@ -673,4 +673,170 @@ describe("OpenAI usage-only stream translation", () => {
     })
     expect(translatedStream.at(-1)).toEqual({ type: "message_stop" })
   })
+
+  test("should not complete message on empty-choices metadata chunk without usage", () => {
+    const openAIStream: Array<ChatCompletionChunk> = [
+      {
+        id: "cmpl-metadata",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "kimi-k3",
+        choices: [
+          {
+            index: 0,
+            delta: { role: "assistant" },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-metadata",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "kimi-k3",
+        choices: [
+          {
+            index: 0,
+            delta: { content: "Hello" },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-metadata",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "kimi-k3",
+        choices: [
+          { index: 0, delta: {}, finish_reason: "stop", logprobs: null },
+        ],
+      },
+      // Metadata-only event (e.g. inference cost) arriving before the
+      // final usage chunk. It must not complete the pending message.
+      {
+        id: "cmpl-metadata",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "kimi-k3",
+        choices: [],
+      },
+      {
+        id: "cmpl-metadata",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "kimi-k3",
+        choices: [],
+        usage: {
+          prompt_tokens: 8544,
+          completion_tokens: 174,
+          total_tokens: 8718,
+        },
+      },
+    ]
+
+    const streamState: AnthropicStreamState = {
+      messageStartSent: false,
+      contentBlockIndex: 0,
+      contentBlockOpen: false,
+      toolCalls: {},
+      thinkingBlockOpen: false,
+    }
+    const translatedStream: Array<unknown> = []
+    const metadataChunkEvents: Array<unknown> = []
+    for (const [index, chunk] of openAIStream.entries()) {
+      const events = translateChunkToAnthropicEvents(chunk, streamState)
+      if (index === 3) {
+        metadataChunkEvents.push(...events)
+      }
+      translatedStream.push(...events)
+    }
+    translatedStream.push(...flushPendingAnthropicStreamEvents(streamState))
+
+    // The metadata-only chunk must not emit any event.
+    expect(metadataChunkEvents).toHaveLength(0)
+
+    const messageDeltaEvents = translatedStream.filter(
+      (event) => (event as { type: string }).type === "message_delta",
+    )
+    expect(messageDeltaEvents).toHaveLength(1)
+    expect(messageDeltaEvents[0]).toEqual({
+      type: "message_delta",
+      delta: {
+        stop_reason: "end_turn",
+        stop_sequence: null,
+      },
+      usage: {
+        input_tokens: 8544,
+        output_tokens: 174,
+      },
+    })
+    expect(translatedStream.at(-1)).toEqual({ type: "message_stop" })
+  })
+
+  test("should complete pending message at flush when no usage chunk arrives", () => {
+    const openAIStream: Array<ChatCompletionChunk> = [
+      {
+        id: "cmpl-no-usage",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "kimi-k3",
+        choices: [
+          {
+            index: 0,
+            delta: { role: "assistant" },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-no-usage",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "kimi-k3",
+        choices: [
+          { index: 0, delta: {}, finish_reason: "stop", logprobs: null },
+        ],
+      },
+      // Metadata-only event without usage; stream ends afterwards.
+      {
+        id: "cmpl-no-usage",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "kimi-k3",
+        choices: [],
+      },
+    ]
+
+    const streamState: AnthropicStreamState = {
+      messageStartSent: false,
+      contentBlockIndex: 0,
+      contentBlockOpen: false,
+      toolCalls: {},
+      thinkingBlockOpen: false,
+    }
+    const translatedStream = openAIStream.flatMap((chunk) =>
+      translateChunkToAnthropicEvents(chunk, streamState),
+    )
+    translatedStream.push(...flushPendingAnthropicStreamEvents(streamState))
+
+    const messageDeltaEvents = translatedStream.filter(
+      (event) => event.type === "message_delta",
+    )
+    expect(messageDeltaEvents).toHaveLength(1)
+    expect(messageDeltaEvents[0]).toEqual({
+      type: "message_delta",
+      delta: {
+        stop_reason: "end_turn",
+        stop_sequence: null,
+      },
+      usage: {
+        input_tokens: 0,
+        output_tokens: 0,
+      },
+    })
+    expect(translatedStream.at(-1)).toEqual({ type: "message_stop" })
+  })
 })

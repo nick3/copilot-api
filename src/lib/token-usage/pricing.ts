@@ -221,6 +221,21 @@ const BUILTIN_PROVIDER_PRICING: Record<
       input: 1.4,
       output: 4.4,
     },
+    "grok-4.5": {
+      tiers: [
+        {
+          cachedInput: 0.5,
+          input: 2,
+          maxInputTokens: 200_000,
+          output: 6,
+        },
+        {
+          cachedInput: 1,
+          input: 4,
+          output: 12,
+        },
+      ],
+    },
     "deepseek-v4-flash": {
       cachedInput: 0.0028,
       input: 0.14,
@@ -235,6 +250,11 @@ const BUILTIN_PROVIDER_PRICING: Record<
       cachedInput: 0.19,
       input: 0.95,
       output: 4,
+    },
+    "kimi-k3": {
+      cachedInput: 0.3,
+      input: 3,
+      output: 15,
     },
     "mimo-v2.5": {
       cachedInput: 0.0028,
@@ -270,24 +290,24 @@ const BUILTIN_PROVIDER_PRICING: Record<
       input: 2.5,
       output: 7.5,
     },
-    "minimax-m2.5": {
-      cachedInput: 0.03,
+    "minimax-m2.7": {
+      cachedInput: 0.06,
       input: 0.3,
       output: 1.2,
     },
     "minimax-m3": {
       tiers: [
         {
-          cachedInput: 0.02,
-          input: 0.1,
+          cachedInput: 0.06,
+          input: 0.3,
           maxInputTokens: 200_000,
-          output: 0.4,
+          output: 1.2,
         },
         {
-          cachedInput: 0.04,
-          input: 0.2,
+          cachedInput: 0.12,
+          input: 0.6,
           maxInputTokens: 512_000,
-          output: 0.8,
+          output: 2.4,
         },
       ],
     },

@@ -955,7 +955,7 @@ describe("mergeToolResultForClaude attachments with tool_reference", () => {
 })
 
 describe("sanitizeIdeTools", () => {
-  test("continues to remove executeCode when Responses tool search is disabled", () => {
+  test("rewrites getDiagnostics description and keeps other tools intact", () => {
     const payload: AnthropicMessagesPayload = {
       model: "gpt-5",
       max_tokens: 128,
@@ -982,11 +982,22 @@ describe("sanitizeIdeTools", () => {
 
     expect(payload.tools?.map((tool) => tool.name)).toEqual([
       "mcp__tool_search__search",
+      "mcp__ide__executeCode",
       "mcp__ide__getDiagnostics",
     ])
+    const diagnosticsTool = payload.tools?.find(
+      (tool) => tool.name === "mcp__ide__getDiagnostics",
+    )
+    expect(diagnosticsTool?.description).toBe(
+      "Get language diagnostics from VS Code. Returns errors, warnings, information, and hints for files in the workspace.",
+    )
+    const executeCodeTool = payload.tools?.find(
+      (tool) => tool.name === "mcp__ide__executeCode",
+    )
+    expect(executeCodeTool?.description).toBe("Execute code")
   })
 
-  test("does not keep executeCode for GPT models without the tool search bridge", () => {
+  test("rewrites getDiagnostics description for GPT models", () => {
     const payload: AnthropicMessagesPayload = {
       model: "gpt-5.4",
       max_tokens: 128,
@@ -1008,8 +1019,15 @@ describe("sanitizeIdeTools", () => {
     sanitizeIdeTools(payload)
 
     expect(payload.tools?.map((tool) => tool.name)).toEqual([
+      "mcp__ide__executeCode",
       "mcp__ide__getDiagnostics",
     ])
+    const diagnosticsTool = payload.tools?.find(
+      (tool) => tool.name === "mcp__ide__getDiagnostics",
+    )
+    expect(diagnosticsTool?.description).toBe(
+      "Get language diagnostics from VS Code. Returns errors, warnings, information, and hints for files in the workspace.",
+    )
   })
 })
 

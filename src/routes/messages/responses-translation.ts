@@ -69,7 +69,8 @@ const COMPACTION_SIGNATURE_PREFIX = "cm1#"
 const COMPACTION_SIGNATURE_SEPARATOR = "@"
 
 export const THINKING_TEXT = "Thinking..."
-export const REASONING_SUMMARY_SEPARATOR = "\u2063\n\n"
+export const REASONING_SUMMARY_SEPARATOR = "\u00A0\n\n"
+const REASONING_SUMMARY_SEPARATOR_PATTERN = /\u00a0\n\n|\u2063\n\n/
 
 interface ResponsesTranslationOptions {
   modelOverride?: string
@@ -472,11 +473,11 @@ const createReasoningSummary = (
     return []
   }
 
-  if (!thinking.includes(REASONING_SUMMARY_SEPARATOR)) {
+  if (!REASONING_SUMMARY_SEPARATOR_PATTERN.test(thinking)) {
     return [{ type: "summary_text", text: thinking }]
   }
 
-  return thinking.split(REASONING_SUMMARY_SEPARATOR).map((text) => ({
+  return thinking.split(REASONING_SUMMARY_SEPARATOR_PATTERN).map((text) => ({
     type: "summary_text",
     text,
   }))

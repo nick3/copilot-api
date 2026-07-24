@@ -1,3 +1,10 @@
+import {
+  fetch as undiciFetch,
+  getGlobalDispatcher,
+  type Dispatcher,
+  type RequestInit as UndiciRequestInit,
+} from "undici"
+
 import type { ResolvedProviderConfig } from "~/lib/config"
 import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
 import type { ChatCompletionsPayload } from "~/services/copilot/create-chat-completions"
@@ -125,4 +132,89 @@ export async function forwardProviderModels(
     method: "GET",
     headers: buildProviderUpstreamHeaders(providerConfig, requestHeaders),
   })
+}
+
+/** Align with Codex images: long-running generation/edits need a generous cap. */
+const PROVIDER_IMAGES_TIMEOUT_MS = 15 * 60 * 1000
+
+const providerImagesDispatcher = {
+  dispatch(
+    options: Dispatcher.DispatchOptions,
+    handler: Dispatcher.DispatchHandler,
+  ) {
+    return getGlobalDispatcher().dispatch(
+      {
+        ...options,
+        bodyTimeout: PROVIDER_IMAGES_TIMEOUT_MS,
+        headersTimeout: PROVIDER_IMAGES_TIMEOUT_MS,
+      },
+      handler,
+    )
+  },
+} as Dispatcher
+
+function resolveProviderRequestUrl(
+  providerConfig: ResolvedProviderConfig,
+  requestUrl: string,
+  path: string,
+): string {
+  const upstreamUrl = new URL(`${providerConfig.baseUrl}${path}`)
+  upstreamUrl.search = new URL(requestUrl, "http://localhost").search
+  return upstreamUrl.toString()
+}
+
+export async function forwardProviderAlphaSearch(
+  providerConfig: ResolvedProviderConfig,
+  request: Request,
+): Promise<Response> {
+  const headers = buildProviderUpstreamHeaders(providerConfig, request.headers)
+  const body = await request.arrayBuffer()
+
+  return await fetch(
+    resolveProviderRequestUrl(providerConfig, request.url, "/v1/alpha/search"),
+    {
+      method: "POST",
+      headers,
+      body,
+    },
+  )
+}
+
+export async function forwardProviderImages(
+  providerConfig: ResolvedProviderConfig,
+  request: Request,
+  operation: "generations" | "edits",
+): Promise<Response> {
+  const headers = buildProviderUpstreamHeaders(providerConfig, request.headers)
+  const contentType = request.headers.get("content-type")
+  if (contentType) {
+    headers["content-type"] = contentType
+  } else if (operation === "edits") {
+    delete headers["content-type"]
+  }
+
+  const init: RequestInit & { duplex: "half" } = {
+    method: "POST",
+    headers,
+    body: request.body,
+    duplex: "half",
+    signal: AbortSignal.timeout(PROVIDER_IMAGES_TIMEOUT_MS),
+  }
+
+  const upstreamUrl = resolveProviderRequestUrl(
+    providerConfig,
+    request.url,
+    `/v1/images/${operation}`,
+  )
+
+  if (typeof Bun !== "undefined") {
+    return await fetch(upstreamUrl, init)
+  }
+
+  // Node's global fetch keeps Undici's shorter default headers/body timeouts.
+  // Use an explicit dispatcher so the documented 15-minute cap applies there.
+  return (await undiciFetch(upstreamUrl, {
+    ...init,
+    dispatcher: providerImagesDispatcher,
+  } as unknown as UndiciRequestInit)) as unknown as Response
 }

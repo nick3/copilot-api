@@ -22,6 +22,7 @@ import {
   isAccountAffinityEnabled,
   mergeConfigWithDefaults,
 } from "./lib/config"
+import { getLatestModelForFamily } from "./lib/models"
 import { initOpencodeVersion } from "./lib/opencode"
 import { ensurePaths } from "./lib/paths"
 import { initProxyFromEnv } from "./lib/proxy"
@@ -103,33 +104,30 @@ type AvailableModels = NonNullable<
   ReturnType<typeof accountsManager.getFirstAccountModels>
 >
 
-async function setupClaudeCode(
-  models: AvailableModels,
-  serverUrl: string,
-): Promise<void> {
-  const selectedModel = await consola.prompt(
-    "Select a model to use with Claude Code",
-    {
-      type: "select",
-      options: models.data.map((model) => model.id),
-    },
-  )
+function setupClaudeCode(models: AvailableModels, serverUrl: string): void {
+  // Default to the latest available model for each Claude Code size tier so
+  // opus maps to opus, sonnet maps to sonnet, and haiku maps to haiku.
+  const opusModel = getLatestModelForFamily(models.data, "opus")?.id
+  const sonnetModel = getLatestModelForFamily(models.data, "sonnet")?.id
+  const haikuModel = getLatestModelForFamily(models.data, "haiku")?.id
 
-  const selectedSmallModel = await consola.prompt(
-    "Select a small model to use with Claude Code",
-    {
-      type: "select",
-      options: models.data.map((model) => model.id),
-    },
+  consola.info(
+    "Selected default Claude Code models:\n"
+      + `- Opus:   ${opusModel ?? "(none available)"}\n`
+      + `- Sonnet: ${sonnetModel ?? "(none available)"}\n`
+      + `- Haiku:  ${haikuModel ?? "(none available)"}`,
   )
 
   const command = generateEnvScript(
     {
       ANTHROPIC_BASE_URL: serverUrl,
       ANTHROPIC_AUTH_TOKEN: "dummy",
-      ANTHROPIC_MODEL: selectedModel,
-      ANTHROPIC_DEFAULT_SONNET_MODEL: selectedModel,
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: selectedSmallModel,
+      ANTHROPIC_MODEL: sonnetModel ?? opusModel,
+      ANTHROPIC_DEFAULT_OPUS_MODEL: opusModel,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: sonnetModel,
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: haikuModel,
+      CLAUDE_CODE_USE_VERTEX: "0",
+      CLAUDE_CODE_USE_BEDROCK: "0",
       DISABLE_NON_ESSENTIAL_MODEL_CALLS: "1",
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
       CLAUDE_CODE_ATTRIBUTION_HEADER: "0",
@@ -265,7 +263,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
       )
       process.exit(1)
     }
-    await setupClaudeCode(models, serverUrl)
+    setupClaudeCode(models, serverUrl)
   }
 
   consola.box(`🌐 Admin UI: ${serverUrl}/admin`)

@@ -180,6 +180,45 @@ test("selectAccountForRequest returns MODEL_NOT_SUPPORTED when endpoint is not s
   expect(selection.reason).toBe("MODEL_NOT_SUPPORTED")
 })
 
+test("selectAccountForRequest skips a disabled model and uses another account", async () => {
+  const disabledModel = makeModel({
+    billing: undefined,
+    id: "shared-model",
+    policy: { state: "disabled", terms: "" },
+  })
+  const enabledModel = makeModel({
+    billing: undefined,
+    id: "shared-model",
+  })
+
+  const disabledAccount: AccountRuntime = {
+    id: "disabled-account",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_disabled",
+    vsCodeVersion: "1.0.0",
+    models: makeModelsResponse([disabledModel]),
+  }
+  const enabledAccount: AccountRuntime = {
+    id: "enabled-account",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_enabled",
+    vsCodeVersion: "1.0.0",
+    models: makeModelsResponse([enabledModel]),
+  }
+
+  const manager = setupManagerWithAccounts(disabledAccount, enabledAccount)
+  const selection = await manager.selectAccountForRequest([
+    { modelId: "shared-model", endpoint: "/chat/completions" },
+  ])
+
+  expect(selection.ok).toBe(true)
+  if (!selection.ok) return
+
+  expect(selection.account.id).toBe("enabled-account")
+})
+
 test("selectAccountForRequest treats missing billing as free (costUnits=0)", async () => {
   const model = makeModel({
     id: "free-model",

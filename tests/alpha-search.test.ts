@@ -7,13 +7,20 @@ const actualConfigModule = await import("../src/lib/config")
 const actualTokenModule = await import("../src/lib/token")
 
 let codexProviderConfig: ResolvedProviderConfig | null = null
+let openrouterProviderConfig: ResolvedProviderConfig | null = null
 
 await mock.module("~/lib/config", () => ({
   ...actualConfigModule,
-  getProviderConfig: (provider: string) =>
-    provider === "codex" ? codexProviderConfig : null,
-  getRawProviderConfig: (provider: string) =>
-    provider === "codex" ? codexProviderConfig : null,
+  getProviderConfig: (provider: string) => {
+    if (provider === "codex") return codexProviderConfig
+    if (provider === "openrouter") return openrouterProviderConfig
+    return null
+  },
+  getRawProviderConfig: (provider: string) => {
+    if (provider === "codex") return codexProviderConfig
+    if (provider === "openrouter") return openrouterProviderConfig
+    return null
+  },
 }))
 
 await mock.module("~/lib/token", () => ({
@@ -28,6 +35,8 @@ const { forwardCodexAlphaSearch, resolveCodexAlphaSearchUrl } =
 const { forwardCodexModels, getModels, resolveCodexModelsUrl } =
   await import("../src/services/codex/get-models")
 const { alphaSearchRoutes } = await import("../src/routes/alpha-search/route")
+const { providerAlphaSearchRoutes } =
+  await import("../src/routes/provider/alpha-search/route")
 
 const originalFetch = globalThis.fetch
 const originalCodexAccessToken = state.codexAccessToken
@@ -104,6 +113,8 @@ const fetchMock = mock(
 function createApp() {
   const app = new Hono()
   app.route("/alpha/search", alphaSearchRoutes)
+  app.route("/v1/alpha/search", alphaSearchRoutes)
+  app.route("/:provider/v1/alpha/search", providerAlphaSearchRoutes)
   return app
 }
 
@@ -114,6 +125,13 @@ beforeEach(() => {
     baseUrl: "https://chatgpt.com/backend-api",
     name: "codex",
     type: "openai-responses",
+  }
+  openrouterProviderConfig = {
+    apiKey: "openrouter-key",
+    authType: "authorization",
+    baseUrl: "https://openrouter.example",
+    name: "openrouter",
+    type: "openai-compatible",
   }
   state.codexAccessToken = "codex-access-token"
   state.codexAccountId = "account-123"
@@ -130,6 +148,7 @@ afterEach(() => {
   state.codexAccessToken = originalCodexAccessToken
   state.codexAccountId = originalCodexAccountId
   resetLoggerRuntimeForTests()
+  openrouterProviderConfig = null
 })
 
 describe("Codex alpha search URL", () => {
@@ -247,6 +266,139 @@ describe("Codex alpha search forwarding", () => {
 
     expect(response.status).toBe(404)
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  test("supports the v1 alpha search alias", async () => {
+    const response = await createApp().request("/v1/alpha/search?q=bun", {
+      method: "POST",
+      body: JSON.stringify(alphaSearchPayload),
+    })
+
+    expect(response.status).toBe(200)
+    const [url] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe("https://chatgpt.com/backend-api/codex/alpha/search?q=bun")
+  })
+
+  test("supports the provider-scoped alpha search route", async () => {
+    const response = await createApp().request(
+      "/codex/v1/alpha/search?q=provider",
+      {
+        method: "POST",
+        body: JSON.stringify(alphaSearchPayload),
+      },
+    )
+
+    expect(response.status).toBe(200)
+    const [url] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe(
+      "https://chatgpt.com/backend-api/codex/alpha/search?q=provider",
+    )
+  })
+
+  test("proxies non-codex providers on the provider-scoped alpha search route", async () => {
+    const response = await createApp().request(
+      "/openrouter/v1/alpha/search?q=generic",
+      {
+        method: "POST",
+        headers: {
+          accept: "*/*",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(alphaSearchPayload),
+      },
+    )
+
+    expect(response.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe("https://openrouter.example/v1/alpha/search?q=generic")
+    expect(init?.method).toBe("POST")
+    const headers = new Headers(init?.headers)
+    expect(headers.get("authorization")).toBe("Bearer openrouter-key")
+    expect(headers.get("content-type")).toBe("application/json")
+    expect(await new Response(init?.body).json()).toEqual(alphaSearchPayload)
+  })
+
+  test("logs provider-scoped request and response bodies at debug level", async () => {
+    resetLoggerRuntimeForTests(undefined, "debug")
+    trackAlphaSearchResponseClone = true
+
+    const response = await createApp().request(
+      "/openrouter/v1/alpha/search?q=debug",
+      {
+        method: "POST",
+        body: JSON.stringify(alphaSearchPayload),
+      },
+    )
+
+    expect(response.status).toBe(200)
+    expect(alphaSearchResponseCloneCount).toBe(1)
+  })
+
+  test("returns 404 for an unavailable provider-scoped alpha search", async () => {
+    openrouterProviderConfig = null
+
+    const response = await createApp().request("/openrouter/v1/alpha/search", {
+      method: "POST",
+    })
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({
+      error: {
+        message: "Provider 'openrouter' not found or disabled",
+        type: "invalid_request_error",
+      },
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  test("converts provider alpha search failures into gateway errors", async () => {
+    fetchMock.mockImplementationOnce(() =>
+      Promise.reject(new Error("provider alpha failed")),
+    )
+
+    const response = await createApp().request("/openrouter/v1/alpha/search", {
+      method: "POST",
+    })
+
+    expect(response.status).toBe(500)
+    expect(await response.json()).toEqual({
+      error: { message: "provider alpha failed", type: "error" },
+    })
+  })
+
+  test("reads request and response bodies when debug logging is enabled", async () => {
+    resetLoggerRuntimeForTests(undefined, "debug")
+    trackAlphaSearchResponseClone = true
+
+    const response = await createApp().request("/alpha/search", {
+      method: "POST",
+      body: JSON.stringify(alphaSearchPayload),
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      results: [{ title: "result" }],
+    })
+    expect(alphaSearchResponseCloneCount).toBe(1)
+  })
+
+  test("preserves non-JSON upstream responses when debug logging is enabled", async () => {
+    resetLoggerRuntimeForTests(undefined, "debug")
+    const nonJsonFetchMock = mock(
+      (): Promise<Response> =>
+        Promise.resolve(new Response("upstream failed", { status: 502 })),
+    )
+    ;(globalThis as unknown as { fetch: typeof fetch }).fetch =
+      nonJsonFetchMock as unknown as typeof fetch
+
+    const response = await createApp().request("/alpha/search", {
+      method: "POST",
+      body: JSON.stringify(alphaSearchPayload),
+    })
+
+    expect(response.status).toBe(502)
+    expect(await response.text()).toBe("upstream failed")
   })
 
   test("adds JSON content type when a request body has none", async () => {

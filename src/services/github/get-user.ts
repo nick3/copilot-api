@@ -1,5 +1,6 @@
 import type { AccountContext } from "~/lib/types/account"
 
+import consola from "consola"
 import { getGitHubApiBaseUrl, githubUserHeaders } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
 import { accountFromState, state } from "~/lib/state"
@@ -23,7 +24,15 @@ export async function getGitHubUser(account?: AccountContext) {
     headers: githubUserHeaders(resolvedAccount),
   })
 
-  if (!response.ok) throw new HTTPError("Failed to get GitHub user", response)
+  if (!response.ok) {
+    const errorText = await response.clone().text()
+    consola.error(
+      "Failed to get GitHub user response body",
+      errorText.slice(0, 4_000),
+    )
+
+    throw new HTTPError("Failed to get GitHub user", response)
+  }
 
   return (await response.json()) as GithubUserResponse
 }

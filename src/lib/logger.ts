@@ -266,6 +266,8 @@ export const __loggerTestUtils = {
 
 type DebugLogger = Pick<ConsolaInstance, "debug">
 
+type AsyncDebugValueFactory = () => Promise<unknown>
+
 export const debugLazy = (
   logger: DebugLogger,
   factory: () => [unknown, ...Array<unknown>],
@@ -288,7 +290,7 @@ export const debugJson = (
 export const debugJsonLazy = async (
   logger: DebugLogger,
   label: string,
-  factory: () => Promise<unknown>,
+  factory: AsyncDebugValueFactory,
 ): Promise<void> => {
   if (!isDebugFileLoggingEnabled()) {
     return

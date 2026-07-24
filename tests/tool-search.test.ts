@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import {
   createMcpToolSearchSentinel,
   hasDeferredMcpNamespaceTool,
+  isAlwaysLoadedToolName,
   parseMcpToolSearchSentinel,
   resolveBridgeToolSearchName,
   selectDeferredToolsByNames,
@@ -12,6 +13,11 @@ import { runMcpServer } from "~/mcp"
 import { createToolSearchMcpServer } from "~/mcp-server"
 
 describe("tool search helpers", () => {
+  test("keeps workflow reporting tools eagerly loaded", () => {
+    expect(isAlwaysLoadedToolName("Workflow")).toBe(true)
+    expect(isAlwaysLoadedToolName("ReportFindings")).toBe(true)
+  })
+
   test("detects eligible Responses tool search requests", () => {
     expect(
       shouldEnableResponsesToolSearch({

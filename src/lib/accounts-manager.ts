@@ -20,6 +20,7 @@ import {
 import { resolveModelAlias } from "~/lib/config"
 import { HTTPError } from "~/lib/error"
 import { hasTokenPrices } from "~/lib/model-billing"
+import { isCopilotModelAvailable } from "~/lib/model-availability"
 import { getModels, type Model } from "~/services/copilot/get-models"
 import { getCopilotToken } from "~/services/github/get-copilot-token"
 import { getCopilotUsage } from "~/services/github/get-copilot-usage"
@@ -865,6 +866,10 @@ export class AccountsManager {
     for (const candidate of candidates) {
       const model = models.find((m) => m.id === candidate.modelId)
       if (!model) {
+        continue
+      }
+
+      if (!isCopilotModelAvailable(model)) {
         continue
       }
 

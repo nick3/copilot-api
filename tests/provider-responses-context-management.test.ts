@@ -23,6 +23,8 @@ await mock.module("~/lib/token-usage", () => ({
 }))
 
 const { responsesRoutes } = await import("../src/routes/responses/route")
+const { providerResponsesRoutes } =
+  await import("../src/routes/provider/responses/route")
 const { responsesUtilsDependencies } =
   await import("../src/routes/responses/utils")
 
@@ -71,6 +73,8 @@ const fetchMock = mock((_url: string | URL | Request, init?: RequestInit) => {
 const createApp = () => {
   const app = new Hono()
   app.route("/v1/responses", responsesRoutes)
+  app.route("/:provider/v1/responses", providerResponsesRoutes)
+  app.route("/:provider/responses", providerResponsesRoutes)
   return app
 }
 
@@ -285,5 +289,57 @@ describe("provider Responses context management", () => {
 
     expect(body.context_management).toBeUndefined()
     expect(body.input).toHaveLength(3)
+  })
+
+  test("supports the provider-scoped responses route", async () => {
+    const app = createApp()
+    const response = await app.request("/openai/v1/responses", {
+      body: JSON.stringify({
+        input: "hello",
+        model: "gpt-test",
+      }),
+      headers: {
+        "content-type": "application/json",
+      },
+      method: "POST",
+    })
+
+    expect(response.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://openai-responses.example/v1/responses",
+    )
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = parseJsonRequestBody((init as RequestInit).body) as {
+      model: string
+    }
+    expect(body.model).toBe("gpt-test")
+  })
+
+  test("supports the unversioned provider-scoped responses route", async () => {
+    const response = await createApp().request("/openai/responses", {
+      body: JSON.stringify({ input: "hello", model: "gpt-test" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    })
+
+    expect(response.status).toBe(200)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://openai-responses.example/v1/responses",
+    )
+  })
+
+  test("converts malformed provider response bodies into gateway errors", async () => {
+    const response = await createApp().request("/openai/responses", {
+      body: "{",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    })
+
+    expect(response.status).toBe(500)
+    const body = (await response.json()) as { error: { type: string } }
+    expect(body.error.type).toBe("error")
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

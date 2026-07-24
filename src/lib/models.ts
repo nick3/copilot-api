@@ -2,10 +2,14 @@ import type { Model } from "~/services/copilot/get-models"
 
 import { accountsManager } from "~/lib/accounts-manager"
 
+import {
+  isCopilotModelAvailable,
+  type ModelAvailabilityOptions,
+} from "./model-availability"
+
 export const getAvailableModels = (): Array<Model> =>
-  (accountsManager.getFirstAccountModels()?.data ?? []).filter(
-    (model) =>
-      model.model_picker_enabled || model.capabilities.type === "embeddings",
+  (accountsManager.getFirstAccountModels()?.data ?? []).filter((model) =>
+    isCopilotModelAvailable(model),
   )
 
 /**
@@ -40,6 +44,47 @@ export const findEndpointModel = (sdkModelId: string): Model | undefined => {
 
   const modelName = `claude-${normalized.family}-${normalized.version}`
   return models.find((m) => m.id === modelName)
+}
+
+/**
+ * Finds the latest available model for a given Claude family (e.g. "opus",
+ * "sonnet", "haiku") in an account-managed model list. "Latest" is
+ * determined by the highest semantic version parsed from the model ID.
+ */
+export const getLatestModelForFamily = (
+  models: ReadonlyArray<Model>,
+  family: string,
+  availabilityOptions?: ModelAvailabilityOptions,
+): Model | undefined => {
+  let best: { model: Model; major: number; minor: number } | undefined
+
+  for (const model of models) {
+    if (!isCopilotModelAvailable(model, availabilityOptions)) {
+      continue
+    }
+
+    const normalized = normalizeSdkModelId(model.id)
+    if (!normalized || normalized.family !== family) {
+      continue
+    }
+
+    const [majorPart, minorPart = "0"] = normalized.version.split(".")
+    const major = Number.parseInt(majorPart, 10)
+    const minor = Number.parseInt(minorPart, 10)
+    if (Number.isNaN(major) || Number.isNaN(minor)) {
+      continue
+    }
+
+    if (
+      !best
+      || major > best.major
+      || (major === best.major && minor > best.minor)
+    ) {
+      best = { model, major, minor }
+    }
+  }
+
+  return best?.model
 }
 
 /**

@@ -1,5 +1,6 @@
 import type { AccountContext } from "~/lib/types/account"
 
+import consola from "consola"
 import { getGitHubApiBaseUrl, githubHeaders } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
 import { accountFromState } from "~/lib/state"
@@ -16,6 +17,12 @@ export const getCopilotUsage = async (
   )
 
   if (!response.ok) {
+    const errorText = await response.clone().text()
+    consola.error(
+      "Failed to get Copilot user response body",
+      errorText.slice(0, 4_000),
+    )
+
     throw new HTTPError("Failed to get Copilot usage", response)
   }
 
