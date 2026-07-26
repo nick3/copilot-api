@@ -1176,6 +1176,12 @@ describe("messages handler routing", () => {
   })
 
   test("records Copilot AIU when Messages web search routes through Responses", async () => {
+    await writeConfig({
+      messageApiWebSearchModel: "search-model",
+      useResponsesApiWebSearch: true,
+      useResponsesApiWebSocket: false,
+    })
+
     const selection = buildSelection("/responses", "search-model", [
       "low",
       "high",
@@ -1188,23 +1194,32 @@ describe("messages handler routing", () => {
 
       return Promise.resolve(
         new Response(
-          JSON.stringify({
-            ...buildResponsesResult("search-model", "search result"),
-            copilot_usage: {
-              total_nano_aiu: 1_750_000_000,
-            },
-            usage: {
-              input_tokens: 13,
-              input_tokens_details: {
-                cached_tokens: 6,
+          [
+            "event: response.completed",
+            `data: ${JSON.stringify({
+              copilot_usage: {
+                total_nano_aiu: 1_750_000_000,
               },
-              output_tokens: 4,
-              total_tokens: 17,
-            },
-          }),
+              response: {
+                ...buildResponsesResult("search-model", "search result"),
+                usage: {
+                  input_tokens: 13,
+                  input_tokens_details: {
+                    cached_tokens: 6,
+                  },
+                  output_tokens: 4,
+                  total_tokens: 17,
+                },
+              },
+              sequence_number: 1,
+              type: "response.completed",
+            })}`,
+            "",
+            "",
+          ].join("\n"),
           {
             status: 200,
-            headers: { "content-type": "application/json" },
+            headers: { "content-type": "text/event-stream" },
           },
         ),
       )
