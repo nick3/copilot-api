@@ -180,6 +180,156 @@ test("selectAccountForRequest returns MODEL_NOT_SUPPORTED when endpoint is not s
   expect(selection.reason).toBe("MODEL_NOT_SUPPORTED")
 })
 
+test("selectAccountForRequest keeps the requested model for token-based billing accounts", async () => {
+  const requestedModel = makeModel({
+    id: "requested-model",
+    billing: undefined,
+  })
+  const smallModel = makeModel({ id: "small-model", billing: undefined })
+  const account: AccountRuntime = {
+    id: "token-billed",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_test",
+    models: makeModelsResponse([requestedModel, smallModel]),
+    tokenBasedBilling: true,
+  }
+  const manager = setupManagerWithAccount(account)
+
+  const selection = await manager.selectAccountForRequest([
+    {
+      modelId: "small-model",
+      tokenBasedBillingModelId: "requested-model",
+      endpoint: "/chat/completions",
+    },
+  ])
+
+  expect(selection.ok).toBe(true)
+  if (!selection.ok) return
+  expect(selection.selectedModel.id).toBe("requested-model")
+})
+
+test("selectAccountForRequest uses the small model when token billing is explicitly disabled", async () => {
+  const requestedModel = makeModel({
+    id: "requested-model",
+    billing: {
+      is_premium: true,
+      multiplier: 1,
+      token_prices: { input_price: 1 },
+    },
+  })
+  const smallModel = makeModel({ id: "small-model", billing: undefined })
+  const account: AccountRuntime = {
+    id: "premium-request-billed",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_test",
+    models: makeModelsResponse([requestedModel, smallModel]),
+    tokenBasedBilling: false,
+  }
+  const manager = setupManagerWithAccount(account)
+
+  const selection = await manager.selectAccountForRequest([
+    {
+      modelId: "small-model",
+      tokenBasedBillingModelId: "requested-model",
+      endpoint: "/chat/completions",
+    },
+  ])
+
+  expect(selection.ok).toBe(true)
+  if (!selection.ok) return
+  expect(selection.selectedModel.id).toBe("small-model")
+})
+
+test("selectAccountForRequest infers token billing from model prices when account metadata is missing", async () => {
+  const requestedModel = makeModel({
+    id: "requested-model",
+    billing: {
+      is_premium: true,
+      multiplier: 1,
+      token_prices: { input_price: 1 },
+    },
+  })
+  const smallModel = makeModel({ id: "small-model", billing: undefined })
+  const account: AccountRuntime = {
+    id: "legacy-token-billed",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_test",
+    models: makeModelsResponse([requestedModel, smallModel]),
+    unlimited: true,
+  }
+  const manager = setupManagerWithAccount(account)
+
+  const selection = await manager.selectAccountForRequest([
+    {
+      modelId: "small-model",
+      tokenBasedBillingModelId: "requested-model",
+      endpoint: "/chat/completions",
+    },
+  ])
+
+  expect(selection.ok).toBe(true)
+  if (!selection.ok) return
+  expect(selection.selectedModel.id).toBe("requested-model")
+})
+
+test("account affinity keeps warmup routing on the token-billed account", async () => {
+  const requestedModel = makeModel({
+    id: "requested-model",
+    billing: undefined,
+  })
+  const smallModel = makeModel({ id: "small-model", billing: undefined })
+  const premiumRequestAccount: AccountRuntime = {
+    id: "premium-request-account",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_premium_request",
+    models: makeModelsResponse([smallModel]),
+    tokenBasedBilling: false,
+  }
+  const tokenBilledAccount: AccountRuntime = {
+    id: "token-billed-account",
+    accountType: "individual",
+    addedAt: Date.now(),
+    githubToken: "ghp_token_billed",
+    models: makeModelsResponse([requestedModel]),
+    tokenBasedBilling: true,
+  }
+  const manager = setupManagerWithAccounts(
+    premiumRequestAccount,
+    tokenBilledAccount,
+  )
+  manager.setAccountAffinityEnabled(true)
+
+  const initial = await manager.selectAccountForRequest(
+    [{ modelId: "requested-model", endpoint: "/chat/completions" }],
+    { requestId: "shared-session" },
+  )
+  expect(initial.ok).toBe(true)
+  if (!initial.ok) return
+  expect(initial.account.id).toBe("token-billed-account")
+  initial.confirmAffinity?.()
+
+  const warmup = await manager.selectAccountForRequest(
+    [
+      {
+        modelId: "small-model",
+        tokenBasedBillingModelId: "requested-model",
+        endpoint: "/chat/completions",
+      },
+    ],
+    { requestId: "shared-session", affinityModelId: "requested-model" },
+  )
+
+  expect(warmup.ok).toBe(true)
+  if (!warmup.ok) return
+  expect(warmup.account.id).toBe("token-billed-account")
+  expect(warmup.selectedModel.id).toBe("requested-model")
+  expect(warmup.affinityHit).toBe(true)
+})
+
 test("selectAccountForRequest skips a disabled model and uses another account", async () => {
   const disabledModel = makeModel({
     billing: undefined,
@@ -735,12 +885,20 @@ test("applyQuotaRefreshSuccessIfCurrent sets overagePermitted from quota respons
 
   const applied = applyQuotaRefreshSuccessIfCurrent(account, snapshot, {
     premium,
+    tokenBasedBilling: true,
   })
 
   expect(applied).toBe(true)
   expect(account.overagePermitted).toBe(true)
   expect(account.unlimited).toBe(false)
   expect(account.premiumRemaining).toBe(50)
+  expect(account.tokenBasedBilling).toBe(true)
+
+  const reapplied = applyQuotaRefreshSuccessIfCurrent(account, snapshot, {
+    premium,
+  })
+  expect(reapplied).toBe(true)
+  expect(account.tokenBasedBilling).toBeUndefined()
 })
 
 test("getAccountStatus includes runtime billing metadata in returned status", () => {
@@ -805,6 +963,28 @@ test("getAccountStatus detects zero-valued tiered token pricing", () => {
   const statuses = manager.getAccountStatus()
 
   expect(statuses[0].tokenBasedBilling).toBe(true)
+})
+
+test("getAccountStatus prefers explicit token billing metadata over model-price inference", () => {
+  const model = makeModel({
+    id: "gpt-5-token-priced",
+    billing: {
+      token_prices: { input_price: 1 },
+    },
+  })
+  const account: AccountRuntime = {
+    id: "explicit-premium-request-account",
+    accountType: "enterprise",
+    addedAt: Date.now(),
+    githubToken: "ghp_test",
+    models: makeModelsResponse([model]),
+    tokenBasedBilling: false,
+  }
+
+  const manager = setupManagerWithAccount(account)
+  const statuses = manager.getAccountStatus()
+
+  expect(statuses[0].tokenBasedBilling).toBe(false)
 })
 
 test("getCostUnits ignores empty token prices", () => {

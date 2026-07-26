@@ -114,6 +114,8 @@ export interface AccountRuntime extends AccountMeta {
   unlimited?: boolean
   /** Whether this account allows overage billing (enterprise feature) */
   overagePermitted?: boolean
+  /** Whether this account is billed directly by token instead of premium requests */
+  tokenBasedBilling?: boolean
   /** Timestamp of last quota fetch */
   lastQuotaFetch?: number
   /** Token refresh timer reference */

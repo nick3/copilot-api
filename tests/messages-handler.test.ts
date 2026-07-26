@@ -8,7 +8,10 @@ import type { AccountRuntime } from "~/lib/types/account"
 import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
 import type { Model } from "~/services/copilot/get-models"
 
-import { accountsManager } from "~/lib/accounts-manager"
+import {
+  accountsManager,
+  type AccountRequestCandidate,
+} from "~/lib/accounts-manager"
 import { getAdminDb } from "~/lib/admin-db"
 import {
   compactMessageSections,
@@ -1503,7 +1506,7 @@ describe("messages handler routing", () => {
 
 describe("messages handler affinity context", () => {
   test("warmup requests switch candidate model before account selection", async () => {
-    let selectionCandidates: Array<{ modelId: string; endpoint: string }> = []
+    let selectionCandidates: Array<AccountRequestCandidate> = []
     let selectionRequestId: string | undefined
     let selectionAffinityModelId: string | undefined
 
@@ -1565,13 +1568,68 @@ describe("messages handler affinity context", () => {
 
     expect(response.status).toBe(200)
     expect(selectionCandidates[0]?.modelId).toBe(getSmallModel())
+    expect(selectionCandidates[0]?.tokenBasedBillingModelId).toBe(
+      "original-model",
+    )
     expect(selectionCandidates[0]?.endpoint).toBe("/v1/messages")
     expect(selectionRequestId).toBe(expectedSessionId)
     expect(selectionAffinityModelId).toBe("original-model")
   })
 
+  test("warmup requests keep the requested model for a token-based billing account", async () => {
+    let upstreamBody: Record<string, unknown> | undefined
+    const selection = buildSelection("/v1/messages", "original-model")
+    selection.account.tokenBasedBilling = true
+    accountsManager.selectAccountForRequest = () => Promise.resolve(selection)
+
+    const fetchMock = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = parseFetchBody(opts?.body)
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildAnthropicResponse("original-model", "warmup")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "anthropic-beta": "warmup-beta",
+        },
+        body: JSON.stringify(
+          createPayload({
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: "warmup",
+                    cache_control: { type: "ephemeral" },
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(upstreamBody?.model).toBe("original-model")
+  })
+
   test("compact requests keep original model for affinity while routing small model", async () => {
-    let selectionCandidates: Array<{ modelId: string; endpoint: string }> = []
+    let selectionCandidates: Array<AccountRequestCandidate> = []
     let selectionAffinityModelId: string | undefined
 
     accountsManager.selectAccountForRequest = (candidates, options) => {
@@ -1611,6 +1669,7 @@ describe("messages handler affinity context", () => {
 
     expect(response.status).toBe(200)
     expect(selectionCandidates[0]?.modelId).toBe(getSmallModel())
+    expect(selectionCandidates[0]?.tokenBasedBillingModelId).toBeUndefined()
     expect(selectionCandidates[0]?.endpoint).toBe("/v1/messages")
     expect(selectionAffinityModelId).toBe("original-model")
   })

@@ -93,6 +93,8 @@ const TOKEN_REFRESH_JITTER_MS = 30_000
 export interface AccountRequestCandidate {
   modelId: string
   endpoint: string
+  /** Model to use instead when the selected account uses token-based billing. */
+  tokenBasedBillingModelId?: string
 }
 
 export type { QuotaReservation } from "./accounts-manager-quota"
@@ -182,11 +184,21 @@ function preserveSubagentSelectionReason(
     : nextSelectionReason
 }
 
-function hasTokenBasedBilling(account: AccountRuntime): boolean | undefined {
+function inferTokenBasedBilling(account: AccountRuntime): boolean | undefined {
   const models = account.models?.data
   if (!Array.isArray(models)) return undefined
 
   return models.some((model) => hasTokenPrices(model.billing?.token_prices))
+}
+
+export function isTokenBasedBillingAccount(account: AccountRuntime): boolean {
+  return (account.tokenBasedBilling ?? inferTokenBasedBilling(account)) === true
+}
+
+function getTokenBasedBillingStatus(
+  account: AccountRuntime,
+): boolean | undefined {
+  return account.tokenBasedBilling ?? inferTokenBasedBilling(account)
 }
 
 function normalizeCacheKeys(keys?: ReadonlyArray<string>): Array<string> {
@@ -774,6 +786,7 @@ export class AccountsManager {
         const applied = applyQuotaRefreshSuccessIfCurrent(account, snapshot, {
           premium,
           copilotApiUrl: usage.endpoints.api,
+          tokenBasedBilling: usage.token_based_billing,
         })
 
         if (applied) {
@@ -864,7 +877,14 @@ export class AccountsManager {
     }
 
     for (const candidate of candidates) {
-      const model = models.find((m) => m.id === candidate.modelId)
+      const resolvedCandidate =
+        (
+          candidate.tokenBasedBillingModelId
+          && isTokenBasedBillingAccount(account)
+        ) ?
+          { ...candidate, modelId: candidate.tokenBasedBillingModelId }
+        : candidate
+      const model = models.find((m) => m.id === resolvedCandidate.modelId)
       if (!model) {
         continue
       }
@@ -873,11 +893,13 @@ export class AccountsManager {
         continue
       }
 
-      if (!this.isModelSupportedForEndpoint(model, candidate.endpoint)) {
+      if (
+        !this.isModelSupportedForEndpoint(model, resolvedCandidate.endpoint)
+      ) {
         continue
       }
 
-      return { candidate, model }
+      return { candidate: resolvedCandidate, model }
     }
 
     return null
@@ -1696,7 +1718,7 @@ export class AccountsManager {
         remaining: this.temporaryAccount.premiumRemaining,
         unlimited: this.temporaryAccount.unlimited,
         overagePermitted: this.temporaryAccount.overagePermitted,
-        tokenBasedBilling: hasTokenBasedBilling(this.temporaryAccount),
+        tokenBasedBilling: getTokenBasedBillingStatus(this.temporaryAccount),
         failed: this.temporaryAccount.failed,
         failureReason: this.temporaryAccount.failureReason,
         lastModelsFetch: this.temporaryAccount.lastModelsFetch,
@@ -1713,7 +1735,7 @@ export class AccountsManager {
           remaining: account.premiumRemaining,
           unlimited: account.unlimited,
           overagePermitted: account.overagePermitted,
-          tokenBasedBilling: hasTokenBasedBilling(account),
+          tokenBasedBilling: getTokenBasedBillingStatus(account),
           failed: account.failed,
           failureReason: account.failureReason,
           enabled: account.enabled,

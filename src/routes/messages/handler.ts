@@ -10,7 +10,9 @@ import type { Model } from "~/services/copilot/get-models"
 
 import {
   accountsManager,
+  type AccountRequestCandidate,
   type AccountSelectionReason,
+  isTokenBasedBillingAccount,
 } from "~/lib/accounts-manager"
 import { awaitApproval } from "~/lib/approval"
 import { COMPACT_REQUEST, type CompactType } from "~/lib/compact"
@@ -483,9 +485,16 @@ export async function handleCompletion(c: Context) {
   const isCompact = compactType !== 0
   const originalRequestModel = anthropicPayload.model
   let usesInternalModelRewrite = false
+  let tokenBasedBillingWarmupModel: string | undefined
 
   // Fix warmup probe: force small model for Claude Code warmup requests (CLAUDE_CODE_SUBAGENT_MODEL also works).
-  if (anthropicBeta && isWarmupProbeRequest(anthropicPayload)) {
+  if (
+    anthropicBeta
+    && compactType === 0
+    && webSearchRoute.kind !== "responses"
+    && isWarmupProbeRequest(anthropicPayload)
+  ) {
+    tokenBasedBillingWarmupModel = resolveModelAlias(originalRequestModel)
     anthropicPayload.model = getSmallModel()
     usesInternalModelRewrite = true
   }
@@ -566,36 +575,45 @@ export async function handleCompletion(c: Context) {
 
   const endpointModel = findEndpointModel(routingModel)
   const resolvedClientModel = endpointModel?.id ?? routingModel
-  const reasoningRequestModel =
-    usesInternalModelRewrite ? resolvedClientModel : requestedModel
+  const tokenBasedBillingWarmupEndpointModel =
+    tokenBasedBillingWarmupModel === undefined ? undefined : (
+      findEndpointModel(tokenBasedBillingWarmupModel)
+    )
+  const resolvedTokenBasedBillingWarmupModel =
+    tokenBasedBillingWarmupModel === undefined ? undefined : (
+      (tokenBasedBillingWarmupEndpointModel?.id ?? tokenBasedBillingWarmupModel)
+    )
   const affinityModelId =
     routingModel !== originalRequestModel ?
       (findEndpointModel(originalRequestModel)?.id ?? originalRequestModel)
     : undefined
   const useMessagesApi = isMessagesApiEnabled()
 
-  const candidates: Array<{ modelId: string; endpoint: string }> = []
+  const createCandidate = (
+    modelId: string,
+    endpoint: string,
+  ): AccountRequestCandidate => ({
+    modelId,
+    endpoint,
+    ...(resolvedTokenBasedBillingWarmupModel === undefined ?
+      {}
+    : {
+        tokenBasedBillingModelId: resolvedTokenBasedBillingWarmupModel,
+      }),
+  })
+  const candidates: Array<AccountRequestCandidate> = []
   if (webSearchRoute.kind === "responses") {
-    candidates.push({
-      modelId: resolvedClientModel,
-      endpoint: RESPONSES_ENDPOINT,
-    })
+    candidates.push(createCandidate(resolvedClientModel, RESPONSES_ENDPOINT))
   } else {
     if (useMessagesApi) {
-      candidates.push({
-        modelId: resolvedClientModel,
-        endpoint: MESSAGES_ENDPOINT,
-      })
+      candidates.push(createCandidate(resolvedClientModel, MESSAGES_ENDPOINT))
     }
     candidates.push(
-      {
-        modelId: resolvedClientModel,
-        endpoint: RESPONSES_ENDPOINT,
-      },
-      {
-        modelId: endpointModel?.id ?? openAIPayload.model,
-        endpoint: CHAT_COMPLETIONS_ENDPOINT,
-      },
+      createCandidate(resolvedClientModel, RESPONSES_ENDPOINT),
+      createCandidate(
+        endpointModel?.id ?? openAIPayload.model,
+        CHAT_COMPLETIONS_ENDPOINT,
+      ),
     )
   }
 
@@ -643,6 +661,15 @@ export async function handleCompletion(c: Context) {
     })
   }
   const { account, reservation, selectedModel, endpoint, costUnits } = selection
+  const usesTokenBasedBillingWarmupModel =
+    resolvedTokenBasedBillingWarmupModel !== undefined
+    && isTokenBasedBillingAccount(account)
+  const reasoningRequestModel =
+    usesTokenBasedBillingWarmupModel ? requestedModel
+    : usesInternalModelRewrite ? resolvedClientModel
+    : requestedModel
+  const selectedClientModel =
+    usesTokenBasedBillingWarmupModel ? originalRequestModel : clientModel
   openAIPayload.model = selectedModel.id
   anthropicPayload.model = selectedModel.id
   const premiumRemainingBefore = account.premiumRemaining
@@ -664,7 +691,7 @@ export async function handleCompletion(c: Context) {
     promptCacheKey: normalizedPromptCacheKey,
     isSubagent: isSubagentRequest,
     requestModel: reasoningRequestModel,
-    clientModel,
+    clientModel: selectedClientModel,
     account,
     reservation,
     upstreamEndpoint: endpoint,

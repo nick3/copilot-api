@@ -111,18 +111,24 @@ export const applyQuotaRefreshSuccessIfCurrent = (
   result: {
     premium: QuotaDetail
     copilotApiUrl?: string
+    tokenBasedBilling?: boolean
   },
 ): boolean => {
   if (!isAuthSnapshotCurrent(account, snapshot)) {
     return false
   }
 
-  const { premium, copilotApiUrl } = result
+  const { premium, copilotApiUrl, tokenBasedBilling } = result
 
   account.premiumEntitlement = premium.entitlement
   account.premiumRemaining = premium.remaining
   account.unlimited = premium.unlimited
   account.overagePermitted = premium.overage_permitted
+  if (tokenBasedBilling === undefined) {
+    delete account.tokenBasedBilling
+  } else {
+    account.tokenBasedBilling = tokenBasedBilling
+  }
   if (copilotApiUrl) {
     account.copilotApiUrl = copilotApiUrl
   }
