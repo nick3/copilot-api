@@ -5,12 +5,42 @@ import type { AnthropicMessagesPayload } from "../src/routes/messages/anthropic-
 import {
   applyLastMessageCacheControl,
   getLastMessageContentCacheControl,
+  isClaudeAutoModelRequest,
   mergeToolResultForClaude,
   normalizeSystemMessages,
   prepareMessagesApiPayload,
   sanitizeIdeTools,
   stripToolReferenceTurnBoundary,
 } from "../src/routes/messages/preprocess"
+
+describe("isClaudeAutoModelRequest", () => {
+  const createSecurityMonitorPayload = (): AnthropicMessagesPayload => ({
+    model: "claude-sonnet-4",
+    max_tokens: 128,
+    messages: [{ role: "user", content: "check" }],
+    stop_sequences: ["</block>"],
+    system: [
+      {
+        type: "text",
+        text: "You are a security monitor for autonomous AI coding agents. Check the changes.",
+      },
+    ],
+  })
+
+  test("detects the Claude Code security-monitor request shape", () => {
+    expect(isClaudeAutoModelRequest(createSecurityMonitorPayload())).toBe(true)
+  })
+
+  test("rejects requests with tools or a different stop sequence", () => {
+    const withTools = createSecurityMonitorPayload()
+    withTools.tools = [{ name: "Read", input_schema: { type: "object" } }]
+    expect(isClaudeAutoModelRequest(withTools)).toBe(false)
+
+    const wrongStop = createSecurityMonitorPayload()
+    wrongStop.stop_sequences = ["</different>"]
+    expect(isClaudeAutoModelRequest(wrongStop)).toBe(false)
+  })
+})
 
 describe("normalizeSystemMessages", () => {
   test("stabilizes Claude Code billing header in string system prompt", () => {

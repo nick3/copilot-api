@@ -21,6 +21,7 @@ import {
   type TokenUsageEventsPage,
   type TokenUsageSummary,
 } from "~/lib/token-usage"
+import { resolveTokenUsageCost } from "~/lib/token-usage/pricing"
 import { traceIdMiddleware } from "~/lib/trace"
 import { adminApiRoutes } from "~/routes/admin-api/route"
 import { tokenUsageRoute } from "~/routes/token-usage/route"
@@ -366,8 +367,8 @@ describe("token usage storage", () => {
   test("calculates built-in Codex GPT-5.6 prices with cached input discount", async () => {
     const expectedCosts = [
       { model: "gpt-5.6-sol", totalCostNanos: 96_000_000 },
-      { model: "gpt-5.6-terra", totalCostNanos: 48_000_000 },
-      { model: "gpt-5.6-luna", totalCostNanos: 19_200_000 },
+      { model: "gpt-5.6-terra", totalCostNanos: 38_400_000 },
+      { model: "gpt-5.6-luna", totalCostNanos: 3_840_000 },
     ]
 
     for (const { model } of expectedCosts) {
@@ -401,9 +402,9 @@ describe("token usage storage", () => {
     const summary = (await response.json()) as TokenUsageSummary
     expect(summary.totals.costs).toEqual([
       {
-        amount: 0.1632,
+        amount: 0.13824,
         currency: "USD",
-        total_cost_nanos: 163_200_000,
+        total_cost_nanos: 138_240_000,
       },
     ])
   })
@@ -414,8 +415,8 @@ describe("token usage storage", () => {
       { model: "gpt-5.4-mini", totalCostNanos: 416_550_000 },
       { model: "gpt-5.5", totalCostNanos: 2_777_000_000 },
       { model: "gpt-5.6-sol", totalCostNanos: 2_814_500_000 },
-      { model: "gpt-5.6-terra", totalCostNanos: 1_407_250_000 },
-      { model: "gpt-5.6-luna", totalCostNanos: 562_900_000 },
+      { model: "gpt-5.6-terra", totalCostNanos: 1_125_800_000 },
+      { model: "gpt-5.6-luna", totalCostNanos: 112_580_000 },
     ]
 
     for (const { model } of expectedCosts) {
@@ -444,6 +445,127 @@ describe("token usage storage", () => {
         total_cost_nanos: totalCostNanos,
       })
     }
+  })
+
+  test("records OpenRouter-reported cost before configured pricing", async () => {
+    recordTokenUsageEvent({
+      cost: 0.0002928408,
+      endpoint: "provider_messages",
+      input_tokens: 853,
+      model: "claude-sonnet-4",
+      output_tokens: 284,
+      pricing: { input: 100, output: 100 },
+      pricingCurrency: "CNY",
+      providerName: "openrouter",
+      source: "provider",
+    })
+
+    const page = await fetchEventsPage()
+    expect(page.items[0]?.cost).toEqual({
+      amount: 0.000292841,
+      currency: "USD",
+      source: "upstream",
+      total_cost_nanos: 292_841,
+    })
+  })
+
+  test("preserves a zero OpenRouter-reported cost", () => {
+    expect(
+      resolveTokenUsageCost({
+        cost: 0,
+        input_tokens: 10,
+        model: "free-model",
+        output_tokens: 5,
+        pricing: { input: 1, output: 2 },
+        providerName: "openrouter",
+        source: "provider",
+      }),
+    ).toEqual({
+      currency: "USD",
+      source: "upstream",
+      total_cost_nanos: 0,
+    })
+  })
+
+  test("does not use provider-reported cost for non-OpenRouter providers", () => {
+    expect(
+      resolveTokenUsageCost({
+        cost: 0.0002928408,
+        input_tokens: 10,
+        model: "custom-model",
+        output_tokens: 5,
+        pricing: { input: 1, output: 2 },
+        pricingCurrency: "USD",
+        providerName: "anthropic",
+        source: "provider",
+      }),
+    ).toEqual({
+      currency: "USD",
+      source: "config",
+      total_cost_nanos: 20_000,
+    })
+  })
+
+  test("prices new OpenCode Go and DashScope models", () => {
+    const cases = [
+      {
+        currency: "USD",
+        model: "hy3",
+        providerName: "opencode-go",
+        totalCostNanos: 1_950_000,
+      },
+      {
+        currency: "USD",
+        model: "gpt-5.6-luna",
+        providerName: "opencode-go",
+        totalCostNanos: 2_045_000,
+      },
+      {
+        currency: "USD",
+        model: "qwen3.8-max",
+        providerName: "opencode-go",
+        totalCostNanos: 23_000_000,
+      },
+      {
+        currency: "CNY",
+        model: "qwen3.8-max",
+        providerName: "dashscope",
+        totalCostNanos: 137_000_000,
+      },
+    ]
+
+    for (const { currency, model, providerName, totalCostNanos } of cases) {
+      expect(
+        resolveTokenUsageCost({
+          cache_creation_input_tokens: 1_000,
+          cache_read_input_tokens: 2_000,
+          input_tokens: 1_000,
+          model,
+          output_tokens: 3_000,
+          providerName,
+          source: "provider",
+        }),
+      ).toEqual({
+        currency,
+        source: "builtin",
+        total_cost_nanos: totalCostNanos,
+      })
+    }
+
+    expect(
+      resolveTokenUsageCost({
+        cache_read_input_tokens: 2_000,
+        input_tokens: 1_000,
+        model: "deepseek-v4-flash-0731",
+        output_tokens: 3_000,
+        providerName: "dashscope",
+        source: "provider",
+      }),
+    ).toEqual({
+      currency: "CNY",
+      source: "builtin",
+      total_cost_nanos: 7_400_000,
+    })
   })
 
   test("only falls back to interaction id when no real session id exists", async () => {

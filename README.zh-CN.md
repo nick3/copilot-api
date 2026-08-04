@@ -470,10 +470,7 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
     },
     "modelResponsesApiCompactThresholds": {
       "gpt-5.4": 217600,
-      "gpt-5.5": 217600,
-      "gpt-5.6-sol": 231200,
-      "gpt-5.6-terra": 231200,
-      "gpt-5.6-luna": 231200
+      "gpt-5.5": 217600
     },
     "modelReasoningEfforts": {
       "gpt-5-mini": "low"
@@ -481,7 +478,8 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
     "useMessagesApi": true,
     "useResponsesApiWebSocket": true,
     "useResponsesApiWebSearch": true,
-    "messageApiWebSearchModel": "gpt-5-mini"
+    "messageApiWebSearchModel": "gpt-5-mini",
+    "claudeAutoModel": ""
   }
   ```
 - **auth.apiKeys：** 用于普通非 admin 路由的 API key。支持多个 key 轮换使用。请求可通过 `x-api-key: <key>` 或 `Authorization: Bearer <key>` 进行认证。若为空或省略，则普通路由的认证会被禁用。
@@ -500,14 +498,14 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
     - `topP`：可选，当请求未指定时使用的默认 `top_p`。
     - `topK`：可选，当请求未指定时使用的默认 `top_k`。
     - `pricing`：可选，供 `/token-usage` 成本计算使用的每百万 token 价格。支持 `input`、`output`、`cachedInput`、`cacheCreationInput`、`explicitCachedInput`，以及带 `maxInputTokens` 的阶梯 `tiers`。
-      内置 OpenCode Go 价格现已包含 `grok-4.5`、`kimi-k3`、`minimax-m2.7` 以及更新后的 `minimax-m3` 阶梯；用户自定义价格始终优先。
-    - `type`：可选，覆盖该模型使用的 provider 类型。支持 `anthropic`、`openai-compatible` 和 `openai-responses`，适合一个上游同时暴露不同 API 形态模型的场景。
+      内置 OpenCode Go 价格包含 `hy3`、`gpt-5.6-luna`、`qwen3.8-max`、`grok-4.5`、`kimi-k3`、`minimax-m2.7` 以及更新后的 `minimax-m3` 阶梯。DashScope 价格也包含 `qwen3.8-max` 和 `deepseek-v4-flash-0731`；用户自定义价格始终优先。OpenRouter 上报的 usage cost 优先于配置价格，并统一按 USD 记录。
+    - `type`：可选，覆盖该模型使用的 provider 类型。支持 `anthropic`、`openai-compatible` 和 `openai-responses`，适合一个上游同时暴露不同 API 形态模型的场景。OpenCode Go 会自动让 `qwen*` 与 `minimax*` 模型走 Anthropic Messages、`gpt*` 模型走 OpenAI Responses，其他模型仍走 OpenAI-compatible 默认协议；显式的模型级 `type` 优先级更高。
     - `extraBody`：可选，按模型合入上游请求体的动态字段；请求体显式同名字段优先。OpenAI 兼容 provider 可用它配置 `enable_thinking`、`preserve_thinking`、`reasoning_effort` 等字段。DashScope/阿里云百炼 provider 会从 Anthropic `thinking.budget_tokens` 翻译出 `thinking_budget`；若在 `extraBody` 中配置，则会在翻译后强制写入并覆盖请求派生出的预算值。DashScope provider 会默认把 `preserve_thinking` 设为 `true`，除非 `extraBody` 已显式配置。非 DashScope provider 不会转发请求派生出的 `thinking_budget`，除非它在 `extraBody` 中被显式配置。
     - `contextCache`：可选，显式 context cache 控制。省略时仅 DashScope/阿里云百炼 OpenAI 兼容 provider 默认 `true`，其他上游默认 `false`。启用后会按 DashScope Context Cache 格式，在最多 4 个 content block 上注入 `cache_control: { "type": "ephemeral" }`。缓存断点策略与 opencode 主链路保持一致：前 2 条 system 消息 + 最后 2 条非 system 消息。标记字符串 content 时会把 `system` / `user` / `assistant` / `tool` 消息转换为 text content part 数组；已有数组 content 则标记最后一个 part。如果模型本身已经支持隐式缓存，或上游不支持该显式缓存扩展字段，可在模型配置中设为 `false`。
     - `supportPdf`：可选，控制该模型是否支持 PDF/document content。默认 `false`，不支持时会把 PDF 转成提示文本；设为 `true` 时会把 PDF/document 转成 OpenAI Chat Completions 的 file part。
     - `toolContentSupportType`：可选，配置该模型的 tool result content 支持能力，值为 `array`、`image`、`pdf` 的数组。provider 侧未配置时默认只发送 string tool content。若 `supportPdf` 为 `true` 但这里不包含 `pdf`，tool result 里的 file part 会被转成 user role 消息。Copilot 主链路不使用这个 provider 默认，仍按 array + image 且不支持 PDF 的能力处理。
 - **contextManagement：** 控制代理是否为 Responses API 附加 `context_management` 压缩指令。`messages` 作用于被翻译成 Responses API 的 Anthropic 风格 `/v1/messages` 请求，包括 `openai-responses` provider 的 Messages 路由，默认值为 `true`。`responses` 作用于 native `/v1/responses` 流量，包括 `provider/model` 别名和内置 `codex` provider，默认值为 `false`。只有在确认客户端支持 context management compaction 后，才建议在 Responses API 下启用 `responses`。启用后，请求体会带上 `context_management`，并在后续轮次中仅保留最新的压缩承载内容。GPT-5.6 及以上模型启用该功能会影响 prompt cache 命中，因此代理不会为这些模型自动附加 context management；客户端显式传入的 `context_management` 字段仍会保留。
-- **modelResponsesApiCompactThresholds：** 按模型覆盖 Responses API 的 `compact_threshold`，仅在代理自动附加 `context_management` 时使用。它的优先级高于 `resolveResponsesCompactThreshold` 基于 `max_prompt_tokens * ratio` 的兜底阈值。默认将 `gpt-5.4` 和 `gpt-5.5` 设为 `217600`（`272000 * 0.8`），将 `gpt-5.6-sol`、`gpt-5.6-terra` 和 `gpt-5.6-luna` 设为 `231200`（`272000 * 0.85`）。未列出的模型继续使用原有兜底逻辑。
+- **modelResponsesApiCompactThresholds：** 按模型覆盖 Responses API 的 `compact_threshold`，仅在代理自动附加 `context_management` 时使用。它的优先级高于 `resolveResponsesCompactThreshold` 基于 `max_prompt_tokens * ratio` 的兜底阈值。默认将 `gpt-5.4` 和 `gpt-5.5` 设为 `217600`（`272000 * 0.8`）。未列出的模型继续使用原有兜底逻辑。
 - **smallModel：** 用于无工具预热消息、compact/background 请求以及其他短小维护型轮次（例如 Claude Code 或 OpenCode 发出的 housekeeping 请求）的回退模型，用来避免消耗 premium requests；默认是 `gpt-5-mini`。预热或探测请求会根据本次选中的 GitHub Copilot 账号决定路由：按 premium request 计费的账号使用 `smallModel`，按 token 计费的账号则保留请求模型，因为后者没有需要节省的 premium request 配额。compact/background 请求仍由 `compactUseSmallModel` 控制。如果原始模型名被屏蔽，而这里指向的是某个别名目标模型，则会解析为首选别名。
 - **accountAffinity：** 是否根据 session 标识启用粘性账号路由。开启后，同一 session 针对同一模型的请求会优先路由到上次成功处理它的账号。该策略同时适用于免费模型和付费模型。默认值为 `true`。设为 `false` 则所有模型都改为顺序路由。
 - **apiKey（已弃用）：** 兼容迁移的旧单 key 字段。优先使用 `auth.apiKeys`。当 `auth.apiKeys` 为空时，服务端会回退到 `COPILOT_API_KEY`，再回退到 `apiKey`。
@@ -523,6 +521,7 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
 - **useResponsesApiWebSocket：** 当为 `true`（默认）时，发往上游 Copilot Responses API 的请求会对声明了 `ws:/responses` 的模型使用 Copilot WebSocket transport；仅声明 `/responses` 的模型仍走 HTTP。设为 `false` 可禁用上游 WebSocket 路由。该配置不会禁用 `/v1/responses` 上面向 Codex 的入站 WebSocket listener。如果上游 WebSocket 反复断开，请先尝试其他网络或 VPN 节点，再关闭此选项验证 HTTP 回退路径。
 - **useResponsesApiWebSearch：** 当为 `true`（默认）时，`/v1/responses` 会保留 `type: "web_search"` 的工具并转发到上游。设为 `false` 则会在发送 Copilot 请求之前将其剥离。
 - **messageApiWebSearchModel：** 顶层 Copilot `/v1/messages` 请求只包含 Anthropic 服务端 `web_search` 工具时使用的全局回退模型，默认值为 `gpt-5-mini`。如果该值是 `provider/model` 别名，请求会进入对应 provider 的 Messages API 路径，并在转发前移除 provider 前缀。对于 Copilot GPT 模型，web search 会通过 `/responses` 执行。混合 `web_search` 与自定义工具的场景暂不支持，服务端会移除 server-side `web_search` 并让请求继续走普通链路。
+- **claudeAutoModel：** 用于 Claude Code 后台 security-monitor 请求的模型，作用于 `/v1/messages` 和 provider message 路由。无工具、`stop_sequences: ["</block>"]` 且 system prompt 匹配 security-monitor 前缀的请求会改用该模型。顶层配置为 `provider/model` 时会路由到对应 provider；直接 provider 路由保持当前 provider。默认为空（禁用）。
 - **claudeTokenMultiplier：** 用于 Claude `/v1/messages/count_tokens` 请求在本地走 GPT tokenizer 估算时的乘数。默认值为 `1.15`。如果你的客户端仍然过晚触发上下文压缩，可以适当调大。这个配置只会在代理本地估算 Claude token 时生效；如果已经配置 `anthropicApiKey` 且 Anthropic token counting 调用成功，则会直接返回 Anthropic 的精确计数，不会使用这个乘数。
 - **logLevel：** 控制 `logs/*.log` 下 handler 文件日志的详细级别。可选值：`error`、`warn`、`info`、`debug`。默认值为 `info`。如果你需要把 payload 级或 stream 级的调试内容写入文件日志，请显式设置为 `debug`。
 - **anthropicApiKey：** 可选的 Anthropic API key，用于精确的 Claude token 计数（见下文 [精确的 Claude Token 计数](#accurate-claude-token-counting)）。也可通过环境变量 `ANTHROPIC_API_KEY` 设置。若未配置，或上游调用失败，则回退到由 `claudeTokenMultiplier` 控制的本地 GPT tokenizer 估算。

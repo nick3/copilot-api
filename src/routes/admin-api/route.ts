@@ -243,6 +243,7 @@ const CONFIG_KEYS = new Set<keyof AppConfig>([
   "useResponsesApiWebSocket",
   "useResponsesApiWebSearch",
   "messageApiWebSearchModel",
+  "claudeAutoModel",
   "useResponsesApiContextManagement",
   "copilotUseLocalModels",
   "devMode",
@@ -1245,7 +1246,12 @@ function parseModelMappings(
 
 function applyOptionalString(
   next: AppConfig,
-  key: "smallModel" | "apiKey" | "anthropicApiKey" | "messageApiWebSearchModel",
+  key:
+    | "smallModel"
+    | "apiKey"
+    | "anthropicApiKey"
+    | "messageApiWebSearchModel"
+    | "claudeAutoModel",
   value: unknown,
 ): string | undefined {
   const parsed = parseOptionalString(value, key)
@@ -1695,6 +1701,8 @@ const CONFIG_PATCH_HANDLERS: Partial<Record<string, ConfigPatchHandler>> = {
     applyOptionalBoolean(next, "useResponsesApiWebSearch", value),
   messageApiWebSearchModel: (next, value) =>
     applyOptionalString(next, "messageApiWebSearchModel", value),
+  claudeAutoModel: (next, value) =>
+    applyOptionalString(next, "claudeAutoModel", value),
   useResponsesApiContextManagement: applyLegacyResponsesApiContextManagement,
   copilotUseLocalModels: (next, value) =>
     applyOptionalBoolean(next, "copilotUseLocalModels", value),

@@ -861,7 +861,7 @@ const mapOutputToAnthropicContent = (
     switch (item.type) {
       case "reasoning": {
         const thinkingText = extractReasoningText(item)
-        if (thinkingText.length > 0) {
+        if (thinkingText.length > 0 || (item.id && item.encrypted_content)) {
           contentBlocks.push({
             type: "thinking",
             thinking: thinkingText,
@@ -967,11 +967,6 @@ const extractReasoningText = (item: ResponseOutputReasoning): string => {
         continue
       }
     }
-  }
-
-  // Compatible with opencode, it will filter out blocks where the thinking text is empty, so we add a default thinking text here
-  if (!item.summary || item.summary.length === 0) {
-    return THINKING_TEXT
   }
 
   collectFromBlocks(item.summary)

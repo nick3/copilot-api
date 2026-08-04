@@ -186,6 +186,7 @@ export type AnthropicWebSearchContentBlock =
   | AnthropicWebSearchToolResultBlock
 
 export interface AnthropicUsage {
+  cost?: number
   input_tokens: number
   output_tokens: number
   cache_creation_input_tokens?: number
@@ -275,6 +276,7 @@ export interface AnthropicMessageDeltaEvent {
     stop_sequence?: string | null
   }
   usage?: {
+    cost?: number
     input_tokens?: number
     output_tokens: number
     cache_creation_input_tokens?: number

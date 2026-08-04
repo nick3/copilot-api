@@ -17,6 +17,7 @@ import {
 import { awaitApproval } from "~/lib/approval"
 import { COMPACT_REQUEST, type CompactType } from "~/lib/compact"
 import {
+  getClaudeAutoModel,
   getMessageApiWebSearchModel,
   getProviderConfig,
   getSmallModel,
@@ -128,6 +129,7 @@ import {
   applyLastMessageCacheControl,
   getCompactType,
   getLastMessageContentCacheControl,
+  isClaudeAutoModelRequest,
   mergeToolResultForClaude,
   normalizeSystemMessages,
   prepareMessagesApiPayload,
@@ -409,6 +411,17 @@ export async function handleCompletion(c: Context) {
   normalizeSystemMessages(anthropicPayload)
   sanitizeIdeTools(anthropicPayload)
 
+  const claudeAutoModel = getClaudeAutoModel()
+  const shouldUseClaudeAutoModel = Boolean(
+    claudeAutoModel && isClaudeAutoModelRequest(anthropicPayload),
+  )
+  if (claudeAutoModel && shouldUseClaudeAutoModel) {
+    logger.debug(
+      `Claude auto model override: ${anthropicPayload.model} -> ${claudeAutoModel}`,
+    )
+    anthropicPayload.model = claudeAutoModel
+  }
+
   const providerModelAlias = resolveExistingProviderModelAlias(
     anthropicPayload.model,
     providerConfigResolver,
@@ -481,10 +494,11 @@ export async function handleCompletion(c: Context) {
     markerInspection.kind === "none" ? sessionId : undefined
 
   const anthropicBeta = c.req.header("anthropic-beta")
+  logger.debug("Anthropic Beta header:", anthropicBeta)
   const compactType = getCompactType(anthropicPayload)
   const isCompact = compactType !== 0
   const originalRequestModel = anthropicPayload.model
-  let usesInternalModelRewrite = false
+  let usesInternalModelRewrite = shouldUseClaudeAutoModel
   let tokenBasedBillingWarmupModel: string | undefined
 
   // Fix warmup probe: force small model for Claude Code warmup requests (CLAUDE_CODE_SUBAGENT_MODEL also works).
@@ -492,6 +506,7 @@ export async function handleCompletion(c: Context) {
     anthropicBeta
     && compactType === 0
     && webSearchRoute.kind !== "responses"
+    && !shouldUseClaudeAutoModel
     && isWarmupProbeRequest(anthropicPayload)
   ) {
     tokenBasedBillingWarmupModel = resolveModelAlias(originalRequestModel)

@@ -23,6 +23,7 @@ test("Responses API settings exposes transport toggles and context management", 
       useResponsesApiWebSearch
       useResponsesApiWebSocket={false}
       messageApiWebSearchModelValue="search/gpt-search"
+      claudeAutoModelValue="openrouter/anthropic/claude-haiku-4.5"
       responsesApiContextManagementModelsValue=""
       compactThresholdsMode="form"
       compactThresholdsJson="{}"
@@ -35,6 +36,7 @@ test("Responses API settings exposes transport toggles and context management", 
       onCompactThresholdsToggleMode={() => {}}
       onCompactThresholdsUpdateItem={() => {}}
       onMessageApiWebSearchModelChange={() => {}}
+      onClaudeAutoModelChange={() => {}}
       onResponsesApiContextManagementModelsChange={() => {}}
       onToggleContextManagementMessages={() => {}}
       onToggleContextManagementResponses={() => {}}
@@ -47,6 +49,8 @@ test("Responses API settings exposes transport toggles and context management", 
   expect(html).toContain("ws:/responses")
   expect(html).toContain("Messages web search model")
   expect(html).toContain("search/gpt-search")
+  expect(html).toContain("Claude security monitor model")
+  expect(html).toContain("openrouter/anthropic/claude-haiku-4.5")
   expect(html).toContain("Enable context management for Messages routes")
   expect(html).toContain("Enable context management for native Responses")
   expect(html).toContain("Default: enabled")
@@ -62,6 +66,7 @@ test("Responses API settings marks dependent fields inactive when context manage
       useResponsesApiWebSearch
       useResponsesApiWebSocket
       messageApiWebSearchModelValue="gpt-5-mini"
+      claudeAutoModelValue=""
       responsesApiContextManagementModelsValue="gpt-5.4"
       compactThresholdsMode="form"
       compactThresholdsJson="{}"
@@ -74,6 +79,7 @@ test("Responses API settings marks dependent fields inactive when context manage
       onCompactThresholdsToggleMode={() => {}}
       onCompactThresholdsUpdateItem={() => {}}
       onMessageApiWebSearchModelChange={() => {}}
+      onClaudeAutoModelChange={() => {}}
       onResponsesApiContextManagementModelsChange={() => {}}
       onToggleContextManagementMessages={() => {}}
       onToggleContextManagementResponses={() => {}}
@@ -95,6 +101,7 @@ test("compact threshold form validation rejects decimals", () => {
       useResponsesApiWebSearch
       useResponsesApiWebSocket
       messageApiWebSearchModelValue="gpt-5-mini"
+      claudeAutoModelValue=""
       responsesApiContextManagementModelsValue=""
       compactThresholdsMode="form"
       compactThresholdsJson="{}"
@@ -113,6 +120,7 @@ test("compact threshold form validation rejects decimals", () => {
       onCompactThresholdsToggleMode={() => {}}
       onCompactThresholdsUpdateItem={() => {}}
       onMessageApiWebSearchModelChange={() => {}}
+      onClaudeAutoModelChange={() => {}}
       onResponsesApiContextManagementModelsChange={() => {}}
       onToggleContextManagementMessages={() => {}}
       onToggleContextManagementResponses={() => {}}
@@ -154,6 +162,7 @@ test("Messages web search model renders Copilot and provider suggestions", () =>
       useResponsesApiWebSearch
       useResponsesApiWebSocket
       messageApiWebSearchModelValue="gpt-5-mini"
+      claudeAutoModelValue=""
       responsesApiContextManagementModelsValue=""
       compactThresholdsMode="form"
       compactThresholdsJson="{}"
@@ -167,6 +176,7 @@ test("Messages web search model renders Copilot and provider suggestions", () =>
       onCompactThresholdsToggleMode={() => {}}
       onCompactThresholdsUpdateItem={() => {}}
       onMessageApiWebSearchModelChange={() => {}}
+      onClaudeAutoModelChange={() => {}}
       onResponsesApiContextManagementModelsChange={() => {}}
       onToggleContextManagementMessages={() => {}}
       onToggleContextManagementResponses={() => {}}
@@ -190,6 +200,7 @@ test("Messages web search model keeps custom values visible", () => {
       useResponsesApiWebSearch
       useResponsesApiWebSocket
       messageApiWebSearchModelValue="custom-search-model"
+      claudeAutoModelValue=""
       responsesApiContextManagementModelsValue=""
       compactThresholdsMode="form"
       compactThresholdsJson="{}"
@@ -203,6 +214,7 @@ test("Messages web search model keeps custom values visible", () => {
       onCompactThresholdsToggleMode={() => {}}
       onCompactThresholdsUpdateItem={() => {}}
       onMessageApiWebSearchModelChange={() => {}}
+      onClaudeAutoModelChange={() => {}}
       onResponsesApiContextManagementModelsChange={() => {}}
       onToggleContextManagementMessages={() => {}}
       onToggleContextManagementResponses={() => {}}
@@ -223,6 +235,7 @@ test("Messages web search model input can stay empty", () => {
       useResponsesApiWebSearch
       useResponsesApiWebSocket
       messageApiWebSearchModelValue=""
+      claudeAutoModelValue=""
       responsesApiContextManagementModelsValue=""
       compactThresholdsMode="form"
       compactThresholdsJson="{}"
@@ -235,6 +248,7 @@ test("Messages web search model input can stay empty", () => {
       onCompactThresholdsToggleMode={() => {}}
       onCompactThresholdsUpdateItem={() => {}}
       onMessageApiWebSearchModelChange={() => {}}
+      onClaudeAutoModelChange={() => {}}
       onResponsesApiContextManagementModelsChange={() => {}}
       onToggleContextManagementMessages={() => {}}
       onToggleContextManagementResponses={() => {}}

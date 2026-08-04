@@ -1643,6 +1643,74 @@ describe("messages handler affinity context", () => {
     expect(upstreamBody?.model).toBe("original-model")
   })
 
+  test("Claude auto model overrides warmup routing before account selection", async () => {
+    await writeConfig({ claudeAutoModel: "auto-model" })
+    let selectionCandidates: Array<AccountRequestCandidate> = []
+    let upstreamBody: Record<string, unknown> | undefined
+
+    accountsManager.selectAccountForRequest = (candidates) => {
+      selectionCandidates = candidates
+      return Promise.resolve(buildSelection("/v1/messages", "auto-model"))
+    }
+
+    const fetchMock = mock((_url: string, opts?: FetchOptions) => {
+      upstreamBody = parseFetchBody(opts?.body)
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(buildAnthropicResponse("auto-model", "checked")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      )
+    })
+
+    // @ts-expect-error test mock only implements the used subset
+    fetchHolder.fetch = fetchMock
+
+    const response = await messageRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "anthropic-beta": "warmup-beta",
+        },
+        body: JSON.stringify(
+          createPayload({
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: "warmup",
+                    cache_control: { type: "ephemeral" },
+                  },
+                ],
+              },
+            ],
+            stop_sequences: ["</block>"],
+            system: [
+              {
+                type: "text",
+                text: "You are a security monitor for autonomous AI coding agents. Check the changes.",
+              },
+            ],
+          }),
+        ),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(selectionCandidates[0]).toMatchObject({
+      endpoint: "/v1/messages",
+      modelId: "auto-model",
+    })
+    expect(selectionCandidates[0]?.tokenBasedBillingModelId).toBeUndefined()
+    expect(upstreamBody?.model).toBe("auto-model")
+  })
+
   test("compact requests keep original model for affinity while routing small model", async () => {
     let selectionCandidates: Array<AccountRequestCandidate> = []
     let selectionAffinityModelId: string | undefined

@@ -19,6 +19,7 @@ import type { Model } from "~/services/copilot/get-models"
 import {
   getConfiguredReasoningEffortForModel,
   getProviderConfig,
+  getClaudeAutoModel,
   type ModelConfig,
   type ResolvedProviderConfig,
   resolveEffectiveProviderConfig,
@@ -37,12 +38,14 @@ import {
 import { createHandlerLogger, debugJson, debugLazy } from "~/lib/logger"
 import { resolveBridgeToolSearchName } from "~/lib/tool-search"
 import {
+  createProviderTokenUsageRecorder,
   mergeAnthropicUsage,
   normalizeAnthropicUsage,
   normalizeOpenAIUsage,
   normalizeResponsesUsage,
   type UsageTokens,
 } from "~/lib/token-usage"
+import { parseUserIdMetadata } from "~/lib/utils"
 import {
   translateToAnthropic,
   translateToOpenAI,
@@ -61,7 +64,10 @@ import {
   translateAnthropicMessagesToResponsesPayload,
   translateResponsesResultToAnthropic,
 } from "~/routes/messages/responses-translation"
-import { normalizeSystemMessages } from "~/routes/messages/preprocess"
+import {
+  isClaudeAutoModelRequest,
+  normalizeSystemMessages,
+} from "~/routes/messages/preprocess"
 import {
   parseReasoningEffort,
   type ReasoningEffort,
@@ -93,7 +99,6 @@ import {
   forwardProviderMessages,
   forwardProviderResponses,
 } from "~/services/providers/provider-proxy"
-
 const logger = createHandlerLogger("provider-messages-handler")
 
 const resolveProviderResponsesReasoningEffort = (
@@ -173,7 +178,19 @@ export async function handleProviderMessages(
 ): Promise<Response> {
   const provider = c.req.param("provider")
   const payload = await c.req.json<AnthropicMessagesPayload>()
-  return await handleProviderMessagesForProvider(c, { payload, provider })
+
+  const claudeAutoModel = getClaudeAutoModel()
+  if (claudeAutoModel && isClaudeAutoModelRequest(payload)) {
+    logger.debug(
+      `Claude auto model override (${provider}): ${payload.model} -> ${claudeAutoModel}`,
+    )
+    payload.model = claudeAutoModel
+  }
+
+  return await handleProviderMessagesForProvider(c, {
+    payload,
+    provider,
+  })
 }
 
 export async function handleProviderMessagesForProvider(
@@ -208,6 +225,19 @@ export async function handleProviderMessagesForProvider(
 
   try {
     const modelConfig = providerConfig.models?.[payload.model]
+    const recordUsage = createProviderMessagesUsageRecorder(
+      payload,
+      provider,
+      modelConfig,
+      providerConfig.pricingCurrency,
+    )
+    const completionInstrumentation: ProviderMessagesInstrumentation = {
+      onComplete: (usage) => {
+        recordUsage(usage)
+        instrumentation?.onComplete?.(usage)
+      },
+      onError: instrumentation?.onError,
+    }
     const effectiveProviderConfig = resolveEffectiveProviderConfig(
       providerConfig,
       payload.model,
@@ -222,7 +252,7 @@ export async function handleProviderMessagesForProvider(
       if (hasWebSearchServerTool(payload)) {
         if (isWebSearchOnlyRequest(payload)) {
           return await handleOpenAIResponsesProviderWebSearchMessages(c, {
-            instrumentation,
+            instrumentation: completionInstrumentation,
             payload,
             provider,
             providerConfig: effectiveProviderConfig,
@@ -234,7 +264,7 @@ export async function handleProviderMessagesForProvider(
       }
 
       return await handleOpenAIResponsesProviderMessages(c, {
-        instrumentation,
+        instrumentation: completionInstrumentation,
         modelConfig,
         payload,
         provider,
@@ -247,7 +277,7 @@ export async function handleProviderMessagesForProvider(
       stripWebSearchServerTool(payload)
 
       return await handleOpenAICompatibleProviderMessages(c, {
-        instrumentation,
+        instrumentation: completionInstrumentation,
         modelConfig,
         payload,
         provider,
@@ -278,7 +308,7 @@ export async function handleProviderMessagesForProvider(
     if (isStreamingResponse) {
       return streamProviderMessages({
         c,
-        instrumentation,
+        instrumentation: completionInstrumentation,
         payload,
         provider,
         providerConfig: effectiveProviderConfig,
@@ -289,7 +319,7 @@ export async function handleProviderMessagesForProvider(
     const jsonBody = (await upstreamResponse.json()) as AnthropicResponse
     return respondProviderMessagesJson(c, {
       body: jsonBody,
-      instrumentation,
+      instrumentation: completionInstrumentation,
       payload,
       provider,
       providerConfig: effectiveProviderConfig,
@@ -527,6 +557,7 @@ const handleOpenAIResponsesProviderMessages = async (
   if (responsesPayload.stream) {
     return streamResponsesProviderMessages({
       c,
+      instrumentation,
       payload,
       provider,
       providerConfig,
@@ -773,6 +804,10 @@ const streamProviderMessages = ({
   logger.debug("provider.messages.streaming")
   return streamSSE(c, async (stream) => {
     let usage: UsageTokens = {}
+    const openRouterThinkingState: OpenRouterThinkingStreamState = {
+      signedThinkingBlockIndexes: new Set<number>(),
+      thinkingBlockIndexes: new Set<number>(),
+    }
 
     try {
       let completed = false
@@ -798,10 +833,20 @@ const streamProviderMessages = ({
         usage = mergeAnthropicUsage(usage, parsed.usage)
         data = parsed.data
 
-        await stream.writeSSE({
-          event: eventName,
-          data,
-        })
+        const streamEvents =
+          providerConfig.name.trim().toLowerCase() === "openrouter" ?
+            normalizeOpenRouterStreamEvents(
+              eventName,
+              data,
+              openRouterThinkingState,
+            )
+          : [{ data, event: eventName }]
+        for (const streamEvent of streamEvents) {
+          await stream.writeSSE({
+            event: streamEvent.event,
+            data: streamEvent.data,
+          })
+        }
 
         if (parsed.error || eventName === "error") {
           instrumentation?.onError?.(
@@ -1132,6 +1177,83 @@ const parseProviderStreamEvent = (
   }
 }
 
+const normalizeOpenRouterThinkingSignatures = (
+  body: AnthropicResponse,
+): void => {
+  for (const block of body.content) {
+    if (block.type === "thinking") {
+      block.signature ??= ""
+    }
+  }
+}
+
+type OpenRouterThinkingStreamState = {
+  signedThinkingBlockIndexes: Set<number>
+  thinkingBlockIndexes: Set<number>
+}
+
+type ProviderStreamEvent = {
+  data: string
+  event: string | undefined
+}
+
+const normalizeOpenRouterStreamEvents = (
+  eventName: string | undefined,
+  data: string,
+  state: OpenRouterThinkingStreamState,
+): Array<ProviderStreamEvent> => {
+  let event: AnthropicStreamEventData
+  try {
+    event = JSON.parse(data) as typeof event
+  } catch {
+    return [{ data, event: eventName }]
+  }
+
+  if (
+    event.type === "content_block_start"
+    && event.content_block.type === "thinking"
+  ) {
+    const { index } = event
+    state.thinkingBlockIndexes.add(index)
+    state.signedThinkingBlockIndexes.delete(index)
+  }
+
+  if (
+    event.type === "content_block_delta"
+    && event.delta.type === "signature_delta"
+  ) {
+    const { index } = event
+    state.signedThinkingBlockIndexes.add(index)
+  }
+
+  if (event.type === "content_block_stop") {
+    const { index } = event
+    if (!state.thinkingBlockIndexes.has(index)) {
+      return [{ data, event: eventName }]
+    }
+
+    const hasSignature = state.signedThinkingBlockIndexes.has(index)
+    state.thinkingBlockIndexes.delete(index)
+    state.signedThinkingBlockIndexes.delete(index)
+
+    if (!hasSignature) {
+      return [
+        {
+          data: JSON.stringify({
+            delta: { signature: "", type: "signature_delta" },
+            index,
+            type: "content_block_delta",
+          }),
+          event: "content_block_delta",
+        },
+        { data, event: eventName },
+      ]
+    }
+  }
+
+  return [{ data, event: eventName }]
+}
+
 const respondProviderMessagesJson = (
   c: Context,
   options: {
@@ -1144,6 +1266,10 @@ const respondProviderMessagesJson = (
 ): Response => {
   const { body, instrumentation, providerConfig } = options
   adjustInputTokens(providerConfig, body.usage)
+
+  if (providerConfig.name.trim().toLowerCase() === "openrouter") {
+    normalizeOpenRouterThinkingSignatures(body)
+  }
 
   debugJson(logger, "provider.messages.no_stream result:", body)
   const response = c.json(body)
@@ -1254,3 +1380,18 @@ const adjustInputTokens = (
   usage.input_tokens = adjustedInput
   debugJson(logger, "provider.messages.adjusted_usage:", usage)
 }
+
+const createProviderMessagesUsageRecorder = (
+  payload: AnthropicMessagesPayload,
+  provider: string,
+  modelConfig: ModelConfig | undefined,
+  pricingCurrency: string | undefined,
+) =>
+  createProviderTokenUsageRecorder({
+    endpoint: "provider_messages",
+    model: payload.model,
+    pricing: modelConfig?.pricing,
+    pricingCurrency,
+    providerName: provider,
+    sessionId: parseUserIdMetadata(payload.metadata?.user_id).sessionId,
+  })

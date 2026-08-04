@@ -128,7 +128,7 @@ describe("builtin provider config", () => {
     })
   })
 
-  test("adds model Responses API compact thresholds by default", () => {
+  test("does not add GPT-5.6 Responses API compact thresholds by default", () => {
     const tempDir = createTempConfigDir()
     const configPath = path.join(tempDir, "config.json")
 
@@ -140,9 +140,6 @@ describe("builtin provider config", () => {
     expect(JSON.parse(output)).toEqual({
       gpt54: 217600,
       gpt55: 217600,
-      gpt56Sol: 231200,
-      gpt56Terra: 231200,
-      gpt56Luna: 231200,
       unknown: null,
     })
     expect(
@@ -150,9 +147,6 @@ describe("builtin provider config", () => {
     ).toEqual({
       "gpt-5.4": 217600,
       "gpt-5.5": 217600,
-      "gpt-5.6-sol": 231200,
-      "gpt-5.6-terra": 231200,
-      "gpt-5.6-luna": 231200,
     })
   })
 
@@ -226,12 +220,15 @@ describe("builtin provider config", () => {
 
     const output = runScript(
       tempDir,
-      'const { getModelResponsesApiCompactThreshold } = await import("./src/lib/config"); console.log(JSON.stringify({ gpt54: getModelResponsesApiCompactThreshold("gpt-5.4"), gpt55: getModelResponsesApiCompactThreshold("gpt-5.5") }));',
+      'const { getModelResponsesApiCompactThreshold } = await import("./src/lib/config"); console.log(JSON.stringify({ gpt54: getModelResponsesApiCompactThreshold("gpt-5.4"), gpt55: getModelResponsesApiCompactThreshold("gpt-5.5"), gpt56Sol: getModelResponsesApiCompactThreshold("gpt-5.6-sol") ?? null, gpt56Terra: getModelResponsesApiCompactThreshold("gpt-5.6-terra") ?? null, gpt56Luna: getModelResponsesApiCompactThreshold("gpt-5.6-luna") ?? null }));',
     )
 
     expect(JSON.parse(output)).toEqual({
       gpt54: 123456,
       gpt55: 217600,
+      gpt56Sol: null,
+      gpt56Terra: null,
+      gpt56Luna: null,
     })
   })
 

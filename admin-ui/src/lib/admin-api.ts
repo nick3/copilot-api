@@ -406,6 +406,7 @@ export type AdminConfig = {
   useResponsesApiWebSocket?: boolean
   useResponsesApiWebSearch?: boolean
   messageApiWebSearchModel?: string
+  claudeAutoModel?: string
   /** @deprecated use contextManagement */
   useResponsesApiContextManagement?: boolean
   copilotUseLocalModels?: boolean
@@ -787,6 +788,7 @@ const ADMIN_CONFIG_KEYS = new Set<keyof AdminConfig>([
   "useResponsesApiWebSocket",
   "useResponsesApiWebSearch",
   "messageApiWebSearchModel",
+  "claudeAutoModel",
   "useResponsesApiContextManagement",
   "copilotUseLocalModels",
 ])

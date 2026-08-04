@@ -103,6 +103,11 @@ const translateThinking = (thinking: string): ResponseInputReasoning => {
 }
 
 describe("translateAnthropicMessagesToResponsesPayload", () => {
+  it("keeps empty summaries compatible with legacy Thinking markers", () => {
+    expect(translateThinking("").summary).toEqual([])
+    expect(translateThinking("Thinking...").summary).toEqual([])
+  })
+
   it("restores marked summary boundaries and preserves unmarked history", () => {
     const firstSummary =
       "**Preparing to search online**\n\nI need to use web.run."

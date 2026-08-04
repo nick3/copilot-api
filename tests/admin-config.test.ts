@@ -3,6 +3,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import {
+  getClaudeAutoModel,
   getLogLevel,
   getMessageApiWebSearchModel,
   getModelMappings,
@@ -283,6 +284,52 @@ test("getMessageApiWebSearchModel trims configured model names", async () => {
   )
 })
 
+test("POST /api/admin/config updates and trims claudeAutoModel", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          claudeAutoModel: "  openrouter/anthropic/claude-haiku-4.5  ",
+        }),
+      }),
+    )
+
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as { claudeAutoModel?: string }
+    expect(body.claudeAutoModel).toBe("openrouter/anthropic/claude-haiku-4.5")
+    expect(getClaudeAutoModel()).toBe("openrouter/anthropic/claude-haiku-4.5")
+  })
+})
+
+test("POST /api/admin/config clears claudeAutoModel", async () => {
+  await withConfig({ claudeAutoModel: "auto-model" }, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ claudeAutoModel: "" }),
+      }),
+    )
+
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as { claudeAutoModel?: string }
+    expect(body.claudeAutoModel).toBeUndefined()
+    expect(getClaudeAutoModel()).toBeUndefined()
+  })
+})
+
 test("POST /api/admin/config updates useResponsesApiWebSocket", async () => {
   await withConfig({}, async () => {
     const { server } = await import("../src/server")
@@ -425,9 +472,6 @@ test("POST /api/admin/config updates modelResponsesApiCompactThresholds", async 
     expect(body.modelResponsesApiCompactThresholds).toEqual({
       "gpt-5.4": 123456,
       "gpt-5.5": 217600,
-      "gpt-5.6-sol": 231200,
-      "gpt-5.6-terra": 231200,
-      "gpt-5.6-luna": 231200,
     })
   })
 })
@@ -579,9 +623,6 @@ test("POST /api/admin/config clears modelResponsesApiCompactThresholds", async (
       expect(body.modelResponsesApiCompactThresholds).toEqual({
         "gpt-5.4": 217600,
         "gpt-5.5": 217600,
-        "gpt-5.6-sol": 231200,
-        "gpt-5.6-terra": 231200,
-        "gpt-5.6-luna": 231200,
       })
     },
   )

@@ -23,6 +23,7 @@ export type TokenUsagePeriod = "day" | "week" | "month"
 export interface UsageTokens {
   cache_creation_input_tokens?: number | null
   cache_read_input_tokens?: number | null
+  cost?: number | null
   input_tokens?: number | null
   output_tokens?: number | null
   total_nano_aiu?: number | null

@@ -3071,6 +3071,7 @@ type ResponsesApiSettingsCardProps = {
   useResponsesApiWebSocket: boolean
   useResponsesApiWebSearch: boolean
   messageApiWebSearchModelValue: string
+  claudeAutoModelValue: string
   contextManagementMessages: boolean
   contextManagementResponses: boolean
   responsesApiContextManagementModelsValue: string
@@ -3083,6 +3084,7 @@ type ResponsesApiSettingsCardProps = {
   onToggleUseResponsesApiWebSocket: (value: boolean) => void
   onToggleUseResponsesApiWebSearch: (value: boolean) => void
   onMessageApiWebSearchModelChange: (value: string) => void
+  onClaudeAutoModelChange: (value: string) => void
   onToggleContextManagementMessages: (value: boolean) => void
   onToggleContextManagementResponses: (value: boolean) => void
   onResponsesApiContextManagementModelsChange: (value: string) => void
@@ -3100,6 +3102,7 @@ export function ResponsesApiSettingsCard({
   useResponsesApiWebSocket,
   useResponsesApiWebSearch,
   messageApiWebSearchModelValue,
+  claudeAutoModelValue,
   contextManagementMessages,
   contextManagementResponses,
   responsesApiContextManagementModelsValue,
@@ -3112,6 +3115,7 @@ export function ResponsesApiSettingsCard({
   onToggleUseResponsesApiWebSocket,
   onToggleUseResponsesApiWebSearch,
   onMessageApiWebSearchModelChange,
+  onClaudeAutoModelChange,
   onToggleContextManagementMessages,
   onToggleContextManagementResponses,
   onResponsesApiContextManagementModelsChange,
@@ -3244,6 +3248,26 @@ export function ResponsesApiSettingsCard({
               </div>
             ) : null}
           </div>
+        </div>
+
+        <div className="grid gap-2 rounded-lg border p-3">
+          <div className="space-y-1">
+            <Label className="text-muted-foreground text-xs">
+              {t("settingsPage.responsesApi.claudeAutoModelLabel")}
+            </Label>
+            <div className="text-muted-foreground text-xs">
+              {t("settingsPage.responsesApi.claudeAutoModelHint")}
+            </div>
+          </div>
+          <Input
+            autoComplete="off"
+            placeholder={t(
+              "settingsPage.responsesApi.claudeAutoModelPlaceholder",
+            )}
+            value={claudeAutoModelValue}
+            onChange={(e) => onClaudeAutoModelChange(e.target.value)}
+            className="font-mono text-xs"
+          />
         </div>
 
         <hr className="border-t" />
@@ -4375,6 +4399,7 @@ type SettingsPageViewProps = {
   useResponsesApiWebSocket: boolean
   useResponsesApiWebSearch: boolean
   messageApiWebSearchModelValue: string
+  claudeAutoModelValue: string
   contextManagementMessages: boolean
   contextManagementResponses: boolean
   responsesApiContextManagementModelsValue: string
@@ -4382,6 +4407,7 @@ type SettingsPageViewProps = {
   onUseResponsesApiWebSocketToggle: (value: boolean) => void
   onUseResponsesApiWebSearchToggle: (value: boolean) => void
   onMessageApiWebSearchModelChange: (value: string) => void
+  onClaudeAutoModelChange: (value: string) => void
   onContextManagementMessagesToggle: (value: boolean) => void
   onContextManagementResponsesToggle: (value: boolean) => void
   onResponsesApiContextManagementModelsChange: (value: string) => void
@@ -4831,6 +4857,13 @@ function useSettingsPageState(): SettingsPageViewProps {
     [setDraft],
   )
 
+  const handleClaudeAutoModelChange = useCallback(
+    (value: string) => {
+      setDraft((prev) => ({ ...prev, claudeAutoModel: value }))
+    },
+    [setDraft],
+  )
+
   const updateContextManagement = useCallback(
     (patch: Partial<ContextManagementDraft>) => {
       setDraft((prev) => ({
@@ -4967,6 +5000,7 @@ function useSettingsPageState(): SettingsPageViewProps {
   const useResponsesApiWebSocket = draft.useResponsesApiWebSocket ?? true
   const useResponsesApiWebSearch = draft.useResponsesApiWebSearch ?? true
   const messageApiWebSearchModelValue = draft.messageApiWebSearchModel ?? ""
+  const claudeAutoModelValue = draft.claudeAutoModel ?? ""
   const contextManagement = getContextManagementFromConfig(draft)
   const providerModelSuggestions = deriveProviderModelSuggestions(providersItems)
 
@@ -5059,6 +5093,7 @@ function useSettingsPageState(): SettingsPageViewProps {
     useResponsesApiWebSocket,
     useResponsesApiWebSearch,
     messageApiWebSearchModelValue,
+    claudeAutoModelValue,
     contextManagementMessages: contextManagement.messages,
     contextManagementResponses: contextManagement.responses,
     responsesApiContextManagementModelsValue,
@@ -5066,6 +5101,7 @@ function useSettingsPageState(): SettingsPageViewProps {
     onUseResponsesApiWebSocketToggle: handleUseResponsesApiWebSocketToggle,
     onUseResponsesApiWebSearchToggle: handleUseResponsesApiWebSearchToggle,
     onMessageApiWebSearchModelChange: handleMessageApiWebSearchModelChange,
+    onClaudeAutoModelChange: handleClaudeAutoModelChange,
     onContextManagementMessagesToggle: handleContextManagementMessagesToggle,
     onContextManagementResponsesToggle: handleContextManagementResponsesToggle,
     onResponsesApiContextManagementModelsChange:
@@ -5177,6 +5213,7 @@ function SettingsPageView({
   useResponsesApiWebSocket,
   useResponsesApiWebSearch,
   messageApiWebSearchModelValue,
+  claudeAutoModelValue,
   contextManagementMessages,
   contextManagementResponses,
   responsesApiContextManagementModelsValue,
@@ -5184,6 +5221,7 @@ function SettingsPageView({
   onUseResponsesApiWebSocketToggle,
   onUseResponsesApiWebSearchToggle,
   onMessageApiWebSearchModelChange,
+  onClaudeAutoModelChange,
   onContextManagementMessagesToggle,
   onContextManagementResponsesToggle,
   onResponsesApiContextManagementModelsChange,
@@ -5375,6 +5413,7 @@ function SettingsPageView({
               useResponsesApiWebSocket={useResponsesApiWebSocket}
               useResponsesApiWebSearch={useResponsesApiWebSearch}
               messageApiWebSearchModelValue={messageApiWebSearchModelValue}
+              claudeAutoModelValue={claudeAutoModelValue}
               contextManagementMessages={contextManagementMessages}
               contextManagementResponses={contextManagementResponses}
               responsesApiContextManagementModelsValue={
@@ -5389,6 +5428,7 @@ function SettingsPageView({
               onToggleUseResponsesApiWebSocket={onUseResponsesApiWebSocketToggle}
               onToggleUseResponsesApiWebSearch={onUseResponsesApiWebSearchToggle}
               onMessageApiWebSearchModelChange={onMessageApiWebSearchModelChange}
+              onClaudeAutoModelChange={onClaudeAutoModelChange}
               onToggleContextManagementMessages={
                 onContextManagementMessagesToggle
               }

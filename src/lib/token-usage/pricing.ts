@@ -115,34 +115,34 @@ const BUILTIN_PROVIDER_PRICING: Record<
     "gpt-5.6-terra": {
       tiers: [
         {
-          cacheCreationInput: 3.125,
-          cachedInput: 0.25,
-          input: 2.5,
+          cacheCreationInput: 2.5,
+          cachedInput: 0.2,
+          input: 2,
           maxInputTokens: 272_000,
-          output: 15,
+          output: 12,
         },
         {
-          cacheCreationInput: 6.25,
-          cachedInput: 0.5,
-          input: 5,
-          output: 22.5,
+          cacheCreationInput: 5,
+          cachedInput: 0.4,
+          input: 4,
+          output: 18,
         },
       ],
     },
     "gpt-5.6-luna": {
       tiers: [
         {
-          cacheCreationInput: 1.25,
-          cachedInput: 0.1,
-          input: 1,
+          cacheCreationInput: 0.25,
+          cachedInput: 0.02,
+          input: 0.2,
           maxInputTokens: 272_000,
-          output: 6,
+          output: 1.2,
         },
         {
-          cacheCreationInput: 2.5,
-          cachedInput: 0.2,
-          input: 2,
-          output: 9,
+          cacheCreationInput: 0.5,
+          cachedInput: 0.04,
+          input: 0.4,
+          output: 1.8,
         },
       ],
     },
@@ -182,6 +182,18 @@ const BUILTIN_PROVIDER_PRICING: Record<
       input: 12,
       output: 36,
     },
+    "qwen3.8-max": {
+      cachedInput: 1.5,
+      cacheCreationInput: 15,
+      explicitCachedInput: 1,
+      input: 12,
+      output: 36,
+    },
+    "deepseek-v4-flash-0731": {
+      cachedInput: 0.2,
+      input: 1,
+      output: 2,
+    },
     "qwen3.7-plus": {
       tiers: [
         {
@@ -216,6 +228,28 @@ const BUILTIN_PROVIDER_PRICING: Record<
     },
   },
   "opencode-go": {
+    hy3: {
+      cachedInput: 0.035,
+      input: 0.14,
+      output: 0.58,
+    },
+    "gpt-5.6-luna": {
+      tiers: [
+        {
+          cacheCreationInput: 0.125,
+          cachedInput: 0.01,
+          input: 0.1,
+          maxInputTokens: 272_000,
+          output: 0.6,
+        },
+        {
+          cacheCreationInput: 0.25,
+          cachedInput: 0.02,
+          input: 0.2,
+          output: 0.9,
+        },
+      ],
+    },
     "glm-5.2": {
       cachedInput: 0.26,
       input: 1.4,
@@ -290,6 +324,12 @@ const BUILTIN_PROVIDER_PRICING: Record<
       input: 2.5,
       output: 7.5,
     },
+    "qwen3.8-max": {
+      cacheCreationInput: 2.5,
+      cachedInput: 0.25,
+      input: 2,
+      output: 6,
+    },
     "minimax-m2.7": {
       cachedInput: 0.06,
       input: 0.3,
@@ -317,6 +357,16 @@ const BUILTIN_PROVIDER_PRICING: Record<
 export function resolveTokenUsageCost(
   input: TokenUsageCostInput,
 ): CalculatedTokenUsageCost | null {
+  if (
+    input.source === "provider"
+    && input.providerName?.trim().toLowerCase() === "openrouter"
+  ) {
+    const reportedCost = resolveReportedProviderCost(input)
+    if (reportedCost) {
+      return reportedCost
+    }
+  }
+
   if (input.source === "copilot") {
     return resolveCopilotCost(input)
   }
@@ -362,6 +412,26 @@ export function resolveTokenUsageCost(
   return {
     currency,
     source: resolvedPricing.source,
+    total_cost_nanos: totalCostNanos,
+  }
+}
+
+function resolveReportedProviderCost(
+  input: TokenUsageCostInput,
+): CalculatedTokenUsageCost | null {
+  const cost = normalizePrice(input.cost)
+  if (cost === null) {
+    return null
+  }
+
+  const totalCostNanos = Math.round(cost * COST_NANOS_PER_UNIT)
+  if (totalCostNanos < 0) {
+    return null
+  }
+
+  return {
+    currency: "USD",
+    source: "upstream",
     total_cost_nanos: totalCostNanos,
   }
 }
@@ -453,7 +523,7 @@ function getInputTokenTotal(input: UsageTokens): number {
   )
 }
 
-function normalizePrice(value: number | undefined): number | null {
+function normalizePrice(value: number | null | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ?
       value
     : null

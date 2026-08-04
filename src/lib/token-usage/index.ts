@@ -309,6 +309,7 @@ export function normalizeAnthropicUsage(
     | {
         cache_creation_input_tokens?: number
         cache_read_input_tokens?: number
+        cost?: number
         input_tokens?: number
         output_tokens?: number
         total_tokens?: number
@@ -323,6 +324,7 @@ export function normalizeAnthropicUsage(
     cache_read_input_tokens: normalizeOptionalToken(
       usage?.cache_read_input_tokens,
     ),
+    cost: normalizeOptionalCost(usage?.cost),
     input_tokens: normalizeOptionalToken(usage?.input_tokens),
     output_tokens: normalizeOptionalToken(usage?.output_tokens),
     total_tokens: normalizeOptionalToken(usage?.total_tokens),
@@ -338,9 +340,18 @@ export function mergeAnthropicUsage(
       next.cache_creation_input_tokens ?? current.cache_creation_input_tokens,
     cache_read_input_tokens:
       next.cache_read_input_tokens ?? current.cache_read_input_tokens,
+    cost: next.cost ?? current.cost,
     input_tokens: next.input_tokens ?? current.input_tokens,
     output_tokens: next.output_tokens ?? current.output_tokens,
     total_nano_aiu: next.total_nano_aiu ?? current.total_nano_aiu,
     total_tokens: next.total_tokens ?? current.total_tokens,
   }
+}
+
+function normalizeOptionalCost(
+  value: number | null | undefined,
+): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ?
+      value
+    : undefined
 }

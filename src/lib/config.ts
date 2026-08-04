@@ -68,6 +68,14 @@ export interface AppConfig {
   // via /responses. Leave unset to disable (the tool is then stripped).
   // Mixing web_search with other tools is not supported.
   messageApiWebSearchModel?: string
+  // Model used for Claude Code background security-monitor requests on
+  // /v1/messages and provider message APIs: requests without tools, with
+  // `stop_sequences: ["</block>"]` and a system block starting with
+  // "You are a security monitor for autonomous AI coding agents.".
+  // A `provider/model` alias is forwarded to that provider's message API on
+  // the top-level route. Provider message routes use the configured value on
+  // their current provider. Leave empty to disable (default).
+  claudeAutoModel?: string
   claudeTokenMultiplier?: number
   logLevel?: LogLevel
   devMode?: DevModeConfig
@@ -143,6 +151,8 @@ export interface ResolvedProviderConfig {
 }
 
 const GPT_MODEL_PATTERN = /^gpt-(\d+)(?:\.(\d+))?/
+const OPENCODE_ANTHROPIC_MODEL_PATTERN = /^(?:qwen|minimax)/iu
+const OPENCODE_RESPONSES_MODEL_PATTERN = /^gpt(?:[-_.]|$)/iu
 
 function isGpt53OrAbove(model: string): boolean {
   const match = GPT_MODEL_PATTERN.exec(model)
@@ -216,9 +226,6 @@ You interact with the user through a terminal. You have 2 ways of communicating 
 const modelResponsesApiCompactThresholds = {
   "gpt-5.4": 272_000 * 0.8,
   "gpt-5.5": 272_000 * 0.8,
-  "gpt-5.6-sol": 272_000 * 0.85,
-  "gpt-5.6-terra": 272_000 * 0.85,
-  "gpt-5.6-luna": 272_000 * 0.85,
 }
 
 const defaultContextManagement = {
@@ -1278,6 +1285,16 @@ export function resolveEffectiveProviderType(
   if (typeof modelType === "string" && isSupportedProviderType(modelType)) {
     return modelType
   }
+
+  if (providerConfig.name === "opencode-go") {
+    if (OPENCODE_ANTHROPIC_MODEL_PATTERN.test(model)) {
+      return "anthropic"
+    }
+    if (OPENCODE_RESPONSES_MODEL_PATTERN.test(model)) {
+      return "openai-responses"
+    }
+  }
+
   return providerConfig.type
 }
 
@@ -1331,6 +1348,12 @@ export function getMessageApiWebSearchModel(): string | undefined {
   const config = getConfig()
   const model = config.messageApiWebSearchModel?.trim()
   return model && model.length > 0 ? model : undefined
+}
+
+export function getClaudeAutoModel(): string | undefined {
+  const config = getConfig()
+  const model = config.claudeAutoModel
+  return model && model.trim().length > 0 ? model.trim() : undefined
 }
 
 export function getClaudeTokenMultiplier(): number {
