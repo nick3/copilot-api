@@ -31,7 +31,10 @@ const { providerMessageRoutes } =
   await import("../src/routes/provider/messages/route")
 
 const originalFetch = globalThis.fetch
-const fetchMock = mock(() => Promise.resolve(upstreamResponseFactory()))
+const fetchMock = mock((...args: Parameters<typeof fetch>) => {
+  void args
+  return Promise.resolve(upstreamResponseFactory())
+})
 
 const createApp = () => {
   const app = new Hono()
@@ -199,7 +202,7 @@ describe("provider Messages Anthropic forwarding", () => {
     })
 
     expect(response.status).toBe(200)
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined
+    const init = fetchMock.mock.calls[0]?.[1]
     expect(
       typeof init?.body === "string" ? JSON.parse(init.body) : null,
     ).toMatchObject({
