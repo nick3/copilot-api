@@ -78,9 +78,16 @@ const logger = createHandlerLogger("responses-handler")
 
 const RESPONSES_ENDPOINT = "/responses"
 
-// eslint-disable-next-line max-lines-per-function
 export const handleResponses = async (c: Context) => {
   const payload = await c.req.json<ResponsesPayload>()
+  return await handleResponsesPayload(c, payload)
+}
+
+// eslint-disable-next-line max-lines-per-function
+export const handleResponsesPayload = async (
+  c: Context,
+  payload: ResponsesPayload,
+) => {
   debugJson(logger, "Responses request payload:", payload)
 
   const requestedModel = payload.model
