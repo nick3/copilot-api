@@ -1172,6 +1172,56 @@ describe("prepareMessagesApiPayload", () => {
     expect(payload.output_config).toBeUndefined()
   })
 
+  test("keeps signature-only thinking blocks", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-opus-5",
+      max_tokens: 128,
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "thinking",
+              thinking: "",
+              signature: "sig-only",
+            },
+            {
+              type: "text",
+              text: "Visible text",
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: "hello",
+        },
+      ],
+    }
+
+    prepareMessagesApiPayload(payload, {
+      capabilities: {
+        supports: {
+          adaptive_thinking: true,
+        },
+      },
+    } as never)
+
+    expect(payload.messages[0]).toEqual({
+      role: "assistant",
+      content: [
+        {
+          type: "thinking",
+          thinking: "",
+          signature: "sig-only",
+        },
+        {
+          type: "text",
+          text: "Visible text",
+        },
+      ],
+    })
+  })
+
   test("normalizes reasoning effort when tool choice disables adaptive thinking", () => {
     const payload: AnthropicMessagesPayload = {
       model: "gpt-5.4",

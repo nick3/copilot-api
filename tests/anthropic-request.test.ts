@@ -226,6 +226,26 @@ describe("Anthropic to OpenAI translation logic", () => {
     expect(isValidChatCompletionRequest(openAIPayload)).toBe(false)
   })
 
+  test("should skip assistant messages with empty content array", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-4o",
+      messages: [
+        { role: "user", content: "Hello!" },
+        { role: "assistant", content: [] },
+        { role: "user", content: "Are you there?" },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    expect(openAIPayload.messages).toEqual([
+      { role: "user", content: "Hello!" },
+      { role: "user", content: "Are you there?" },
+    ])
+    expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+  })
+
   test("should handle thinking blocks in assistant messages", () => {
     const anthropicPayload: AnthropicMessagesPayload = {
       model: "claude-3-5-sonnet-20241022",

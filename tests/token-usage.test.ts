@@ -506,7 +506,7 @@ describe("token usage storage", () => {
     })
   })
 
-  test("prices new OpenCode Go and DashScope models", () => {
+  test("prices new OpenCode Go, DashScope, and Kimi models", () => {
     const cases = [
       {
         currency: "USD",
@@ -531,6 +531,24 @@ describe("token usage storage", () => {
         model: "qwen3.8-max",
         providerName: "dashscope",
         totalCostNanos: 137_000_000,
+      },
+      {
+        currency: "USD",
+        model: "k3",
+        providerName: "kimi",
+        totalCostNanos: 48_600_000,
+      },
+      {
+        currency: "USD",
+        model: "k3-256k",
+        providerName: "kimi",
+        totalCostNanos: 48_600_000,
+      },
+      {
+        currency: "USD",
+        model: "kimi/kimi-k3",
+        providerName: "codex",
+        totalCostNanos: 324_000_000,
       },
     ]
 

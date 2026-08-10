@@ -300,7 +300,7 @@ const authLoginArgs = {
   provider: {
     type: "string",
     description:
-      "Provider to log in with or configure (copilot, codex, opencode-go, deepseek, dashscope, openrouter, custom)",
+      "Provider to log in with or configure (copilot, codex, opencode-go, kimi, deepseek, dashscope, openrouter, custom)",
   },
   verbose: {
     alias: "v",
@@ -339,6 +339,7 @@ const BUILTIN_PROVIDER_LABELS: Record<BuiltinProviderName, string> = {
 const AUTH_PROVIDER_LABELS: Record<AuthProviderName, string> = {
   ...BUILTIN_PROVIDER_LABELS,
   "opencode-go": "OpenCode Go",
+  kimi: "Kimi",
   deepseek: "DeepSeek",
   dashscope: "DashScope",
   openrouter: "OpenRouter",

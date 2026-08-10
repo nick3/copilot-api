@@ -762,6 +762,7 @@
       "providersAddProvider": "添加空白 provider",
       "providersQuickAddLabel": "快速添加",
       "providersQuickAddOpenCodeGo": "OpenCode Go",
+      "providersQuickAddKimi": "Kimi",
       "providersQuickAddDeepSeek": "DeepSeek",
       "providersQuickAddDashScope": "DashScope",
       "providersQuickAddOpenRouter": "OpenRouter",

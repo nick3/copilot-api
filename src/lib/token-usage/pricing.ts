@@ -37,6 +37,7 @@ const BUILTIN_PROVIDER_CURRENCIES: Record<string, string> = {
   codex: "USD",
   dashscope: "CNY",
   deepseek: "CNY",
+  kimi: "USD",
   "opencode-go": "USD",
 }
 
@@ -146,6 +147,11 @@ const BUILTIN_PROVIDER_PRICING: Record<
         },
       ],
     },
+    "kimi/kimi-k3": {
+      cachedInput: 2,
+      input: 20,
+      output: 100,
+    },
   },
   dashscope: {
     "glm-5.1": {
@@ -225,6 +231,18 @@ const BUILTIN_PROVIDER_PRICING: Record<
       cachedInput: 0.025,
       input: 3,
       output: 6,
+    },
+  },
+  kimi: {
+    k3: {
+      cachedInput: 0.3,
+      input: 3,
+      output: 15,
+    },
+    "k3-256k": {
+      cachedInput: 0.3,
+      input: 3,
+      output: 15,
     },
   },
   "opencode-go": {

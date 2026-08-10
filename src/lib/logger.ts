@@ -11,6 +11,8 @@ import { requestContext } from "./request-context"
 const LOG_RETENTION_DAYS = 7
 const LOG_RETENTION_MS = LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000
+const LOG_DIR_ENV = "COPILOT_API_LOG_DIR"
+const DEFAULT_LOG_DIR = path.join(PATHS.APP_DIR, "logs")
 const FLUSH_INTERVAL_MS = 1000
 const MAX_BUFFER_SIZE = 100
 
@@ -21,8 +23,8 @@ const FILE_LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
   debug: 3,
 }
 
-// Mutable so tests can override to a temp directory
-let logDir = path.join(PATHS.APP_DIR, "logs")
+// Mutable so tests can override the environment-derived directory.
+let testLogDirOverride: string | undefined
 // Test-only logLevel override; undefined means use getLogLevel() from config
 let testLogLevelOverride: LogLevel | undefined
 
@@ -33,13 +35,18 @@ let runtimeInitialized = false
 let flushInterval: ReturnType<typeof setInterval> | undefined
 let cleanupInterval: ReturnType<typeof setInterval> | undefined
 
+const getLogDir = (): string =>
+  testLogDirOverride ?? (process.env[LOG_DIR_ENV]?.trim() || DEFAULT_LOG_DIR)
+
 const ensureLogDirectory = () => {
+  const logDir = getLogDir()
   if (!fs.existsSync(logDir)) {
     fs.mkdirSync(logDir, { recursive: true })
   }
 }
 
 const cleanupOldLogs = () => {
+  const logDir = getLogDir()
   if (!fs.existsSync(logDir)) {
     return
   }
@@ -94,7 +101,7 @@ const getHandlerLogFilePath = (name: string, date: Date): string => {
     String(date.getMonth() + 1).padStart(2, "0"),
     String(date.getDate()).padStart(2, "0"),
   ].join("-")
-  return path.join(logDir, `${sanitizeName(name)}-${dateKey}.log`)
+  return path.join(getLogDir(), `${sanitizeName(name)}-${dateKey}.log`)
 }
 
 const maybeUnref = (timer: ReturnType<typeof setInterval>) => {
@@ -124,7 +131,7 @@ const flushAllBuffers = () => {
   }
 }
 
-const cleanup = () => {
+export const shutdownLoggerRuntime = () => {
   if (flushInterval) {
     clearInterval(flushInterval)
     flushInterval = undefined
@@ -140,6 +147,7 @@ const cleanup = () => {
   }
   logStreams.clear()
   logBuffers.clear()
+  runtimeInitialized = false
 }
 
 const initializeLoggerRuntime = () => {
@@ -158,7 +166,7 @@ const initializeLoggerRuntime = () => {
   cleanupInterval = setInterval(cleanupOldLogs, CLEANUP_INTERVAL_MS)
   maybeUnref(cleanupInterval)
 
-  registerProcessCleanup(cleanup)
+  registerProcessCleanup(shutdownLoggerRuntime)
 }
 
 const getLogStream = (filePath: string): fs.WriteStream => {
@@ -240,7 +248,7 @@ export const resetLoggerRuntimeForTests = (
   logBuffers.clear()
 
   runtimeInitialized = false
-  logDir = overrideLogDir ?? path.join(PATHS.APP_DIR, "logs")
+  testLogDirOverride = overrideLogDir
   testLogLevelOverride = logLevelOverride
 }
 

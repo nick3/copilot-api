@@ -461,6 +461,7 @@ test("provider quick add maps presets to safe defaults", () => {
   const deepseek = createQuickProviderItem("deepseek", [])
   const dashscope = createQuickProviderItem("dashscope", [])
   const openCodeGo = createQuickProviderItem("opencode-go", [])
+  const kimi = createQuickProviderItem("kimi", [])
   const openrouter = createQuickProviderItem("openrouter", [])
   const custom = createQuickProviderItem("custom", [])
 
@@ -487,6 +488,14 @@ test("provider quick add maps presets to safe defaults", () => {
     name: "opencode-go",
     type: "openai-compatible",
     baseUrl: "https://opencode.ai/zen/go",
+    pricingCurrency: "USD",
+    authType: "x-api-key",
+    enabled: true,
+  })
+  expect(kimi).toMatchObject({
+    name: "kimi",
+    type: "openai-compatible",
+    baseUrl: "https://api.kimi.com/coding",
     pricingCurrency: "USD",
     authType: "x-api-key",
     enabled: true,

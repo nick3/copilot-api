@@ -119,6 +119,7 @@ const TOKEN_USAGE_PRICING_KEYS = new Set<string>(TOKEN_USAGE_PRICING_FIELDS)
 
 export type QuickProviderName =
   | "opencode-go"
+  | "kimi"
   | "deepseek"
   | "dashscope"
   | "openrouter"
@@ -136,6 +137,12 @@ const QUICK_PROVIDER_TEMPLATES = {
     name: "opencode-go",
     type: "openai-compatible",
     baseUrl: "https://opencode.ai/zen/go",
+    pricingCurrency: "USD",
+  },
+  kimi: {
+    name: "kimi",
+    type: "openai-compatible",
+    baseUrl: "https://api.kimi.com/coding",
     pricingCurrency: "USD",
   },
   deepseek: {
@@ -4214,6 +4221,14 @@ function ProvidersSettingsCard({
             onClick={() => onQuickAddProvider("deepseek")}
           >
             {t("settingsPage.advanced.providersQuickAddDeepSeek")}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onQuickAddProvider("kimi")}
+          >
+            {t("settingsPage.advanced.providersQuickAddKimi")}
           </Button>
           <Button
             type="button"

@@ -946,8 +946,7 @@ const filterAssistantThinkingBlocks = (
       msg.content = msg.content.filter((block) => {
         if (block.type !== "thinking") return true
         return (
-          block.thinking
-          && block.thinking !== "Thinking..."
+          block.thinking !== "Thinking..."
           && block.signature
           && !block.signature.includes("@")
         )

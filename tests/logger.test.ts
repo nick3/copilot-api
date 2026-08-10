@@ -12,6 +12,7 @@ import {
   getBufferedLogLinesForTests,
   normalizeLogTypeToLevel,
   resetLoggerRuntimeForTests,
+  shutdownLoggerRuntime,
   shouldWriteFileLog,
 } from "../src/lib/logger"
 import { state } from "../src/lib/state"
@@ -151,6 +152,50 @@ test("createHandlerLogger writes direct debug file logs when logLevel is debug",
     expect(lines[0]).toContain("[debug]")
     expect(lines[0]).toContain("allowed direct debug")
   } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true })
+  }
+})
+
+test("createHandlerLogger writes to COPILOT_API_LOG_DIR when set", async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "logger-env-test-"))
+  const previousLogDir = process.env.COPILOT_API_LOG_DIR
+  process.env.COPILOT_API_LOG_DIR = tmpDir
+
+  try {
+    resetLoggerRuntimeForTests(undefined, "info")
+    const logger = createHandlerLogger("env-override-handler")
+    for (let index = 0; index < 100; index += 1) {
+      logger.error(`line-${index}`)
+    }
+
+    const now = new Date()
+    const dateKey = [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, "0"),
+      String(now.getDate()).padStart(2, "0"),
+    ].join("-")
+    const filePath = path.join(tmpDir, `env-override-handler-${dateKey}.log`)
+
+    let content = ""
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      try {
+        content = await fs.readFile(filePath, "utf8")
+      } catch {
+        // The write stream opens asynchronously.
+      }
+      if (content.includes("line-99")) break
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+
+    expect(content).toContain("line-0")
+    expect(content).toContain("line-99")
+  } finally {
+    shutdownLoggerRuntime()
+    if (previousLogDir === undefined) {
+      Reflect.deleteProperty(process.env, "COPILOT_API_LOG_DIR")
+    } else {
+      process.env.COPILOT_API_LOG_DIR = previousLogDir
+    }
     await fs.rm(tmpDir, { recursive: true, force: true })
   }
 })
