@@ -17,6 +17,7 @@ import {
   applyResponsesApiContextManagement,
   compactInputByLatestCompaction,
 } from "~/routes/responses/utils"
+import { handleResponsesViaMessages } from "~/routes/responses/messages-handler"
 
 import type {
   ResponsesPayload,
@@ -39,6 +40,7 @@ export async function handleProviderResponsesForProvider(
   options: {
     payload: ResponsesPayload
     provider: string
+    publicModel?: string
   },
 ): Promise<Response> {
   const { payload, provider } = options
@@ -63,6 +65,17 @@ export async function handleProviderResponsesForProvider(
     providerConfig,
     payload.model,
   )
+  if (
+    effectiveProviderConfig.type === "anthropic"
+    || effectiveProviderConfig.type === "openai-compatible"
+  ) {
+    return await handleResponsesViaMessages(c, {
+      payload,
+      publicModel: options.publicModel ?? payload.model,
+      targetModel: `${provider}/${payload.model}`,
+    })
+  }
+
   if (effectiveProviderConfig.type !== "openai-responses") {
     return c.json(
       {

@@ -23,6 +23,7 @@ import {
   toAccountContext,
 } from "~/lib/handler-utils"
 import { createHandlerLogger, debugJson, debugJsonTail } from "~/lib/logger"
+import { findEndpointModel } from "~/lib/models"
 import { parseProviderModelAlias } from "~/lib/provider-model"
 import { checkRateLimit } from "~/lib/rate-limit"
 import {
@@ -59,6 +60,7 @@ import {
 } from "~/services/copilot/create-responses"
 
 import { createStreamIdTracker, fixStreamIds } from "./stream-id-sync"
+import { handleResponsesViaMessages } from "./messages-handler"
 import {
   applyResponsesApiContextManagement,
   compactInputByLatestCompaction,
@@ -96,6 +98,24 @@ export const handleResponses = async (c: Context) => {
     return await handleProviderResponsesForProvider(c, {
       payload,
       provider: providerModelAlias.provider,
+      publicModel: requestedModel,
+    })
+  }
+
+  const endpointModel = findEndpointModel(payload.model)
+  const responsesTransport = getResponsesTransportForModel(endpointModel)
+  if (
+    endpointModel
+    && !responsesTransport
+    && endpointModel.supported_endpoints?.some(
+      (endpoint) =>
+        endpoint === "/v1/messages" || endpoint === "/chat/completions",
+    )
+  ) {
+    return await handleResponsesViaMessages(c, {
+      payload,
+      publicModel: requestedModel,
+      targetModel: endpointModel.id,
     })
   }
 

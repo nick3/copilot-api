@@ -43,6 +43,7 @@ import {
   normalizeAnthropicUsage,
   normalizeOpenAIUsage,
   normalizeResponsesUsage,
+  type TokenUsageEndpoint,
   type UsageTokens,
 } from "~/lib/token-usage"
 import { parseUserIdMetadata } from "~/lib/utils"
@@ -200,9 +201,11 @@ export async function handleProviderMessagesForProvider(
     payload: AnthropicMessagesPayload
     provider: string
     requestModel?: string
+    usageEndpoint?: TokenUsageEndpoint
   },
 ): Promise<Response> {
-  const { instrumentation, payload, provider, requestModel } = options
+  const { instrumentation, payload, provider, requestModel, usageEndpoint } =
+    options
   const providerConfig = resolveProviderConfig(c, provider)
   if (!providerConfig) {
     const message = `Provider '${provider}' not found or disabled`
@@ -230,6 +233,7 @@ export async function handleProviderMessagesForProvider(
       provider,
       modelConfig,
       providerConfig.pricingCurrency,
+      usageEndpoint,
     )
     const completionInstrumentation: ProviderMessagesInstrumentation = {
       onComplete: (usage) => {
@@ -1386,9 +1390,10 @@ const createProviderMessagesUsageRecorder = (
   provider: string,
   modelConfig: ModelConfig | undefined,
   pricingCurrency: string | undefined,
+  usageEndpoint?: TokenUsageEndpoint,
 ) =>
   createProviderTokenUsageRecorder({
-    endpoint: "provider_messages",
+    endpoint: usageEndpoint ?? "provider_messages",
     model: payload.model,
     pricing: modelConfig?.pricing,
     pricingCurrency,

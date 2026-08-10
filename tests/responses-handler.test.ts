@@ -5,6 +5,8 @@ import path from "node:path"
 import "./shared-admin-db-test-home"
 
 import type { UsageTokens } from "~/lib/token-usage"
+import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
+import type { CompletionPayloadOptions } from "~/routes/messages/handler"
 import type { AccountRuntime } from "~/lib/types/account"
 import type { ResponsesPayload } from "~/services/copilot/create-responses"
 import type { Model } from "~/services/copilot/get-models"
@@ -44,6 +46,8 @@ const [
   import("~/routes/responses/route"),
   import("~/routes/responses/utils"),
 ])
+const { responsesMessagesDependencies } =
+  await import("~/routes/responses/messages-handler")
 
 type SelectionResult = Awaited<
   ReturnType<(typeof accountsManager)["selectAccountForRequest"]>
@@ -62,7 +66,12 @@ const originalSelect =
 const originalFinalize = accountsManager.finalizeQuota.bind(accountsManager)
 const originalMarkFailed =
   accountsManager.markAccountFailed.bind(accountsManager)
+const originalGetFirstAccountModels =
+  accountsManager.getFirstAccountModels.bind(accountsManager)
 const defaultResponsesUtilsDependencies = { ...responsesUtilsDependencies }
+const defaultResponsesMessagesDependencies = {
+  ...responsesMessagesDependencies,
+}
 const DB_PATH_ENV = "COPILOT_API_SQLITE_DB_PATH"
 let configBeforeTest: string | null | undefined
 let dbPathBeforeTest: string | undefined
@@ -226,6 +235,11 @@ afterEach(async () => {
   accountsManager.selectAccountForRequest = originalSelect
   accountsManager.finalizeQuota = originalFinalize
   accountsManager.markAccountFailed = originalMarkFailed
+  accountsManager.getFirstAccountModels = originalGetFirstAccountModels
+  Object.assign(
+    responsesMessagesDependencies,
+    defaultResponsesMessagesDependencies,
+  )
   await closeUsageStore()
   if (dbPathBeforeTest === undefined) {
     Reflect.deleteProperty(process.env, DB_PATH_ENV)
@@ -243,6 +257,84 @@ afterEach(async () => {
 })
 
 describe("responses handler model mapping", () => {
+  test("routes a Messages-only Copilot model through Responses Lite", async () => {
+    accountsManager.getFirstAccountModels = () => ({
+      object: "list",
+      data: [
+        {
+          ...buildModel("claude-test"),
+          supported_endpoints: ["/v1/messages"],
+        },
+      ],
+    })
+    const handleMessages = mock(
+      (
+        _context: unknown,
+        _payload: AnthropicMessagesPayload,
+        _options?: CompletionPayloadOptions,
+      ) =>
+        Promise.resolve(
+          Response.json({
+            content: [
+              {
+                type: "tool_use",
+                id: "call-patch",
+                name: "apply_patch",
+                input: { input: "*** Begin Patch" },
+              },
+            ],
+            id: "msg-lite",
+            model: "claude-test",
+            role: "assistant",
+            stop_reason: "tool_use",
+            stop_sequence: null,
+            type: "message",
+            usage: { input_tokens: 8, output_tokens: 4 },
+          }),
+        ),
+    )
+    responsesMessagesDependencies.handleCompletionPayload = handleMessages
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-test",
+          input: [
+            {
+              role: "developer",
+              type: "additional_tools",
+              tools: [{ type: "custom", name: "apply_patch" }],
+            },
+            { role: "user", type: "message", content: "Patch it" },
+          ],
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(handleMessages).toHaveBeenCalledTimes(1)
+    expect(handleMessages.mock.calls[0]?.[1].tools?.[0]?.name).toBe(
+      "apply_patch",
+    )
+    expect(handleMessages.mock.calls[0]?.[2]).toMatchObject({
+      skipClaudeAutoModel: true,
+      skipModelMapping: true,
+      skipWebSearch: true,
+      usageEndpoint: "responses",
+    })
+    const body = (await response.json()) as { output: Array<unknown> }
+    expect(body.output[0]).toEqual(
+      expect.objectContaining({
+        type: "custom_tool_call",
+        call_id: "call-patch",
+        name: "apply_patch",
+        input: "*** Begin Patch",
+      }),
+    )
+  })
+
   test("applies modelMappings to client model before account selection", async () => {
     setModelMappings({ "gpt-original": "gpt-mapped" })
 
@@ -819,6 +911,64 @@ describe("responses handler Copilot AIU token usage", () => {
 })
 
 describe("responses handler provider alias routing", () => {
+  test("routes non-Responses providers through Responses Lite", async () => {
+    setProviderConfig("acme", {
+      type: "openai-compatible",
+      enabled: true,
+      baseUrl: "https://acme.example.com",
+      apiKey: "acme-key",
+      authType: "authorization",
+    })
+    const selectSpy = mock(() =>
+      Promise.resolve(buildSelection("/responses", "any")),
+    )
+    accountsManager.selectAccountForRequest = selectSpy
+    const handleMessages = mock(
+      (
+        _context: unknown,
+        payload: AnthropicMessagesPayload,
+        _options?: CompletionPayloadOptions,
+      ) =>
+        Promise.resolve(
+          Response.json({
+            id: "msg-provider-lite",
+            type: "message",
+            role: "assistant",
+            content: [{ type: "text", text: "from acme" }],
+            model: payload.model,
+            stop_reason: "end_turn",
+            stop_sequence: null,
+            usage: { input_tokens: 1, output_tokens: 1 },
+          }),
+        ),
+    )
+    responsesMessagesDependencies.handleCompletionPayload = handleMessages
+
+    const response = await responsesRoutes.fetch(
+      new Request("http://local/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "acme/gpt-acme",
+          input: "hello",
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(selectSpy).not.toHaveBeenCalled()
+    expect(handleMessages).toHaveBeenCalledTimes(1)
+    expect(handleMessages.mock.calls[0]?.[1].model).toBe("acme/gpt-acme")
+    const body = (await response.json()) as {
+      model: string
+      output_text: string
+    }
+    expect(body).toMatchObject({
+      model: "acme/gpt-acme",
+      output_text: "from acme",
+    })
+  })
+
   test("routes provider-prefixed models to provider responses handler", async () => {
     setProviderConfig("acme", {
       type: "openai-responses",

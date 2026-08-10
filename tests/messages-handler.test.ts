@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import fs from "node:fs/promises"
+import { Hono } from "hono"
 import path from "node:path"
 
 import "./shared-admin-db-test-home"
@@ -25,6 +26,7 @@ import { state } from "~/lib/state"
 import { closeUsageStore, getTokenUsageEventsPage } from "~/lib/token-usage"
 import { getUUID } from "~/lib/utils"
 import { messageRoutes } from "~/routes/messages/route"
+import { handleCompletionPayload } from "~/routes/messages/handler"
 
 type SelectionResult = Awaited<
   ReturnType<(typeof accountsManager)["selectAccountForRequest"]>
@@ -603,6 +605,63 @@ describe("messages handler cache_control merge", () => {
 })
 
 describe("messages handler routing", () => {
+  test("Responses Lite keeps multi-account dispatch and records Responses usage", async () => {
+    let selectionCandidates: ReadonlyArray<AccountRequestCandidate> = []
+    const selection = buildSelection("/v1/messages", "messages-model")
+    accountsManager.selectAccountForRequest = (candidates) => {
+      selectionCandidates = candidates
+      return Promise.resolve(selection)
+    }
+    const finalizeQuota = mock(() => Promise.resolve())
+    accountsManager.finalizeQuota = finalizeQuota
+
+    fetchHolder.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify(buildAnthropicResponse("messages-model", "lite")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      ),
+    ) as unknown as typeof fetch
+
+    const app = new Hono()
+    app.post("/", (c) =>
+      handleCompletionPayload(c, createPayload(), {
+        skipClaudeAutoModel: true,
+        skipModelMapping: true,
+        skipWebSearch: true,
+        usageEndpoint: "responses",
+      }),
+    )
+
+    const response = await app.request("/", { method: "POST" })
+    await response.text()
+    const usageEvent = await readSingleTokenUsageEvent()
+
+    expect(response.status).toBe(200)
+    expect(selectionCandidates).toContainEqual({
+      endpoint: "/v1/messages",
+      modelId: "original-model",
+    })
+    expect(selectionCandidates).toContainEqual({
+      endpoint: "/responses",
+      modelId: "original-model",
+    })
+    expect(selectionCandidates).toContainEqual({
+      endpoint: "/chat/completions",
+      modelId: "original-model",
+    })
+    expect(finalizeQuota).toHaveBeenCalledTimes(1)
+    expect(usageEvent).toMatchObject({
+      endpoint: "responses",
+      model: "messages-model",
+      source: "copilot",
+    })
+  })
+
   test("routes to the Messages API when selection chooses /v1/messages", async () => {
     let requestedUrl = ""
     let upstreamBody: Record<string, unknown> | undefined

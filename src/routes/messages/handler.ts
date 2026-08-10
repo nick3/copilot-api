@@ -73,6 +73,7 @@ import {
   normalizeOpenAIUsage,
   normalizeOptionalToken,
   normalizeResponsesUsage,
+  type TokenUsageEndpoint,
   type UsageTokens,
 } from "~/lib/token-usage"
 import {
@@ -224,6 +225,7 @@ type InstrumentationContext = {
   upstreamModel: string
   upstreamEndpoint: string
   costUnits: number
+  usageEndpoint?: TokenUsageEndpoint
 
   premiumRemainingBefore?: number
   premiumUnlimitedBefore?: boolean
@@ -295,9 +297,10 @@ async function handleProviderAliasCompletion(
     payload: AnthropicMessagesPayload
     provider: string
     providerModel: string
+    usageEndpoint?: TokenUsageEndpoint
   },
 ): Promise<Response> {
-  const { payload, provider, providerModel } = options
+  const { payload, provider, providerModel, usageEndpoint } = options
   const requestId = randomUUID()
   const startedAtMs = Date.now()
   const method = c.req.raw.method
@@ -387,6 +390,7 @@ async function handleProviderAliasCompletion(
       payload,
       provider,
       requestModel: originalModel,
+      usageEndpoint,
     })
   } catch (error) {
     const observableError = await extractErrorObservability(error)
@@ -395,13 +399,32 @@ async function handleProviderAliasCompletion(
   }
 }
 
-// eslint-disable-next-line max-lines-per-function, complexity
 export async function handleCompletion(c: Context) {
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
+
+  return await handleCompletionPayload(c, anthropicPayload)
+}
+
+export interface CompletionPayloadOptions {
+  compactType?: ReturnType<typeof getCompactType>
+  skipClaudeAutoModel?: boolean
+  skipModelMapping?: boolean
+  skipWebSearch?: boolean
+  usageEndpoint?: TokenUsageEndpoint
+}
+
+// eslint-disable-next-line max-lines-per-function, complexity
+export async function handleCompletionPayload(
+  c: Context,
+  anthropicPayload: AnthropicMessagesPayload,
+  dispatchOptions: CompletionPayloadOptions = {},
+) {
   const providerConfigResolver = getProviderConfigResolver(c)
 
   const requestedModel = anthropicPayload.model
-  anthropicPayload.model = resolveMappedModel(anthropicPayload.model)
+  if (!dispatchOptions.skipModelMapping) {
+    anthropicPayload.model = resolveMappedModel(anthropicPayload.model)
+  }
   if (anthropicPayload.model !== requestedModel) {
     logger.debug(
       `Resolved model mapping: ${requestedModel} -> ${anthropicPayload.model}`,
@@ -413,7 +436,9 @@ export async function handleCompletion(c: Context) {
 
   const claudeAutoModel = getClaudeAutoModel()
   const shouldUseClaudeAutoModel = Boolean(
-    claudeAutoModel && isClaudeAutoModelRequest(anthropicPayload),
+    !dispatchOptions.skipClaudeAutoModel
+    && claudeAutoModel
+    && isClaudeAutoModelRequest(anthropicPayload),
   )
   if (claudeAutoModel && shouldUseClaudeAutoModel) {
     logger.debug(
@@ -437,21 +462,26 @@ export async function handleCompletion(c: Context) {
       payload: anthropicPayload,
       provider: providerTargetModelAlias.provider,
       providerModel: providerTargetModelAlias.model,
+      usageEndpoint: dispatchOptions.usageEndpoint,
     })
   }
 
-  const webSearchRoute = resolveWebSearchRoute(anthropicPayload, {
-    webSearchModel: getMessageApiWebSearchModel(),
-    responsesWebSearchEnabled: isResponsesApiWebSearchEnabled(),
-    isProviderAvailable: (provider) =>
-      providerConfigResolver(provider) !== null,
-  })
+  const webSearchRoute =
+    dispatchOptions.skipWebSearch ?
+      ({ kind: "strip" } as const)
+    : resolveWebSearchRoute(anthropicPayload, {
+        webSearchModel: getMessageApiWebSearchModel(),
+        responsesWebSearchEnabled: isResponsesApiWebSearchEnabled(),
+        isProviderAvailable: (provider) =>
+          providerConfigResolver(provider) !== null,
+      })
 
   if (webSearchRoute.kind === "provider") {
     return await handleProviderAliasCompletion(c, {
       payload: anthropicPayload,
       provider: webSearchRoute.alias.provider,
       providerModel: webSearchRoute.alias.model,
+      usageEndpoint: dispatchOptions.usageEndpoint,
     })
   }
 
@@ -495,7 +525,8 @@ export async function handleCompletion(c: Context) {
 
   const anthropicBeta = c.req.header("anthropic-beta")
   logger.debug("Anthropic Beta header:", anthropicBeta)
-  const compactType = getCompactType(anthropicPayload)
+  const compactType =
+    dispatchOptions.compactType ?? getCompactType(anthropicPayload)
   const isCompact = compactType !== 0
   const originalRequestModel = anthropicPayload.model
   let usesInternalModelRewrite = shouldUseClaudeAutoModel
@@ -712,6 +743,7 @@ export async function handleCompletion(c: Context) {
     upstreamEndpoint: endpoint,
     upstreamModel: selectedModel.id,
     costUnits,
+    usageEndpoint: dispatchOptions.usageEndpoint,
     upstreamRequestId,
     premiumRemainingBefore,
     premiumUnlimitedBefore,
@@ -813,7 +845,7 @@ const handleWithChatCompletions = async (params: {
 
   instr.initiator = effectiveInitiator
   const recordTokenUsage = createCopilotTokenUsageRecorder({
-    endpoint: "chat_completions",
+    endpoint: instr.usageEndpoint ?? "chat_completions",
     fallbackSessionId: sessionId,
     model: selectedModel.id,
     sessionId: instr.promptCacheKey,
@@ -921,7 +953,7 @@ const handleWithWebSearchResponsesApi = async (params: {
 
   instr.initiator = effectiveInitiator
   const recordTokenUsage = createCopilotTokenUsageRecorder({
-    endpoint: "responses",
+    endpoint: instr.usageEndpoint ?? "responses",
     fallbackSessionId: sessionId,
     model: selectedModel.id,
     sessionId: instr.promptCacheKey,
@@ -1052,7 +1084,7 @@ const handleWithResponsesApi = async (params: {
 
   instr.initiator = effectiveInitiator
   const recordTokenUsage = createCopilotTokenUsageRecorder({
-    endpoint: "responses",
+    endpoint: instr.usageEndpoint ?? "responses",
     fallbackSessionId: sessionId,
     model: selectedModel.id,
     sessionId: instr.promptCacheKey,
@@ -2363,7 +2395,7 @@ const handleWithMessagesApi = async (params: {
 
   instr.initiator = effectiveInitiator
   const recordTokenUsage = createCopilotTokenUsageRecorder({
-    endpoint: "messages",
+    endpoint: instr.usageEndpoint ?? "messages",
     fallbackSessionId: sessionId,
     model: anthropicPayload.model,
     sessionId:
