@@ -98,7 +98,28 @@ export interface ModelConfig {
   supportPdf?: boolean
   toolContentSupportType?: Array<ToolContentSupportType>
   type?: ProviderType
+  codex?: CodexModelCapabilitiesConfig
 }
+
+export interface CodexModelCapabilitiesConfig {
+  enabled?: boolean
+  contextWindow?: number
+  maxOutputTokens?: number
+  inputModalities?: Array<"text" | "image">
+  reasoningEfforts?: Array<CodexReasoningEffort>
+  defaultReasoningEffort?: CodexReasoningEffort
+  supportsParallelToolCalls?: boolean
+}
+
+export type CodexReasoningEffort =
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max"
+  | "ultra"
 
 export interface TokenUsagePricingTier {
   cachedInput?: number

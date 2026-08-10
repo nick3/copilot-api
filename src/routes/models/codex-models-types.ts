@@ -1,5 +1,6 @@
 export interface CodexModelsResponse {
   models: Array<CodexModel>
+  [key: string]: unknown
 }
 
 export interface CodexModel {
@@ -20,6 +21,8 @@ export interface CodexModel {
   auto_review_model_override: string | null
   context_window: number
   max_context_window: number
+  max_output_tokens?: number
+  effective_context_window_percent?: number
   auto_compact_token_limit: number | null
   comp_hash: string | null
   reasoning_summary_format: CodexReasoningSummaryFormat
@@ -45,6 +48,7 @@ export interface CodexModel {
   supports_reasoning_summary_parameter: boolean
   supports_reasoning_summaries: boolean
   base_instructions: string
+  [key: string]: unknown
 }
 
 export type CodexVerbosity = "low" | "medium"
@@ -66,9 +70,11 @@ export type CodexMultiAgentVersion = "v1" | "v2"
 
 export type CodexReasoningSummaryFormat = "experimental"
 
-export type CodexReasoningSummary = "none"
+export type CodexReasoningSummary = "auto" | "none"
 
 export type CodexReasoningEffort =
+  | "none"
+  | "minimal"
   | "low"
   | "medium"
   | "high"
@@ -135,4 +141,19 @@ export interface CodexInstructionsVariables {
   personality_default?: string
   personality_friendly?: string
   personality_pragmatic?: string
+}
+
+export interface SyntheticCodexModelCandidate {
+  slug: string
+  catalogSlug?: string
+  catalogMatchRequired?: boolean
+  providerName?: string
+  displayName: string
+  description: string
+  contextWindow: number
+  maxOutputTokens: number
+  inputModalities: Array<CodexInputModality>
+  reasoningEfforts: Array<CodexReasoningEffort>
+  defaultReasoningEffort: CodexReasoningEffort
+  supportsParallelToolCalls: boolean
 }

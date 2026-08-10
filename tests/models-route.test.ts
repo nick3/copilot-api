@@ -100,7 +100,7 @@ const fetchMock = mock((url: string | URL | Request, _init?: RequestInit) => {
     requestUrl
     === "https://chatgpt.com/backend-api/codex/models?verify=lazy-log"
   ) {
-    const response = Response.json({ object: "list", data: [] })
+    const response = Response.json({ models: [] })
     const originalClone = response.clone.bind(response)
     Object.defineProperty(response, "clone", {
       value: () => {
@@ -109,6 +109,17 @@ const fetchMock = mock((url: string | URL | Request, _init?: RequestInit) => {
       },
     })
     return Promise.resolve(response)
+  }
+
+  if (
+    requestUrl
+    === "https://codex.example/backend-api/codex/models?client_version=1.2.3"
+  ) {
+    return Promise.resolve(
+      Response.json({
+        models: [{ slug: "gpt-native", display_name: "GPT Native" }],
+      }),
+    )
   }
 
   const providerModelIds: Record<string, string> = {
@@ -268,8 +279,10 @@ describe("model routes", () => {
     )
 
     expect(response.status).toBe(200)
-    const body = (await response.json()) as { data: Array<{ id: string }> }
-    expect(body.data.map((model) => model.id)).toEqual(["qwen-plus", ""])
+    const body = (await response.json()) as {
+      models: Array<{ slug: string }>
+    }
+    expect(body.models.map((model) => model.slug)).toEqual(["gpt-native"])
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "https://codex.example/backend-api/codex/models?client_version=1.2.3",
@@ -302,26 +315,21 @@ describe("model routes", () => {
     })
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ object: "list", data: [] })
+    expect(await response.json()).toEqual({ models: [] })
     expect(codexModelsResponseCloneCount).toBe(0)
   })
 
-  test("returns not found for Codex clients when the provider is unavailable", async () => {
+  test("returns an empty merged catalog when Codex and fallback models are unavailable", async () => {
     const response = await createApp().request("/v1/models", {
       headers: { "user-agent": "codex/1.2.3" },
     })
 
-    expect(response.status).toBe(404)
-    expect(await response.json()).toEqual({
-      error: {
-        message: "Provider 'codex' not found or disabled",
-        type: "invalid_request_error",
-      },
-    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ models: [] })
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  test("preserves remote Codex model error responses", async () => {
+  test("falls back to the merged catalog when remote Codex models fail", async () => {
     providerConfigs = {
       codex: {
         apiKey: "configured-token",
@@ -339,11 +347,84 @@ describe("model routes", () => {
       { headers: { "user-agent": "codex/1.2.3" } },
     )
 
-    expect(response.status).toBe(429)
-    expect(response.headers.get("x-request-id")).toBe("codex-request-123")
-    expect(await response.json()).toEqual({
-      error: { message: "rate limited" },
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ models: [] })
+  })
+
+  test("synthesizes Messages-only Copilot models for Codex clients", async () => {
+    const copilotModels = createCopilotModels(["claude-test"])
+    const model = copilotModels.data[0]
+    model.supported_endpoints = ["/v1/messages"]
+    model.capabilities.supports.tool_calls = true
+    model.capabilities.supports.reasoning_effort = ["low", "high", "max"]
+    model.capabilities.supports.parallel_tool_calls = true
+    model.capabilities.limits.max_output_tokens = 16_384
+    accountsManager.getFirstAccountModels = () => copilotModels
+
+    const response = await createApp().request("/v1/models", {
+      headers: { "user-agent": "codex/1.2.3" },
     })
+
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as {
+      models: Array<Record<string, unknown>>
+    }
+    expect(body.models).toHaveLength(1)
+    expect(body.models[0]).toMatchObject({
+      slug: "claude-test",
+      use_responses_lite: true,
+      context_window: 200_000,
+      max_output_tokens: 16_384,
+      supports_parallel_tool_calls: true,
+      default_reasoning_level: "max",
+      supported_reasoning_levels: [
+        { effort: "low", description: "low reasoning effort" },
+        { effort: "high", description: "high reasoning effort" },
+        { effort: "max", description: "max reasoning effort" },
+      ],
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  test("synthesizes configured provider models with Codex capability overrides", async () => {
+    enabledProviders = ["kimi"]
+    providerConfigs = {
+      kimi: {
+        ...createProviderConfig("kimi", "https://kimi.example"),
+        models: {
+          k3: {
+            codex: {
+              contextWindow: 256_000,
+              maxOutputTokens: 32_000,
+              reasoningEfforts: ["low", "high"],
+              defaultReasoningEffort: "high",
+              supportsParallelToolCalls: true,
+            },
+          },
+        },
+      },
+    }
+
+    const response = await createApp().request("/v1/models", {
+      headers: { "user-agent": "codex/1.2.3" },
+    })
+
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as {
+      models: Array<Record<string, unknown>>
+    }
+    expect(body.models.find((model) => model.slug === "kimi/k3")).toMatchObject(
+      {
+        slug: "kimi/k3",
+        display_name: "k3 (kimi)",
+        use_responses_lite: true,
+        input_modalities: ["text", "image"],
+        context_window: 256_000,
+        max_output_tokens: 32_000,
+        default_reasoning_level: "high",
+        supports_parallel_tool_calls: true,
+      },
+    )
   })
 
   test("admin aggregated models mirror public runtime aggregation", async () => {
