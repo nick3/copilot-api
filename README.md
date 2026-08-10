@@ -382,6 +382,8 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
     "useMessagesApi": true,
     "useResponsesApiWebSocket": true,
     "useResponsesApiWebSearch": true,
+    "alphaSearchCodexPriority": true,
+    "alphaSearchModel": "gpt-5-mini",
     "messageApiWebSearchModel": "gpt-5-mini",
     "logLevel": "info"
   }
@@ -469,6 +471,8 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
     "useMessagesApi": true,
     "useResponsesApiWebSocket": true,
     "useResponsesApiWebSearch": true,
+    "alphaSearchCodexPriority": true,
+    "alphaSearchModel": "gpt-5-mini",
     "messageApiWebSearchModel": "gpt-5-mini",
     "claudeAutoModel": ""
   }
@@ -495,6 +499,7 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
     - `contextCache` (optional): Explicit context cache control. When omitted, it defaults to `true` only for DashScope/Alibaba Cloud Model Studio OpenAI-compatible providers and to `false` for other upstreams. When enabled, it injects `cache_control: { "type": "ephemeral" }` on up to 4 content blocks using the DashScope Context Cache format. The cache breakpoint strategy matches opencode's main provider flow: the first 2 system messages plus the last 2 non-system messages. Marked string content is converted to text content part arrays for `system` / `user` / `assistant` / `tool` messages; existing array content is marked on the last part. Set this to `false` when the model already supports implicit caching, or when the upstream does not accept this explicit-cache extension field.
     - `supportPdf` (optional): Controls whether the model supports PDF/document content. Defaults to `false`; unsupported PDFs are converted to a text notice. Set it to `true` to send PDF/document blocks as OpenAI Chat Completions file parts.
     - `toolContentSupportType` (optional): Tool result content capabilities for that model, as an array of `array`, `image`, and `pdf`. Provider routes default to string-only tool content when omitted. If `supportPdf` is `true` but this list does not include `pdf`, file parts in tool results are moved to user role messages. This provider default does not change the Copilot main flow, which continues to support array + image and not PDF.
+    - `codex` (optional): Controls capability metadata when this model is merged into the Codex-compatible model catalog. Supports `enabled`, `contextWindow`, `maxOutputTokens`, `inputModalities`, `reasoningEfforts`, `defaultReasoningEffort`, and `supportsParallelToolCalls`; set `enabled: false` to hide the model from Codex clients. These fields can also be edited in Admin UI.
 - **contextManagement:** Controls whether the proxy adds Responses API `context_management` compaction instructions. `messages` applies when Anthropic-style `/v1/messages` requests are translated to Responses API, including `openai-responses` provider message routes, and defaults to `true`. `responses` applies to native `/v1/responses` traffic, including `provider/model` aliases and the built-in `codex` provider, and defaults to `false`. Enable `responses` only after checking that your client supports context management compaction. When enabled, the request includes `context_management` in the body and keeps only the latest compaction carrier on follow-up turns. The proxy skips automatic context-management injection for GPT-5.6 and later models because it interferes with prompt-cache hits; an explicit client-provided `context_management` field is still preserved.
 - **modelResponsesApiCompactThresholds:** Per-model Responses API `compact_threshold` overrides used when the proxy adds `context_management`. These values take precedence over the fallback threshold from `resolveResponsesCompactThreshold` (`max_prompt_tokens * ratio`, or the default fallback). Defaults set `gpt-5.4` and `gpt-5.5` to `217600` (`272000 * 0.8`). Models not listed continue to use the normal fallback logic.
 - **smallModel:** Fallback model used for tool-less warmup messages, compact/background requests, and other short housekeeping turns (for example from Claude Code or OpenCode) to avoid spending premium requests; defaults to `gpt-5-mini`. Warmup/probe routing is decided per selected GitHub Copilot account: premium-request-billed accounts use `smallModel`, while token-based-billing accounts keep the requested model because they have no premium-request quota to conserve. Compact/background routing remains controlled by `compactUseSmallModel`. If original names are blocked and this points to an aliased target, it resolves to the preferred alias.
@@ -511,6 +516,8 @@ The `<target>` can be either the account ID (GitHub login) or a 1-based index.
 - **useMessagesApi:** When `true` (default), Claude-family models that support Copilot’s native `/v1/messages` endpoint may use the Messages API path. Set to `false` to skip the Messages API candidate and fall back to `/responses` (if supported) or `/chat/completions`.
 - **useResponsesApiWebSocket:** When `true` (default), outbound Copilot Responses API requests use Copilot’s WebSocket transport for models that advertise `ws:/responses`; models that only advertise `/responses` continue to use HTTP. Set to `false` to disable upstream WebSocket routing. This does not disable the inbound Codex-compatible WebSocket listener on `/v1/responses`. If the upstream WebSocket repeatedly closes, first test a different network or VPN node, then disable this option to verify the HTTP fallback.
 - **useResponsesApiWebSearch:** When `true` (default), `/v1/responses` keeps tools with `type: "web_search"` and forwards them upstream. Set to `false` to strip them before the Copilot request is sent.
+- **alphaSearchCodexPriority:** Defaults to `true`. Top-level Alpha Search requests prefer the native Codex endpoint when that provider is available. Otherwise they execute the supported search/open/click/find/finance/weather/sports/time commands through the existing multi-account Responses dispatcher. Unsupported `image_query` and `screenshot` operations return explicit no-retry output.
+- **alphaSearchModel:** Responses-capable search model used when the requested model only supports Messages or Chat Completions. Defaults to `gpt-5-mini`; it may be a Copilot model or an `openai-responses` `provider/model` alias. Set it to an empty string to disable this redirect.
 - **messageApiWebSearchModel:** Global fallback model used when a top-level Copilot `/v1/messages` request contains only Anthropic's server-side `web_search` tool. Defaults to `gpt-5-mini`. If the value is a `provider/model` alias, the request is routed to that provider's Messages API path with the provider prefix stripped. For Copilot GPT models, web search runs through `/responses`. Mixed `web_search` plus custom tools are not supported; the server-side `web_search` tool is stripped and the request continues normally.
 - **claudeAutoModel:** Model used for Claude Code background security-monitor requests on `/v1/messages` and provider message routes. Requests without tools, with `stop_sequences: ["</block>"]`, and a matching security-monitor system prompt are rerouted to this model. A top-level `provider/model` value routes to that provider; direct provider routes keep their current provider. Empty by default (disabled).
 - **claudeTokenMultiplier:** Multiplier applied to the fallback GPT-tokenizer estimate for Claude `/v1/messages/count_tokens` requests. Defaults to `1.15`. Increase it if your client is still compacting too late. This setting is only used when the proxy is estimating Claude tokens locally; if `anthropicApiKey` is configured and Anthropic token counting succeeds, the exact Anthropic count is returned instead.
@@ -561,7 +568,7 @@ These endpoints require an active Codex login and are available both without a v
 
 | Endpoint | Method | Description |
 | --- | --- | --- |
-| `/alpha/search`<br>`/v1/alpha/search` | `POST` | Transparently forwards JSON and query parameters to the Codex Alpha Search upstream. |
+| `/alpha/search`<br>`/v1/alpha/search` | `POST` | Prefers native Codex Alpha Search, then falls back to a Responses web-search adapter when configured or when Codex is unavailable. |
 | `/images/generations`<br>`/v1/images/generations` | `POST` | Forwards a JSON image-generation request to Codex. |
 | `/images/edits`<br>`/v1/images/edits` | `POST` | Streams a multipart image-edit request to Codex while preserving its content type. |
 
@@ -795,6 +802,7 @@ supports_websockets = true
 [profiles.copilot-api]
 model_provider = "copilot-api"
 model = "gpt-5.4"
+web_search = "live"
 ```
 
 Then run Codex with that profile:
@@ -806,6 +814,18 @@ codex -p copilot-api
 If you configured `auth.apiKeys`, add the same key to Codex's provider headers or bearer-token configuration so both HTTP and WebSocket requests authenticate successfully. For troubleshooting only, set `supports_websockets = false` in Codex to force its HTTP fallback path.
 
 > **Note:** When using Codex via GitHub Copilot, it is currently recommended to disable Codex multi-agent features because Copilot billing may count Codex traffic based on the final user-role message.
+
+For Codex clients, the top-level `GET /v1/models` catalog merges native Responses models with Copilot/provider models that can run through Responses Lite. Anthropic providers use **Responses → Messages**; OpenAI-compatible providers and Chat-only Copilot models continue through **Responses → Messages → Chat Completions**, with JSON and streaming results translated back to Responses.
+
+If Codex uses `approvals_reviewer = "auto_review"`, map its internal review model to a Responses-capable Copilot model in `config.json`:
+
+```json
+{
+  "modelMappings": {
+    "codex-auto-review": "gpt-5.6-luna"
+  }
+}
+```
 
 ## Using with Claude Code
 

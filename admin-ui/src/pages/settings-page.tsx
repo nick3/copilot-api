@@ -15,9 +15,12 @@ import {
   type AdminConfig,
   type AdminConfigResponse,
   type AdminModelDetailsItem,
+  type CodexInputModality,
+  type CodexReasoningEffort,
   type DevModeState,
   type ModelAliasSpec,
   type ProviderAuthType,
+  type ProviderCodexModelConfig,
   type ProviderConfig,
   type ProviderModelConfig,
   type ProviderType,
@@ -99,6 +102,19 @@ const TOOL_CONTENT_SUPPORT_TYPES: Array<ToolContentSupportType> = [
   "array",
   "image",
   "pdf",
+]
+
+const CODEX_INPUT_MODALITIES: Array<CodexInputModality> = ["text", "image"]
+
+const CODEX_REASONING_EFFORTS: Array<CodexReasoningEffort> = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
 ]
 
 const TOKEN_USAGE_PRICING_NUMBER_FIELDS = [
@@ -225,6 +241,15 @@ type ProviderModelItem = {
   supportPdf: boolean
   supportPdfConfigured: boolean
   toolContentSupportType: Array<ToolContentSupportType>
+  codexEnabled: boolean
+  codexEnabledConfigured: boolean
+  codexContextWindow: string
+  codexMaxOutputTokens: string
+  codexInputModalities: Array<CodexInputModality>
+  codexReasoningEfforts: Array<CodexReasoningEffort>
+  codexDefaultReasoningEffort: string
+  codexSupportsParallelToolCalls: boolean
+  codexSupportsParallelToolCallsConfigured: boolean
   pricingJson: string
   extraBodyJson: string
 }
@@ -715,7 +740,7 @@ export function deriveProviderModelSuggestions(
   return suggestions
 }
 
-function providerItemsFromRecord(record: ProviderRecord | undefined): Array<ProviderItem> {
+export function providerItemsFromRecord(record: ProviderRecord | undefined): Array<ProviderItem> {
   if (!record) return []
 
   return Object.entries(record).map(([name, provider]) => ({
@@ -741,6 +766,27 @@ function providerItemsFromRecord(record: ProviderRecord | undefined): Array<Prov
       supportPdf: config.supportPdf ?? false,
       supportPdfConfigured: Object.hasOwn(config, "supportPdf"),
       toolContentSupportType: config.toolContentSupportType ?? [],
+      codexEnabled: config.codex?.enabled ?? true,
+      codexEnabledConfigured:
+        config.codex ? Object.hasOwn(config.codex, "enabled") : false,
+      codexContextWindow:
+        config.codex?.contextWindow === undefined ?
+          ""
+        : String(config.codex.contextWindow),
+      codexMaxOutputTokens:
+        config.codex?.maxOutputTokens === undefined ?
+          ""
+        : String(config.codex.maxOutputTokens),
+      codexInputModalities: config.codex?.inputModalities ?? [],
+      codexReasoningEfforts: config.codex?.reasoningEfforts ?? [],
+      codexDefaultReasoningEffort:
+        config.codex?.defaultReasoningEffort ?? "inherit",
+      codexSupportsParallelToolCalls:
+        config.codex?.supportsParallelToolCalls ?? false,
+      codexSupportsParallelToolCallsConfigured:
+        config.codex ?
+          Object.hasOwn(config.codex, "supportsParallelToolCalls")
+        : false,
       pricingJson: stringifyOptionalJson(config.pricing),
       extraBodyJson: stringifyOptionalJson(config.extraBody),
     })),
@@ -765,6 +811,13 @@ function providerHasMeaningfulContent(item: ProviderItem): boolean {
       || model.contextCacheConfigured
       || model.supportPdfConfigured
       || model.toolContentSupportType.length > 0
+      || model.codexEnabledConfigured
+      || Boolean(model.codexContextWindow.trim())
+      || Boolean(model.codexMaxOutputTokens.trim())
+      || model.codexInputModalities.length > 0
+      || model.codexReasoningEfforts.length > 0
+      || model.codexDefaultReasoningEffort !== "inherit"
+      || model.codexSupportsParallelToolCallsConfigured
       || hasNonEmptyJsonText(model.pricingJson)
       || hasNonEmptyJsonText(model.extraBodyJson),
   )
@@ -926,6 +979,8 @@ function parseSingleModelItem(
   const topPInput = modelItem.topP.trim()
   const topKInput = modelItem.topK.trim()
   const modelTypeInput = modelItem.modelType.trim()
+  const codexContextWindowInput = modelItem.codexContextWindow.trim()
+  const codexMaxOutputTokensInput = modelItem.codexMaxOutputTokens.trim()
   const pricing = parseOptionalPricingJson(
     modelItem.pricingJson,
     `Provider '${providerName}' model pricing`,
@@ -944,6 +999,13 @@ function parseSingleModelItem(
     || modelItem.contextCacheConfigured
     || modelItem.supportPdfConfigured
     || modelItem.toolContentSupportType.length > 0
+    || modelItem.codexEnabledConfigured
+    || Boolean(codexContextWindowInput)
+    || Boolean(codexMaxOutputTokensInput)
+    || modelItem.codexInputModalities.length > 0
+    || modelItem.codexReasoningEfforts.length > 0
+    || modelItem.codexDefaultReasoningEffort !== "inherit"
+    || modelItem.codexSupportsParallelToolCallsConfigured
     || pricing.record
     || extraBody.record,
   )
@@ -1015,6 +1077,38 @@ function parseSingleModelItem(
   if (modelItem.toolContentSupportType.length > 0) {
     config.toolContentSupportType = modelItem.toolContentSupportType
   }
+  const codexConfig: ProviderCodexModelConfig = {}
+  if (modelItem.codexEnabledConfigured) {
+    codexConfig.enabled = modelItem.codexEnabled
+  }
+  for (const [key, input] of [
+    ["contextWindow", codexContextWindowInput],
+    ["maxOutputTokens", codexMaxOutputTokensInput],
+  ] as const) {
+    if (!input) continue
+    const parsed = Number(input)
+    if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+      return {
+        error: `Provider '${providerName}' model '${modelId}': Codex ${key} must be a positive integer.`,
+      }
+    }
+    codexConfig[key] = parsed
+  }
+  if (modelItem.codexInputModalities.length > 0) {
+    codexConfig.inputModalities = modelItem.codexInputModalities
+  }
+  if (modelItem.codexReasoningEfforts.length > 0) {
+    codexConfig.reasoningEfforts = modelItem.codexReasoningEfforts
+  }
+  if (modelItem.codexDefaultReasoningEffort !== "inherit") {
+    codexConfig.defaultReasoningEffort =
+      modelItem.codexDefaultReasoningEffort as CodexReasoningEffort
+  }
+  if (modelItem.codexSupportsParallelToolCallsConfigured) {
+    codexConfig.supportsParallelToolCalls =
+      modelItem.codexSupportsParallelToolCalls
+  }
+  if (Object.keys(codexConfig).length > 0) config.codex = codexConfig
   if (pricing.record) config.pricing = pricing.record
   if (extraBody.record) config.extraBody = extraBody.record
 
@@ -1026,7 +1120,7 @@ function parseSingleModelItem(
   return { record: { modelId, config } }
 }
 
-function parseProviderModelItems(
+export function parseProviderModelItems(
   items: Array<ProviderModelItem>,
   providerName: string,
 ): ParseResult<Record<string, ProviderModelConfig>> {
@@ -1189,6 +1283,15 @@ function useProvidersEditor(
             supportPdf: false,
             supportPdfConfigured: false,
             toolContentSupportType: [],
+            codexEnabled: true,
+            codexEnabledConfigured: false,
+            codexContextWindow: "",
+            codexMaxOutputTokens: "",
+            codexInputModalities: [],
+            codexReasoningEfforts: [],
+            codexDefaultReasoningEffort: "inherit",
+            codexSupportsParallelToolCalls: false,
+            codexSupportsParallelToolCallsConfigured: false,
             pricingJson: "",
             extraBodyJson: "",
           }),
@@ -3077,6 +3180,8 @@ export function ModelMappingsCard({
 type ResponsesApiSettingsCardProps = {
   useResponsesApiWebSocket: boolean
   useResponsesApiWebSearch: boolean
+  alphaSearchCodexPriority?: boolean
+  alphaSearchModelValue?: string
   messageApiWebSearchModelValue: string
   claudeAutoModelValue: string
   contextManagementMessages: boolean
@@ -3090,6 +3195,8 @@ type ResponsesApiSettingsCardProps = {
   providerModelSuggestions?: Array<string>
   onToggleUseResponsesApiWebSocket: (value: boolean) => void
   onToggleUseResponsesApiWebSearch: (value: boolean) => void
+  onToggleAlphaSearchCodexPriority?: (value: boolean) => void
+  onAlphaSearchModelChange?: (value: string) => void
   onMessageApiWebSearchModelChange: (value: string) => void
   onClaudeAutoModelChange: (value: string) => void
   onToggleContextManagementMessages: (value: boolean) => void
@@ -3108,6 +3215,8 @@ type ResponsesApiSettingsCardProps = {
 export function ResponsesApiSettingsCard({
   useResponsesApiWebSocket,
   useResponsesApiWebSearch,
+  alphaSearchCodexPriority = true,
+  alphaSearchModelValue = "gpt-5-mini",
   messageApiWebSearchModelValue,
   claudeAutoModelValue,
   contextManagementMessages,
@@ -3121,6 +3230,8 @@ export function ResponsesApiSettingsCard({
   providerModelSuggestions = [],
   onToggleUseResponsesApiWebSocket,
   onToggleUseResponsesApiWebSearch,
+  onToggleAlphaSearchCodexPriority = () => {},
+  onAlphaSearchModelChange = () => {},
   onMessageApiWebSearchModelChange,
   onClaudeAutoModelChange,
   onToggleContextManagementMessages,
@@ -3181,6 +3292,40 @@ export function ResponsesApiSettingsCard({
             checked={useResponsesApiWebSearch}
             onCheckedChange={onToggleUseResponsesApiWebSearch}
           />
+        </div>
+
+        <div className="grid gap-3 rounded-lg border p-3">
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="text-sm font-medium">
+                {t("settingsPage.responsesApi.alphaSearchCodexPriorityLabel")}
+              </div>
+              <div className="text-muted-foreground text-xs">
+                {t("settingsPage.responsesApi.alphaSearchCodexPriorityHint")}
+              </div>
+            </div>
+            <Switch
+              checked={alphaSearchCodexPriority}
+              onCheckedChange={onToggleAlphaSearchCodexPriority}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label className="text-muted-foreground text-xs">
+              {t("settingsPage.responsesApi.alphaSearchModelLabel")}
+            </Label>
+            <div className="text-muted-foreground text-xs">
+              {t("settingsPage.responsesApi.alphaSearchModelHint")}
+            </div>
+            <Input
+              autoComplete="off"
+              className="font-mono text-xs"
+              placeholder={t(
+                "settingsPage.responsesApi.alphaSearchModelPlaceholder",
+              )}
+              value={alphaSearchModelValue}
+              onChange={(e) => onAlphaSearchModelChange(e.target.value)}
+            />
+          </div>
         </div>
 
         <div className="grid gap-2 rounded-lg border p-3">
@@ -3708,6 +3853,28 @@ function ProviderModelRow({
     onUpdateModel(providerId, item.id, { toolContentSupportType: next })
   }
 
+  const onToggleCodexInputModality = (
+    modality: CodexInputModality,
+    checked: boolean,
+  ) => {
+    const next =
+      checked ?
+        [...new Set(item.codexInputModalities.concat(modality))]
+      : item.codexInputModalities.filter((current) => current !== modality)
+    onUpdateModel(providerId, item.id, { codexInputModalities: next })
+  }
+
+  const onToggleCodexReasoningEffort = (
+    effort: CodexReasoningEffort,
+    checked: boolean,
+  ) => {
+    const next =
+      checked ?
+        [...new Set(item.codexReasoningEfforts.concat(effort))]
+      : item.codexReasoningEfforts.filter((current) => current !== effort)
+    onUpdateModel(providerId, item.id, { codexReasoningEfforts: next })
+  }
+
   return (
     <div className="grid gap-3 rounded-md border border-dashed p-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -3891,6 +4058,202 @@ function ProviderModelRow({
         </div>
         <div className="text-muted-foreground text-xs">
           {t("settingsPage.advanced.providersToolContentSupportTypeHint")}
+        </div>
+      </div>
+
+      <div className="grid gap-3 rounded-md border bg-muted/20 p-3">
+        <div className="space-y-1">
+          <Label className="text-sm font-medium">
+            {t("settingsPage.advanced.providersCodexCapabilitiesLabel")}
+          </Label>
+          <div className="text-muted-foreground text-xs">
+            {t("settingsPage.advanced.providersCodexCapabilitiesHint")}
+          </div>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-2">
+            <Label className="text-muted-foreground text-xs">
+              {t("settingsPage.advanced.providersCodexEnabledLabel")}
+            </Label>
+            <Select
+              value={
+                item.codexEnabledConfigured ?
+                  item.codexEnabled ? "true" : "false"
+                : "inherit"
+              }
+              onValueChange={(value) =>
+                onUpdateModel(providerId, item.id, {
+                  codexEnabled: value === "true",
+                  codexEnabledConfigured: value !== "inherit",
+                })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="inherit">
+                  {t("settingsPage.advanced.providersBooleanInherit")}
+                </SelectItem>
+                <SelectItem value="true">
+                  {t("settingsPage.advanced.providersBooleanEnabled")}
+                </SelectItem>
+                <SelectItem value="false">
+                  {t("settingsPage.advanced.providersBooleanDisabled")}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid gap-2">
+            <Label className="text-muted-foreground text-xs">
+              {t("settingsPage.advanced.providersCodexContextWindowLabel")}
+            </Label>
+            <Input
+              type="number"
+              min="1"
+              step="1"
+              placeholder="256000"
+              value={item.codexContextWindow}
+              onChange={(e) =>
+                onUpdateModel(providerId, item.id, {
+                  codexContextWindow: e.target.value,
+                })
+              }
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label className="text-muted-foreground text-xs">
+              {t("settingsPage.advanced.providersCodexMaxOutputTokensLabel")}
+            </Label>
+            <Input
+              type="number"
+              min="1"
+              step="1"
+              placeholder="32000"
+              value={item.codexMaxOutputTokens}
+              onChange={(e) =>
+                onUpdateModel(providerId, item.id, {
+                  codexMaxOutputTokens: e.target.value,
+                })
+              }
+            />
+          </div>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-2">
+            <Label className="text-muted-foreground text-xs">
+              {t("settingsPage.advanced.providersCodexInputModalitiesLabel")}
+            </Label>
+            <div className="flex flex-wrap gap-2">
+              {CODEX_INPUT_MODALITIES.map((modality) => (
+                <label
+                  key={modality}
+                  className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs"
+                >
+                  <input
+                    type="checkbox"
+                    checked={item.codexInputModalities.includes(modality)}
+                    onChange={(e) =>
+                      onToggleCodexInputModality(modality, e.target.checked)
+                    }
+                  />
+                  {modality}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-2">
+            <Label className="text-muted-foreground text-xs">
+              {t("settingsPage.advanced.providersCodexReasoningEffortsLabel")}
+            </Label>
+            <div className="flex flex-wrap gap-2">
+              {CODEX_REASONING_EFFORTS.map((effort) => (
+                <label
+                  key={effort}
+                  className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs"
+                >
+                  <input
+                    type="checkbox"
+                    checked={item.codexReasoningEfforts.includes(effort)}
+                    onChange={(e) =>
+                      onToggleCodexReasoningEffort(effort, e.target.checked)
+                    }
+                  />
+                  {effort}
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-2">
+            <Label className="text-muted-foreground text-xs">
+              {t("settingsPage.advanced.providersCodexDefaultEffortLabel")}
+            </Label>
+            <Select
+              value={item.codexDefaultReasoningEffort}
+              onValueChange={(value) =>
+                onUpdateModel(providerId, item.id, {
+                  codexDefaultReasoningEffort: value,
+                })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="inherit">
+                  {t("settingsPage.advanced.providersBooleanInherit")}
+                </SelectItem>
+                {CODEX_REASONING_EFFORTS.map((effort) => (
+                  <SelectItem key={effort} value={effort}>
+                    {effort}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid gap-2">
+            <Label className="text-muted-foreground text-xs">
+              {t("settingsPage.advanced.providersCodexParallelToolsLabel")}
+            </Label>
+            <Select
+              value={
+                item.codexSupportsParallelToolCallsConfigured ?
+                  item.codexSupportsParallelToolCalls ? "true" : "false"
+                : "inherit"
+              }
+              onValueChange={(value) =>
+                onUpdateModel(providerId, item.id, {
+                  codexSupportsParallelToolCalls: value === "true",
+                  codexSupportsParallelToolCallsConfigured:
+                    value !== "inherit",
+                })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="inherit">
+                  {t("settingsPage.advanced.providersBooleanInherit")}
+                </SelectItem>
+                <SelectItem value="true">
+                  {t("settingsPage.advanced.providersBooleanEnabled")}
+                </SelectItem>
+                <SelectItem value="false">
+                  {t("settingsPage.advanced.providersBooleanDisabled")}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </div>
 
@@ -4413,6 +4776,8 @@ type SettingsPageViewProps = {
   useMessagesApi: boolean
   useResponsesApiWebSocket: boolean
   useResponsesApiWebSearch: boolean
+  alphaSearchCodexPriority: boolean
+  alphaSearchModelValue: string
   messageApiWebSearchModelValue: string
   claudeAutoModelValue: string
   contextManagementMessages: boolean
@@ -4421,6 +4786,8 @@ type SettingsPageViewProps = {
   onUseMessagesApiToggle: (value: boolean) => void
   onUseResponsesApiWebSocketToggle: (value: boolean) => void
   onUseResponsesApiWebSearchToggle: (value: boolean) => void
+  onAlphaSearchCodexPriorityToggle: (value: boolean) => void
+  onAlphaSearchModelChange: (value: string) => void
   onMessageApiWebSearchModelChange: (value: string) => void
   onClaudeAutoModelChange: (value: string) => void
   onContextManagementMessagesToggle: (value: boolean) => void
@@ -4865,6 +5232,20 @@ function useSettingsPageState(): SettingsPageViewProps {
     [setDraft],
   )
 
+  const handleAlphaSearchCodexPriorityToggle = useCallback(
+    (value: boolean) => {
+      setDraft((prev) => ({ ...prev, alphaSearchCodexPriority: value }))
+    },
+    [setDraft],
+  )
+
+  const handleAlphaSearchModelChange = useCallback(
+    (value: string) => {
+      setDraft((prev) => ({ ...prev, alphaSearchModel: value }))
+    },
+    [setDraft],
+  )
+
   const handleMessageApiWebSearchModelChange = useCallback(
     (value: string) => {
       setDraft((prev) => ({ ...prev, messageApiWebSearchModel: value }))
@@ -5014,6 +5395,8 @@ function useSettingsPageState(): SettingsPageViewProps {
   const useMessagesApi = draft.useMessagesApi ?? true
   const useResponsesApiWebSocket = draft.useResponsesApiWebSocket ?? true
   const useResponsesApiWebSearch = draft.useResponsesApiWebSearch ?? true
+  const alphaSearchCodexPriority = draft.alphaSearchCodexPriority ?? true
+  const alphaSearchModelValue = draft.alphaSearchModel ?? "gpt-5-mini"
   const messageApiWebSearchModelValue = draft.messageApiWebSearchModel ?? ""
   const claudeAutoModelValue = draft.claudeAutoModel ?? ""
   const contextManagement = getContextManagementFromConfig(draft)
@@ -5107,6 +5490,8 @@ function useSettingsPageState(): SettingsPageViewProps {
     useMessagesApi,
     useResponsesApiWebSocket,
     useResponsesApiWebSearch,
+    alphaSearchCodexPriority,
+    alphaSearchModelValue,
     messageApiWebSearchModelValue,
     claudeAutoModelValue,
     contextManagementMessages: contextManagement.messages,
@@ -5115,6 +5500,9 @@ function useSettingsPageState(): SettingsPageViewProps {
     onUseMessagesApiToggle: handleUseMessagesApiToggle,
     onUseResponsesApiWebSocketToggle: handleUseResponsesApiWebSocketToggle,
     onUseResponsesApiWebSearchToggle: handleUseResponsesApiWebSearchToggle,
+    onAlphaSearchCodexPriorityToggle:
+      handleAlphaSearchCodexPriorityToggle,
+    onAlphaSearchModelChange: handleAlphaSearchModelChange,
     onMessageApiWebSearchModelChange: handleMessageApiWebSearchModelChange,
     onClaudeAutoModelChange: handleClaudeAutoModelChange,
     onContextManagementMessagesToggle: handleContextManagementMessagesToggle,
@@ -5227,6 +5615,8 @@ function SettingsPageView({
   useMessagesApi,
   useResponsesApiWebSocket,
   useResponsesApiWebSearch,
+  alphaSearchCodexPriority,
+  alphaSearchModelValue,
   messageApiWebSearchModelValue,
   claudeAutoModelValue,
   contextManagementMessages,
@@ -5235,6 +5625,8 @@ function SettingsPageView({
   onUseMessagesApiToggle,
   onUseResponsesApiWebSocketToggle,
   onUseResponsesApiWebSearchToggle,
+  onAlphaSearchCodexPriorityToggle,
+  onAlphaSearchModelChange,
   onMessageApiWebSearchModelChange,
   onClaudeAutoModelChange,
   onContextManagementMessagesToggle,
@@ -5427,6 +5819,8 @@ function SettingsPageView({
             <ResponsesApiSettingsCard
               useResponsesApiWebSocket={useResponsesApiWebSocket}
               useResponsesApiWebSearch={useResponsesApiWebSearch}
+              alphaSearchCodexPriority={alphaSearchCodexPriority}
+              alphaSearchModelValue={alphaSearchModelValue}
               messageApiWebSearchModelValue={messageApiWebSearchModelValue}
               claudeAutoModelValue={claudeAutoModelValue}
               contextManagementMessages={contextManagementMessages}
@@ -5442,6 +5836,10 @@ function SettingsPageView({
               providerModelSuggestions={providerModelSuggestions}
               onToggleUseResponsesApiWebSocket={onUseResponsesApiWebSocketToggle}
               onToggleUseResponsesApiWebSearch={onUseResponsesApiWebSearchToggle}
+              onToggleAlphaSearchCodexPriority={
+                onAlphaSearchCodexPriorityToggle
+              }
+              onAlphaSearchModelChange={onAlphaSearchModelChange}
               onMessageApiWebSearchModelChange={onMessageApiWebSearchModelChange}
               onClaudeAutoModelChange={onClaudeAutoModelChange}
               onToggleContextManagementMessages={

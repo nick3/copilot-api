@@ -391,6 +391,8 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
     "useMessagesApi": true,
     "useResponsesApiWebSocket": true,
     "useResponsesApiWebSearch": true,
+    "alphaSearchCodexPriority": true,
+    "alphaSearchModel": "gpt-5-mini",
     "messageApiWebSearchModel": "gpt-5-mini",
     "logLevel": "info"
   }
@@ -478,6 +480,8 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
     "useMessagesApi": true,
     "useResponsesApiWebSocket": true,
     "useResponsesApiWebSearch": true,
+    "alphaSearchCodexPriority": true,
+    "alphaSearchModel": "gpt-5-mini",
     "messageApiWebSearchModel": "gpt-5-mini",
     "claudeAutoModel": ""
   }
@@ -504,6 +508,7 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
     - `contextCache`：可选，显式 context cache 控制。省略时仅 DashScope/阿里云百炼 OpenAI 兼容 provider 默认 `true`，其他上游默认 `false`。启用后会按 DashScope Context Cache 格式，在最多 4 个 content block 上注入 `cache_control: { "type": "ephemeral" }`。缓存断点策略与 opencode 主链路保持一致：前 2 条 system 消息 + 最后 2 条非 system 消息。标记字符串 content 时会把 `system` / `user` / `assistant` / `tool` 消息转换为 text content part 数组；已有数组 content 则标记最后一个 part。如果模型本身已经支持隐式缓存，或上游不支持该显式缓存扩展字段，可在模型配置中设为 `false`。
     - `supportPdf`：可选，控制该模型是否支持 PDF/document content。默认 `false`，不支持时会把 PDF 转成提示文本；设为 `true` 时会把 PDF/document 转成 OpenAI Chat Completions 的 file part。
     - `toolContentSupportType`：可选，配置该模型的 tool result content 支持能力，值为 `array`、`image`、`pdf` 的数组。provider 侧未配置时默认只发送 string tool content。若 `supportPdf` 为 `true` 但这里不包含 `pdf`，tool result 里的 file part 会被转成 user role 消息。Copilot 主链路不使用这个 provider 默认，仍按 array + image 且不支持 PDF 的能力处理。
+    - `codex`：可选，控制该模型合并到 Codex 兼容模型目录时公开的能力元数据。支持 `enabled`、`contextWindow`、`maxOutputTokens`、`inputModalities`、`reasoningEfforts`、`defaultReasoningEffort` 和 `supportsParallelToolCalls`；设为 `enabled: false` 可对 Codex 客户端隐藏该模型。这些字段也可以在 Admin UI 中编辑。
 - **contextManagement：** 控制代理是否为 Responses API 附加 `context_management` 压缩指令。`messages` 作用于被翻译成 Responses API 的 Anthropic 风格 `/v1/messages` 请求，包括 `openai-responses` provider 的 Messages 路由，默认值为 `true`。`responses` 作用于 native `/v1/responses` 流量，包括 `provider/model` 别名和内置 `codex` provider，默认值为 `false`。只有在确认客户端支持 context management compaction 后，才建议在 Responses API 下启用 `responses`。启用后，请求体会带上 `context_management`，并在后续轮次中仅保留最新的压缩承载内容。GPT-5.6 及以上模型启用该功能会影响 prompt cache 命中，因此代理不会为这些模型自动附加 context management；客户端显式传入的 `context_management` 字段仍会保留。
 - **modelResponsesApiCompactThresholds：** 按模型覆盖 Responses API 的 `compact_threshold`，仅在代理自动附加 `context_management` 时使用。它的优先级高于 `resolveResponsesCompactThreshold` 基于 `max_prompt_tokens * ratio` 的兜底阈值。默认将 `gpt-5.4` 和 `gpt-5.5` 设为 `217600`（`272000 * 0.8`）。未列出的模型继续使用原有兜底逻辑。
 - **smallModel：** 用于无工具预热消息、compact/background 请求以及其他短小维护型轮次（例如 Claude Code 或 OpenCode 发出的 housekeeping 请求）的回退模型，用来避免消耗 premium requests；默认是 `gpt-5-mini`。预热或探测请求会根据本次选中的 GitHub Copilot 账号决定路由：按 premium request 计费的账号使用 `smallModel`，按 token 计费的账号则保留请求模型，因为后者没有需要节省的 premium request 配额。compact/background 请求仍由 `compactUseSmallModel` 控制。如果原始模型名被屏蔽，而这里指向的是某个别名目标模型，则会解析为首选别名。
@@ -520,6 +525,8 @@ MCP HTTP 的浏览器 CORS 默认只允许 loopback origin。可设置 `COPILOT_
 - **useMessagesApi：** 当为 `true`（默认）时，支持 Copilot 原生 `/v1/messages` 端点的 Claude 系模型会走 Messages API 路径。设为 `false` 时，将跳过 Messages API 候选，回退到 `/responses`（如支持）或 `/chat/completions`。
 - **useResponsesApiWebSocket：** 当为 `true`（默认）时，发往上游 Copilot Responses API 的请求会对声明了 `ws:/responses` 的模型使用 Copilot WebSocket transport；仅声明 `/responses` 的模型仍走 HTTP。设为 `false` 可禁用上游 WebSocket 路由。该配置不会禁用 `/v1/responses` 上面向 Codex 的入站 WebSocket listener。如果上游 WebSocket 反复断开，请先尝试其他网络或 VPN 节点，再关闭此选项验证 HTTP 回退路径。
 - **useResponsesApiWebSearch：** 当为 `true`（默认）时，`/v1/responses` 会保留 `type: "web_search"` 的工具并转发到上游。设为 `false` 则会在发送 Copilot 请求之前将其剥离。
+- **alphaSearchCodexPriority：** 默认值为 `true`。Codex provider 可用时，顶层 Alpha Search 请求优先走原生 Codex 端点；否则通过现有多账号 Responses 调度执行 search/open/click/find/finance/weather/sports/time 等命令。不支持的 `image_query` 与 `screenshot` 会返回明确的“不重试”输出。
+- **alphaSearchModel：** 当请求模型仅支持 Messages 或 Chat Completions 时使用的 Responses 搜索模型，默认值为 `gpt-5-mini`。可填写 Copilot 模型或 `openai-responses` 类型的 `provider/model`；设为空字符串可禁用该重定向。
 - **messageApiWebSearchModel：** 顶层 Copilot `/v1/messages` 请求只包含 Anthropic 服务端 `web_search` 工具时使用的全局回退模型，默认值为 `gpt-5-mini`。如果该值是 `provider/model` 别名，请求会进入对应 provider 的 Messages API 路径，并在转发前移除 provider 前缀。对于 Copilot GPT 模型，web search 会通过 `/responses` 执行。混合 `web_search` 与自定义工具的场景暂不支持，服务端会移除 server-side `web_search` 并让请求继续走普通链路。
 - **claudeAutoModel：** 用于 Claude Code 后台 security-monitor 请求的模型，作用于 `/v1/messages` 和 provider message 路由。无工具、`stop_sequences: ["</block>"]` 且 system prompt 匹配 security-monitor 前缀的请求会改用该模型。顶层配置为 `provider/model` 时会路由到对应 provider；直接 provider 路由保持当前 provider。默认为空（禁用）。
 - **claudeTokenMultiplier：** 用于 Claude `/v1/messages/count_tokens` 请求在本地走 GPT tokenizer 估算时的乘数。默认值为 `1.15`。如果你的客户端仍然过晚触发上下文压缩，可以适当调大。这个配置只会在代理本地估算 Claude token 时生效；如果已经配置 `anthropicApiKey` 且 Anthropic token counting 调用成功，则会直接返回 Anthropic 的精确计数，不会使用这个乘数。
@@ -570,7 +577,7 @@ curl http://localhost:4141/v1/models \
 
 | 端点 | 方法 | 说明 |
 | --- | --- | --- |
-| `/alpha/search`<br>`/v1/alpha/search` | `POST` | 将 JSON 请求体与查询参数透明转发到 Codex Alpha Search 上游。 |
+| `/alpha/search`<br>`/v1/alpha/search` | `POST` | 优先调用原生 Codex Alpha Search；配置要求或 Codex 不可用时回退到 Responses web-search 适配器。 |
 | `/images/generations`<br>`/v1/images/generations` | `POST` | 将 JSON 图片生成请求转发到 Codex。 |
 | `/images/edits`<br>`/v1/images/edits` | `POST` | 保留 content type，并以流式方式转发 multipart 图片编辑请求。 |
 
@@ -805,6 +812,7 @@ supports_websockets = true
 [profiles.copilot-api]
 model_provider = "copilot-api"
 model = "gpt-5.4"
+web_search = "live"
 ```
 
 然后使用该 profile 启动 Codex：
@@ -816,6 +824,18 @@ codex -p copilot-api
 如果你配置了 `auth.apiKeys`，需要在 Codex 的 provider headers 或 bearer-token 配置里使用同一个 key，这样 HTTP 与 WebSocket 请求都能通过认证。仅在排障时，可以在 Codex 中设置 `supports_websockets = false` 来强制走 HTTP fallback。
 
 > **注意：** 通过 GitHub Copilot 使用 Codex 时，目前建议关闭 Codex multi-agent 功能，因为 Copilot 可能会根据最后一条 user-role 消息来计算 Codex 流量。
+
+对于 Codex 客户端，顶层 `GET /v1/models` 会合并原生 Responses 模型和可通过 Responses Lite 运行的 Copilot/provider 模型。Anthropic provider 走 **Responses → Messages**；OpenAI-compatible provider 与仅支持 Chat 的 Copilot 模型继续走 **Responses → Messages → Chat Completions**，JSON 和流式结果都会翻译回 Responses。
+
+如果 Codex 使用 `approvals_reviewer = "auto_review"`，可在 `config.json` 中把内部审核模型映射到支持 Responses 的 Copilot 模型：
+
+```json
+{
+  "modelMappings": {
+    "codex-auto-review": "gpt-5.6-luna"
+  }
+}
+```
 
 ## 与 Claude Code 一起使用
 

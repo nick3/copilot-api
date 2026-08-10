@@ -24,6 +24,8 @@ import {
   mergeConfigWithDefaults,
   SUPPORTED_PROVIDER_TYPES,
   type AppConfig,
+  type CodexModelCapabilitiesConfig,
+  type CodexReasoningEffort,
   type ContextManagementConfig,
   type DevModeConfig,
   type LogLevel,
@@ -242,6 +244,8 @@ const CONFIG_KEYS = new Set<keyof AppConfig>([
   "useMessagesApi",
   "useResponsesApiWebSocket",
   "useResponsesApiWebSearch",
+  "alphaSearchCodexPriority",
+  "alphaSearchModel",
   "messageApiWebSearchModel",
   "claudeAutoModel",
   "useResponsesApiContextManagement",
@@ -418,6 +422,7 @@ const PROVIDER_MODEL_CONFIG_FIELDS = [
   "pricing",
   "supportPdf",
   "toolContentSupportType",
+  "codex",
 ] as const
 
 type ProviderModelConfigField = (typeof PROVIDER_MODEL_CONFIG_FIELDS)[number]
@@ -435,6 +440,36 @@ const TOOL_CONTENT_SUPPORT_TYPES = [
 const TOOL_CONTENT_SUPPORT_TYPE_SET = new Set<ToolContentSupportType>(
   TOOL_CONTENT_SUPPORT_TYPES,
 )
+
+const CODEX_MODEL_CAPABILITY_FIELDS = [
+  "enabled",
+  "contextWindow",
+  "maxOutputTokens",
+  "inputModalities",
+  "reasoningEfforts",
+  "defaultReasoningEffort",
+  "supportsParallelToolCalls",
+] as const
+
+const CODEX_MODEL_CAPABILITY_KEYS = new Set<string>(
+  CODEX_MODEL_CAPABILITY_FIELDS,
+)
+
+const CODEX_INPUT_MODALITIES = ["text", "image"] as const
+const CODEX_INPUT_MODALITY_SET = new Set<string>(CODEX_INPUT_MODALITIES)
+
+const CODEX_REASONING_EFFORTS = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
+] as const satisfies ReadonlyArray<CodexReasoningEffort>
+
+const CODEX_REASONING_EFFORT_SET = new Set<string>(CODEX_REASONING_EFFORTS)
 
 const TOKEN_USAGE_PRICING_NUMBER_FIELDS = [
   "cachedInput",
@@ -618,6 +653,128 @@ function applyProviderModelToolContentSupportType(
   if (normalized.length > 0) {
     config.toolContentSupportType = normalized
   }
+  return undefined
+}
+
+function parseOptionalPositiveInteger(
+  value: unknown,
+  field: string,
+): ParseFieldResult<number> {
+  if (value === null || value === undefined) return { clear: true }
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    return { error: `${field} must be a positive integer` }
+  }
+  return { value }
+}
+
+function parseCodexEnumArray<T extends string>(
+  value: unknown,
+  field: string,
+  allowed: ReadonlySet<string>,
+  allowedValues: ReadonlyArray<string>,
+): ParseFieldResult<Array<T>> {
+  if (value === null || value === undefined) return { clear: true }
+  if (!Array.isArray(value)) return { error: `${field} must be an array` }
+
+  const normalized: Array<T> = []
+  const seen = new Set<string>()
+  for (const [index, item] of value.entries()) {
+    if (typeof item !== "string" || !allowed.has(item)) {
+      return {
+        error: `${field}[${index}] must be one of: ${allowedValues.join(", ")}`,
+      }
+    }
+    if (!seen.has(item)) {
+      seen.add(item)
+      normalized.push(item as T)
+    }
+  }
+  return { value: normalized }
+}
+
+function parseProviderModelCodexConfig(
+  value: unknown,
+  field: string,
+): ParseFieldResult<CodexModelCapabilitiesConfig> {
+  if (value === null || value === undefined) return { clear: true }
+  if (!isPlainObject(value)) return { error: `${field} must be an object` }
+
+  const keyError = validateAllowedObjectKeys(
+    value,
+    field,
+    CODEX_MODEL_CAPABILITY_KEYS,
+  )
+  if (keyError) return { error: keyError }
+
+  const config: CodexModelCapabilitiesConfig = {}
+  if (Object.hasOwn(value, "enabled")) {
+    const parsed = parseOptionalBoolean(value.enabled, `${field}.enabled`)
+    if ("error" in parsed) return parsed
+    if ("value" in parsed) config.enabled = parsed.value
+  }
+  for (const key of ["contextWindow", "maxOutputTokens"] as const) {
+    if (!Object.hasOwn(value, key)) continue
+    const parsed = parseOptionalPositiveInteger(value[key], `${field}.${key}`)
+    if ("error" in parsed) return parsed
+    if ("value" in parsed) config[key] = parsed.value
+  }
+  if (Object.hasOwn(value, "inputModalities")) {
+    const parsed = parseCodexEnumArray<"text" | "image">(
+      value.inputModalities,
+      `${field}.inputModalities`,
+      CODEX_INPUT_MODALITY_SET,
+      CODEX_INPUT_MODALITIES,
+    )
+    if ("error" in parsed) return parsed
+    if ("value" in parsed) config.inputModalities = parsed.value
+  }
+  if (Object.hasOwn(value, "reasoningEfforts")) {
+    const parsed = parseCodexEnumArray<CodexReasoningEffort>(
+      value.reasoningEfforts,
+      `${field}.reasoningEfforts`,
+      CODEX_REASONING_EFFORT_SET,
+      CODEX_REASONING_EFFORTS,
+    )
+    if ("error" in parsed) return parsed
+    if ("value" in parsed) config.reasoningEfforts = parsed.value
+  }
+  if (Object.hasOwn(value, "defaultReasoningEffort")) {
+    const parsed = parseOptionalString(
+      value.defaultReasoningEffort,
+      `${field}.defaultReasoningEffort`,
+    )
+    if ("error" in parsed) return parsed
+    if ("value" in parsed && !CODEX_REASONING_EFFORT_SET.has(parsed.value)) {
+      return {
+        error: `${field}.defaultReasoningEffort must be one of: ${CODEX_REASONING_EFFORTS.join(", ")}`,
+      }
+    }
+    if ("value" in parsed) {
+      config.defaultReasoningEffort = parsed.value as CodexReasoningEffort
+    }
+  }
+  if (Object.hasOwn(value, "supportsParallelToolCalls")) {
+    const parsed = parseOptionalBoolean(
+      value.supportsParallelToolCalls,
+      `${field}.supportsParallelToolCalls`,
+    )
+    if ("error" in parsed) return parsed
+    if ("value" in parsed) {
+      config.supportsParallelToolCalls = parsed.value
+    }
+  }
+  return { value: config }
+}
+
+function applyProviderModelCodex(
+  config: ModelConfig,
+  value: Record<string, unknown>,
+  field: string,
+): string | undefined {
+  if (!Object.hasOwn(value, "codex")) return undefined
+  const parsed = parseProviderModelCodexConfig(value.codex, `${field}.codex`)
+  if ("error" in parsed) return parsed.error
+  if ("value" in parsed) config.codex = parsed.value
   return undefined
 }
 
@@ -807,6 +964,9 @@ function parseProviderModelConfig(
   if (toolContentSupportTypeError) {
     return { error: toolContentSupportTypeError }
   }
+
+  const codexError = applyProviderModelCodex(config, value, field)
+  if (codexError) return { error: codexError }
 
   const extraBodyError = applyProviderModelExtraBody(config, value, field)
   if (extraBodyError) return { error: extraBodyError }
@@ -1264,6 +1424,19 @@ function applyOptionalString(
   return undefined
 }
 
+function applyAlphaSearchModel(
+  next: AppConfig,
+  value: unknown,
+): string | undefined {
+  if (value === null || value === undefined) {
+    next.alphaSearchModel = undefined
+    return undefined
+  }
+  if (typeof value !== "string") return "alphaSearchModel must be a string"
+  next.alphaSearchModel = value.trim()
+  return undefined
+}
+
 function applyAuthConfig(next: AppConfig, value: unknown): string | undefined {
   const parsed = parseAuthConfig(value)
   if ("error" in parsed) return parsed.error
@@ -1296,6 +1469,7 @@ function applyOptionalBoolean(
     | "useMessagesApi"
     | "useResponsesApiWebSocket"
     | "useResponsesApiWebSearch"
+    | "alphaSearchCodexPriority"
     | "compactUseSmallModel"
     | "messageStartInputTokensFallback"
     | "allowOriginalModelNamesForAliases"
@@ -1699,6 +1873,9 @@ const CONFIG_PATCH_HANDLERS: Partial<Record<string, ConfigPatchHandler>> = {
     applyOptionalBoolean(next, "useResponsesApiWebSocket", value),
   useResponsesApiWebSearch: (next, value) =>
     applyOptionalBoolean(next, "useResponsesApiWebSearch", value),
+  alphaSearchCodexPriority: (next, value) =>
+    applyOptionalBoolean(next, "alphaSearchCodexPriority", value),
+  alphaSearchModel: applyAlphaSearchModel,
   messageApiWebSearchModel: (next, value) =>
     applyOptionalString(next, "messageApiWebSearchModel", value),
   claudeAutoModel: (next, value) =>

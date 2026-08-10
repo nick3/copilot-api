@@ -243,6 +243,28 @@ export type ProviderAuthType = "authorization" | "oauth2" | "x-api-key"
 
 export type ToolContentSupportType = "array" | "image" | "pdf"
 
+export type CodexInputModality = "text" | "image"
+
+export type CodexReasoningEffort =
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max"
+  | "ultra"
+
+export type ProviderCodexModelConfig = {
+  enabled?: boolean
+  contextWindow?: number
+  maxOutputTokens?: number
+  inputModalities?: Array<CodexInputModality>
+  reasoningEfforts?: Array<CodexReasoningEffort>
+  defaultReasoningEffort?: CodexReasoningEffort
+  supportsParallelToolCalls?: boolean
+}
+
 export type TokenUsagePricingTier = {
   cachedInput?: number
   cacheCreationInput?: number
@@ -266,6 +288,7 @@ export type ProviderModelConfig = {
   pricing?: TokenUsagePricingConfig
   supportPdf?: boolean
   toolContentSupportType?: Array<ToolContentSupportType>
+  codex?: ProviderCodexModelConfig
 }
 
 export type ProviderConfig = {
@@ -405,6 +428,8 @@ export type AdminConfig = {
   useMessagesApi?: boolean
   useResponsesApiWebSocket?: boolean
   useResponsesApiWebSearch?: boolean
+  alphaSearchCodexPriority?: boolean
+  alphaSearchModel?: string
   messageApiWebSearchModel?: string
   claudeAutoModel?: string
   /** @deprecated use contextManagement */
@@ -787,6 +812,8 @@ const ADMIN_CONFIG_KEYS = new Set<keyof AdminConfig>([
   "useMessagesApi",
   "useResponsesApiWebSocket",
   "useResponsesApiWebSearch",
+  "alphaSearchCodexPriority",
+  "alphaSearchModel",
   "messageApiWebSearchModel",
   "claudeAutoModel",
   "useResponsesApiContextManagement",

@@ -225,6 +225,69 @@ test("POST /api/admin/config updates useResponsesApiWebSearch", async () => {
   })
 })
 
+test("POST /api/admin/config updates Alpha Search settings", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          alphaSearchCodexPriority: false,
+          alphaSearchModel: "  search/gpt-search  ",
+        }),
+      }),
+    )
+
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      alphaSearchCodexPriority?: boolean
+      alphaSearchModel?: string
+    }
+    expect(body.alphaSearchCodexPriority).toBe(false)
+    expect(body.alphaSearchModel).toBe("search/gpt-search")
+
+    const getRes = await server.fetch(
+      new Request("http://localhost/api/admin/config"),
+    )
+    expect(getRes.status).toBe(200)
+    const persisted = (await getRes.json()) as {
+      alphaSearchCodexPriority?: boolean
+      alphaSearchModel?: string
+    }
+    expect(persisted.alphaSearchCodexPriority).toBe(false)
+    expect(persisted.alphaSearchModel).toBe("search/gpt-search")
+  })
+})
+
+test("POST /api/admin/config can explicitly disable alphaSearchModel", async () => {
+  await withConfig({ alphaSearchModel: "gpt-5-mini" }, async () => {
+    const { server } = await import("../src/server")
+
+    const res = await server.fetch(
+      new Request("http://localhost/api/admin/config", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ alphaSearchModel: "" }),
+      }),
+    )
+
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { alphaSearchModel?: string }
+    expect(body.alphaSearchModel).toBe("")
+
+    const getRes = await server.fetch(
+      new Request("http://localhost/api/admin/config"),
+    )
+    expect(getRes.status).toBe(200)
+    const persisted = (await getRes.json()) as {
+      alphaSearchModel?: string
+    }
+    expect(persisted.alphaSearchModel).toBe("")
+  })
+})
+
 test("POST /api/admin/config updates messageApiWebSearchModel", async () => {
   await withConfig({}, async () => {
     const { server } = await import("../src/server")
@@ -739,6 +802,15 @@ test("POST /api/admin/config updates providers", async () => {
                   contextCache: true,
                   supportPdf: true,
                   toolContentSupportType: ["array", "image", "pdf", "image"],
+                  codex: {
+                    enabled: true,
+                    contextWindow: 256_000,
+                    maxOutputTokens: 32_000,
+                    inputModalities: ["text", "image", "text"],
+                    reasoningEfforts: ["low", "high", "low"],
+                    defaultReasoningEffort: "high",
+                    supportsParallelToolCalls: true,
+                  },
                   extraBody: {
                     metadata: {
                       source: "admin-ui",
@@ -789,6 +861,15 @@ test("POST /api/admin/config updates providers", async () => {
               contextCache: boolean
               supportPdf: boolean
               toolContentSupportType: Array<string>
+              codex: {
+                enabled: boolean
+                contextWindow: number
+                maxOutputTokens: number
+                inputModalities: Array<string>
+                reasoningEfforts: Array<string>
+                defaultReasoningEffort: string
+                supportsParallelToolCalls: boolean
+              }
               extraBody: {
                 metadata: {
                   source: string
@@ -831,6 +912,15 @@ test("POST /api/admin/config updates providers", async () => {
     expect(model.contextCache).toBe(true)
     expect(model.supportPdf).toBe(true)
     expect(model.toolContentSupportType).toEqual(["array", "image", "pdf"])
+    expect(model.codex).toEqual({
+      enabled: true,
+      contextWindow: 256_000,
+      maxOutputTokens: 32_000,
+      inputModalities: ["text", "image"],
+      reasoningEfforts: ["low", "high"],
+      defaultReasoningEffort: "high",
+      supportsParallelToolCalls: true,
+    })
     expect(model.extraBody).toEqual({
       metadata: {
         source: "admin-ui",
@@ -1021,6 +1111,45 @@ test("POST /api/admin/config rejects invalid provider model advanced fields", as
       config: { pricing: { tiers: [{ tiers: [] }] } },
       message:
         "providers.custom.models.model.pricing.tiers[0].tiers is not supported",
+    },
+    {
+      config: { codex: [] },
+      message: "providers.custom.models.model.codex must be an object",
+    },
+    {
+      config: { codex: { contextWindow: 0 } },
+      message:
+        "providers.custom.models.model.codex.contextWindow must be a positive integer",
+    },
+    {
+      config: { codex: { maxOutputTokens: 1.5 } },
+      message:
+        "providers.custom.models.model.codex.maxOutputTokens must be a positive integer",
+    },
+    {
+      config: { codex: { inputModalities: ["audio"] } },
+      message:
+        "providers.custom.models.model.codex.inputModalities[0] must be one of",
+    },
+    {
+      config: { codex: { reasoningEfforts: ["extreme"] } },
+      message:
+        "providers.custom.models.model.codex.reasoningEfforts[0] must be one of",
+    },
+    {
+      config: { codex: { defaultReasoningEffort: "extreme" } },
+      message:
+        "providers.custom.models.model.codex.defaultReasoningEffort must be one of",
+    },
+    {
+      config: { codex: { supportsParallelToolCalls: "yes" } },
+      message:
+        "providers.custom.models.model.codex.supportsParallelToolCalls must be a boolean",
+    },
+    {
+      config: { codex: { futureCapability: true } },
+      message:
+        "providers.custom.models.model.codex.futureCapability is not supported",
     },
   ]
 

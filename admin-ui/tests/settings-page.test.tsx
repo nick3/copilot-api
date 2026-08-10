@@ -10,6 +10,8 @@ import {
   deriveReasoningSupportByModel,
   deriveProviderModelSuggestions,
   getUniqueProviderName,
+  parseProviderModelItems,
+  providerItemsFromRecord,
   parseCompactThresholdsJson,
   parseModelMappingsJson,
   parseReasoningJson,
@@ -22,6 +24,8 @@ test("Responses API settings exposes transport toggles and context management", 
       contextManagementResponses={false}
       useResponsesApiWebSearch
       useResponsesApiWebSocket={false}
+      alphaSearchCodexPriority={false}
+      alphaSearchModelValue="search/gpt-search"
       messageApiWebSearchModelValue="search/gpt-search"
       claudeAutoModelValue="openrouter/anthropic/claude-haiku-4.5"
       responsesApiContextManagementModelsValue=""
@@ -42,12 +46,17 @@ test("Responses API settings exposes transport toggles and context management", 
       onToggleContextManagementResponses={() => {}}
       onToggleUseResponsesApiWebSearch={() => {}}
       onToggleUseResponsesApiWebSocket={() => {}}
+      onToggleAlphaSearchCodexPriority={() => {}}
+      onAlphaSearchModelChange={() => {}}
     />,
   )
 
   expect(html).toContain("Enable Responses API WebSocket")
   expect(html).toContain("ws:/responses")
   expect(html).toContain("Messages web search model")
+  expect(html).toContain("Prefer Codex for Alpha Search")
+  expect(html).toContain("Alpha Search fallback model")
+  expect(html).toContain("search/gpt-search")
   expect(html).toContain("search/gpt-search")
   expect(html).toContain("Claude security monitor model")
   expect(html).toContain("openrouter/anthropic/claude-haiku-4.5")
@@ -56,6 +65,60 @@ test("Responses API settings exposes transport toggles and context management", 
   expect(html).toContain("Default: enabled")
   expect(html).toContain("Legacy context management models")
   expect(html).toContain('aria-checked="false"')
+})
+
+test("provider Codex capabilities round-trip through the form model", () => {
+  const items = providerItemsFromRecord({
+    custom: {
+      type: "openai-compatible",
+      models: {
+        "gpt-custom": {
+          codex: {
+            enabled: true,
+            contextWindow: 256_000,
+            maxOutputTokens: 32_000,
+            inputModalities: ["text", "image"],
+            reasoningEfforts: ["low", "high", "ultra"],
+            defaultReasoningEffort: "high",
+            supportsParallelToolCalls: true,
+          },
+        },
+      },
+    },
+  })
+
+  const result = parseProviderModelItems(items[0]?.models ?? [], "custom")
+  expect(result).toEqual({
+    record: {
+      "gpt-custom": {
+        codex: {
+          enabled: true,
+          contextWindow: 256_000,
+          maxOutputTokens: 32_000,
+          inputModalities: ["text", "image"],
+          reasoningEfforts: ["low", "high", "ultra"],
+          defaultReasoningEffort: "high",
+          supportsParallelToolCalls: true,
+        },
+      },
+    },
+  })
+})
+
+test("provider Codex token limits require positive integers", () => {
+  const items = providerItemsFromRecord({
+    custom: {
+      models: { "gpt-custom": { codex: { contextWindow: 256_000 } } },
+    },
+  })
+  const model = items[0]?.models[0]
+  if (!model) throw new Error("Expected provider model form item")
+  model.codexContextWindow = "1.5"
+
+  expect(parseProviderModelItems([model], "custom")).toEqual({
+    error:
+      "Provider 'custom' model 'gpt-custom': Codex contextWindow must be a positive integer.",
+  })
 })
 
 test("Responses API settings marks dependent fields inactive when context management is off", () => {
