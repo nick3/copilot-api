@@ -84,6 +84,9 @@ export interface AccountRuntime extends AccountMeta {
   copilotToken?: string
   /** Account-specific Copilot API base URL returned by GitHub */
   copilotApiUrl?: string
+  /** Token-issued endpoint takes precedence over the usage endpoint. */
+  copilotTokenApiUrl?: string
+  copilotUsageApiUrl?: string
   /** VS Code version for API headers */
   vsCodeVersion?: string
   /** Account-scoped device identifier sent upstream */

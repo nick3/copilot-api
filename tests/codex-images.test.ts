@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 
-import type { ResolvedProviderConfig } from "../src/lib/config"
+import type { ResolvedProviderConfig } from "~/lib/config"
+import { MultipartBodyTooLargeError } from "~/routes/images/temp-form-data"
 
-const actualConfigModule = await import("../src/lib/config")
-const actualTokenModule = await import("../src/lib/token")
+const actualConfigModule = await import("~/lib/config")
+const actualTokenModule = await import("~/lib/token")
 
 let codexProviderConfig: ResolvedProviderConfig | null = null
 let openrouterProviderConfig: ResolvedProviderConfig | null = null
+let modelMappings: Record<string, string> = {}
 
 await mock.module("~/lib/config", () => ({
   ...actualConfigModule,
@@ -21,6 +23,7 @@ await mock.module("~/lib/config", () => ({
     if (provider === "openrouter") return openrouterProviderConfig
     return null
   },
+  resolveMappedModel: (model: string) => modelMappings[model] ?? model,
 }))
 
 await mock.module("~/lib/token", () => ({
@@ -28,23 +31,27 @@ await mock.module("~/lib/token", () => ({
   setupCodexToken: async () => {},
 }))
 
-const { state } = await import("../src/lib/state")
-const { resetLoggerRuntimeForTests } = await import("../src/lib/logger")
+const { state } = await import("~/lib/state")
 const { forwardCodexImages, resolveCodexImagesUrl } =
-  await import("../src/services/codex/images")
-const { imageRouteDependencies, imageRoutes } =
-  await import("../src/routes/images/route")
-const { providerImageRoutes } =
-  await import("../src/routes/provider/images/route")
-const { server } = await import("../src/server")
+  await import("~/services/codex/images")
+const { imageEditsRouteDependencies, imageRouteDependencies, imageRoutes } =
+  await import("~/routes/images/route")
+const { providerImageRoutes } = await import("~/routes/provider/images/route")
+const { server } = await import("~/server")
 
-const originalDebugJsonLazy = imageRouteDependencies.debugJsonLazy
+const originalDebugJsonAsync = imageRouteDependencies.debugJsonLazy
+const originalResolveMappedModel = imageRouteDependencies.resolveMappedModel
+const originalResolveProviderConfig =
+  imageRouteDependencies.resolveProviderConfig
+const originalStageMultipartBodyToDisk =
+  imageEditsRouteDependencies.stageMultipartBodyToDisk
+let stagedCleanupTasks: Array<() => Promise<void>> = []
 let debugValues: Array<unknown> = []
 const debugJsonLazyMock = mock(
   async (
-    _logger: Parameters<typeof originalDebugJsonLazy>[0],
+    _logger: Parameters<typeof originalDebugJsonAsync>[0],
     _label: string,
-    factory: Parameters<typeof originalDebugJsonLazy>[2],
+    factory: Parameters<typeof originalDebugJsonAsync>[2],
   ) => {
     if (state.verbose) {
       debugValues.push(await factory())
@@ -53,6 +60,7 @@ const debugJsonLazyMock = mock(
 )
 
 const originalFetch = globalThis.fetch
+
 const fetchMock = mock(
   (_url: string | URL | Request, _init?: RequestInit): Promise<Response> =>
     Promise.resolve(
@@ -95,26 +103,47 @@ beforeEach(() => {
     name: "openrouter",
     type: "openai-compatible",
   }
+  modelMappings = {}
   state.codexAccessToken = "codex-access-token"
   state.codexAccountId = "account-123"
   state.verbose = false
-  resetLoggerRuntimeForTests(undefined, "info")
   fetchMock.mockClear()
   debugJsonLazyMock.mockClear()
   debugValues = []
   imageRouteDependencies.debugJsonLazy = debugJsonLazyMock
+  imageRouteDependencies.resolveMappedModel = (model) =>
+    modelMappings[model] ?? model
+  imageRouteDependencies.resolveProviderConfig = (provider) =>
+    Promise.resolve(
+      provider === "codex" ? codexProviderConfig
+      : provider === "openrouter" ? openrouterProviderConfig
+      : null,
+    )
+  stagedCleanupTasks = []
+  imageEditsRouteDependencies.stageMultipartBodyToDisk = async (
+    body,
+    contentType,
+  ) => {
+    const staged = await originalStageMultipartBodyToDisk(body, contentType)
+    stagedCleanupTasks.push(staged.cleanup)
+    return staged
+  }
   ;(globalThis as unknown as { fetch: typeof fetch }).fetch =
     fetchMock as unknown as typeof fetch
 })
 
-afterEach(() => {
+afterEach(async () => {
+  await Promise.all(stagedCleanupTasks.map((cleanup) => cleanup()))
   ;(globalThis as unknown as { fetch: typeof fetch }).fetch = originalFetch
   state.codexAccessToken = undefined
   state.codexAccountId = undefined
   state.verbose = false
-  resetLoggerRuntimeForTests()
   openrouterProviderConfig = null
-  imageRouteDependencies.debugJsonLazy = originalDebugJsonLazy
+  imageRouteDependencies.debugJsonLazy = originalDebugJsonAsync
+  imageRouteDependencies.resolveMappedModel = originalResolveMappedModel
+  imageRouteDependencies.resolveProviderConfig = originalResolveProviderConfig
+  imageEditsRouteDependencies.stageMultipartBodyToDisk =
+    originalStageMultipartBodyToDisk
 })
 
 describe("Codex images URL", () => {
@@ -132,18 +161,6 @@ describe("Codex images URL", () => {
   test("builds the edits URL", () => {
     expect(resolveCodexImagesUrl("/images/edits", "edits")).toBe(
       "https://chatgpt.com/backend-api/codex/images/edits",
-    )
-  })
-
-  test("uses a configured Codex API base URL", () => {
-    expect(
-      resolveCodexImagesUrl(
-        "/v1/images/generations?format=png",
-        "generations",
-        "https://codex.example/backend-api/codex/",
-      ),
-    ).toBe(
-      "https://codex.example/backend-api/codex/images/generations?format=png",
     )
   })
 })
@@ -200,6 +217,88 @@ describe("Codex images forwarding", () => {
     expect(await new Response(init?.body).json()).toEqual(payload)
   })
 
+  test("rewrites a mapped JSON generation model before forwarding to Codex", async () => {
+    modelMappings = {
+      "image-model": "gpt-image-2",
+    }
+
+    const response = await createApp().request("/v1/images/generations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "image-model",
+        prompt: "mapped Codex image",
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe("https://chatgpt.com/backend-api/codex/images/generations")
+    expect(await new Response(init?.body).json()).toEqual({
+      model: "gpt-image-2",
+      prompt: "mapped Codex image",
+    })
+  })
+
+  test("routes a mapped JSON generation model to its configured provider", async () => {
+    codexProviderConfig = null
+    modelMappings = {
+      "image-model": "openrouter/black-forest-labs/flux-1.1-pro",
+    }
+
+    const response = await createApp().request(
+      "/v1/images/generations?output=base64",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "image-model",
+          prompt: "mapped provider image",
+        }),
+      },
+    )
+
+    expect(response.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe(
+      "https://openrouter.example/v1/images/generations?output=base64",
+    )
+    const headers = new Headers(init?.headers)
+    expect(headers.get("authorization")).toBe("Bearer openrouter-key")
+    expect(headers.has("chatgpt-account-id")).toBe(false)
+    expect(await new Response(init?.body).json()).toEqual({
+      model: "black-forest-labs/flux-1.1-pro",
+      prompt: "mapped provider image",
+    })
+  })
+
+  test("forwards the original model to Codex when the mapped provider is unavailable", async () => {
+    openrouterProviderConfig = null
+    modelMappings = {
+      "image-model": "openrouter/black-forest-labs/flux-1.1-pro",
+    }
+
+    const response = await createApp().request("/v1/images/generations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "image-model",
+        prompt: "fallback to original model",
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe("https://chatgpt.com/backend-api/codex/images/generations")
+    const headers = new Headers(init?.headers)
+    expect(headers.get("authorization")).toBe("Bearer codex-access-token")
+    expect(await new Response(init?.body).json()).toEqual({
+      model: "image-model",
+      prompt: "fallback to original model",
+    })
+  })
+
   test("preserves multipart fields and file bytes for image edits", async () => {
     state.verbose = true
     const formData = new FormData()
@@ -243,6 +342,229 @@ describe("Codex images forwarding", () => {
     expect(image.type).toBe("image/png")
     expect(await image.text()).toBe("source-image-bytes")
     expect(debugJsonLazyMock).not.toHaveBeenCalled()
+  })
+
+  test("routes a mapped multipart edit model to its configured provider", async () => {
+    modelMappings = {
+      "edit-model": "openrouter/black-forest-labs/flux-kontext-pro",
+    }
+    const formData = new FormData()
+    formData.set("model", "edit-model")
+    formData.set("prompt", "mapped provider edit")
+    formData.set(
+      "image",
+      new Blob(["mapped-source-image"], { type: "image/png" }),
+      "mapped-source.png",
+    )
+
+    const response = await createApp().request("/v1/images/edits", {
+      method: "POST",
+      body: formData,
+    })
+
+    expect(response.status).toBe(200)
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe("https://openrouter.example/v1/images/edits")
+    const headers = new Headers(init?.headers)
+    expect(headers.get("authorization")).toBe("Bearer openrouter-key")
+    expect(headers.get("content-type")).toStartWith(
+      "multipart/form-data; boundary=",
+    )
+
+    const forwardedFormData = await new Response(init?.body, {
+      headers,
+    }).formData()
+    expect(forwardedFormData.get("model")).toBe(
+      "black-forest-labs/flux-kontext-pro",
+    )
+    expect(forwardedFormData.get("prompt")).toBe("mapped provider edit")
+    const image = forwardedFormData.get("image")
+    expect(image).not.toBeNull()
+    expect(typeof image).not.toBe("string")
+    if (image === null || typeof image === "string") {
+      throw new Error("Expected the forwarded image to be a file")
+    }
+    expect(image.name).toBe("mapped-source.png")
+    expect(image.type).toBe("image/png")
+    expect(await image.text()).toBe("mapped-source-image")
+  })
+
+  test("forwards a multipart edit without a model field to Codex", async () => {
+    const formData = new FormData()
+    formData.set("prompt", "no model field")
+    formData.set(
+      "image",
+      new Blob(["raw-image-bytes"], { type: "image/png" }),
+      "raw.png",
+    )
+
+    const response = await createApp().request("/v1/images/edits", {
+      method: "POST",
+      body: formData,
+    })
+
+    expect(response.status).toBe(200)
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe("https://chatgpt.com/backend-api/codex/images/edits")
+
+    const headers = new Headers(init?.headers)
+    const forwardedFormData = await new Response(init?.body, {
+      headers,
+    }).formData()
+    expect(forwardedFormData.get("prompt")).toBe("no model field")
+    const image = forwardedFormData.get("image")
+    if (image === null || typeof image === "string") {
+      throw new Error("Expected the forwarded image to be a file")
+    }
+    expect(image.name).toBe("raw.png")
+    expect(await image.text()).toBe("raw-image-bytes")
+  })
+
+  test("rejects a malformed multipart edit body without forwarding", async () => {
+    const response = await createApp().request("/v1/images/edits", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=broken" },
+      body: "this is not multipart",
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      error: {
+        message: "Invalid multipart form data body",
+        type: "invalid_request_error",
+      },
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  test("streams a non-multipart edit body to Codex unchanged", async () => {
+    const response = await createApp().request("/v1/images/edits", {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: "raw-bytes",
+    })
+
+    expect(response.status).toBe(200)
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe("https://chatgpt.com/backend-api/codex/images/edits")
+    expect(await new Response(init?.body).text()).toBe("raw-bytes")
+  })
+
+  test("forwards a non-JSON generation body as-is to Codex", async () => {
+    const response = await createApp().request("/v1/images/generations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "not-json",
+    })
+
+    expect(response.status).toBe(200)
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe("https://chatgpt.com/backend-api/codex/images/generations")
+    expect(await new Response(init?.body).text()).toBe("not-json")
+  })
+
+  test("preserves non-UTF8 generation bytes when forwarding unchanged", async () => {
+    const body = new Uint8Array([0xff, 0x00, 0x7b, 0x7d])
+
+    const response = await createApp().request("/v1/images/generations", {
+      method: "POST",
+      body,
+    })
+
+    expect(response.status).toBe(200)
+    const [, init] = fetchMock.mock.calls[0] ?? []
+    const headers = new Headers(init?.headers)
+    expect(headers.get("content-type")).toBe("application/json")
+    expect(
+      new Uint8Array(await new Response(init?.body).arrayBuffer()),
+    ).toEqual(body)
+  })
+
+  test("does not rewrite JSON-shaped generation bodies with invalid UTF-8", async () => {
+    modelMappings = {
+      "image-model": "gpt-image-2",
+    }
+    const encoder = new TextEncoder()
+    const body = new Uint8Array([
+      ...encoder.encode('{"model":"image-model","prompt":"'),
+      0xff,
+      ...encoder.encode('"}'),
+    ])
+
+    const response = await createApp().request("/v1/images/generations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    })
+
+    expect(response.status).toBe(200)
+    const [, init] = fetchMock.mock.calls[0] ?? []
+    expect(
+      new Uint8Array(await new Response(init?.body).arrayBuffer()),
+    ).toEqual(body)
+  })
+
+  test("keeps the JSON default when rebuilding a headerless generation", async () => {
+    const body = new TextEncoder().encode(
+      JSON.stringify({ model: "gpt-image-2", prompt: "headerless JSON" }),
+    )
+
+    const response = await createApp().request("/v1/images/generations", {
+      method: "POST",
+      body,
+    })
+
+    expect(response.status).toBe(200)
+    const [, init] = fetchMock.mock.calls[0] ?? []
+    const headers = new Headers(init?.headers)
+    expect(headers.get("content-type")).toBe("application/json")
+    expect(await new Response(init?.body).json()).toEqual({
+      model: "gpt-image-2",
+      prompt: "headerless JSON",
+    })
+  })
+
+  test("returns 413 when multipart staging exceeds its limits", async () => {
+    imageEditsRouteDependencies.stageMultipartBodyToDisk = () =>
+      Promise.reject(new MultipartBodyTooLargeError())
+    const formData = new FormData()
+    formData.set("image", new Blob(["image-bytes"]), "image.png")
+
+    const response = await createApp().request("/v1/images/edits", {
+      method: "POST",
+      body: formData,
+    })
+
+    expect(response.status).toBe(413)
+    expect(await response.json()).toEqual({
+      error: {
+        message:
+          "Multipart form data body exceeds the configured upload limits",
+        type: "invalid_request_error",
+      },
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  test("reports temporary storage failures as server errors", async () => {
+    imageEditsRouteDependencies.stageMultipartBodyToDisk = () =>
+      Promise.reject(new Error("temporary storage unavailable"))
+    const formData = new FormData()
+    formData.set("image", new Blob(["image-bytes"]), "image.png")
+
+    const response = await createApp().request("/v1/images/edits", {
+      method: "POST",
+      body: formData,
+    })
+
+    expect(response.status).toBe(500)
+    expect(await response.json()).toEqual({
+      error: {
+        message: "temporary storage unavailable",
+        type: "error",
+      },
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   test("adds JSON defaults when request headers are absent", async () => {
@@ -368,55 +690,6 @@ describe("Codex images forwarding", () => {
     expect(await new Response(init?.body).json()).toEqual(payload)
   })
 
-  test("reads provider generation bodies at debug log level", async () => {
-    resetLoggerRuntimeForTests(undefined, "debug")
-
-    const response = await createApp().request(
-      "/openrouter/v1/images/generations",
-      {
-        method: "POST",
-        body: JSON.stringify({ prompt: "debug provider image" }),
-      },
-    )
-
-    expect(response.status).toBe(200)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-  })
-
-  test("returns 404 for an unavailable provider-scoped image route", async () => {
-    openrouterProviderConfig = null
-
-    const response = await createApp().request(
-      "/openrouter/v1/images/generations",
-      { method: "POST" },
-    )
-
-    expect(response.status).toBe(404)
-    expect(await response.json()).toEqual({
-      error: {
-        message: "Provider 'openrouter' not found or disabled",
-        type: "invalid_request_error",
-      },
-    })
-    expect(fetchMock).not.toHaveBeenCalled()
-  })
-
-  test("converts provider image failures into gateway errors", async () => {
-    fetchMock.mockImplementationOnce(() =>
-      Promise.reject(new Error("provider image failed")),
-    )
-
-    const response = await createApp().request(
-      "/openrouter/v1/images/generations",
-      { method: "POST" },
-    )
-
-    expect(response.status).toBe(500)
-    expect(await response.json()).toEqual({
-      error: { message: "provider image failed", type: "error" },
-    })
-  })
-
   test("preserves multipart content-type for non-codex provider image edits", async () => {
     const formData = new FormData()
     formData.set("model", "gpt-image-2")
@@ -461,25 +734,8 @@ test("server registers unversioned, v1, and provider Codex media routes", () => 
     "/:provider/v1/images/generations",
     "/:provider/v1/images/edits",
     "/:provider/v1/responses",
-    "/:provider/alpha/search",
-    "/:provider/images/generations",
-    "/:provider/images/edits",
-    "/:provider/responses",
   ]
   for (const path of expectedPaths) {
     expect(postPaths.has(path)).toBe(true)
   }
-
-  const getPaths = new Set(
-    server.routes
-      .filter((route) => route.method === "GET")
-      .map((route) => route.path),
-  )
-  expect(getPaths.has("/:provider/models")).toBe(true)
-  expect(getPaths.has("/:provider/v1/models")).toBe(true)
-
-  const routes = server.routes.map((route) => `${route.method} ${route.path}`)
-  expect(routes.indexOf("POST /v1/responses")).toBeLessThan(
-    routes.indexOf("POST /:provider/responses"),
-  )
 })

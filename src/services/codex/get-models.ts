@@ -10,6 +10,7 @@ interface CodexModelDefinition {
   input: Array<"text" | "image">
   maxTokens: number
   name: string
+  reasoningEfforts: Array<string>
 }
 
 const CODEX_MODELS: Array<CodexModelDefinition> = [
@@ -19,20 +20,15 @@ const CODEX_MODELS: Array<CodexModelDefinition> = [
     input: ["text"],
     maxTokens: 32_000,
     name: "GPT-5.3 Codex Spark",
+    reasoningEfforts: ["minimal", "low", "medium", "high", "xhigh"],
   },
   {
-    contextWindow: 400_000,
-    id: "gpt-5.4",
-    input: ["text", "image"],
-    maxTokens: 128_000,
-    name: "GPT-5.4",
-  },
-  {
-    contextWindow: 400_000,
+    contextWindow: 272_000,
     id: "gpt-5.4-mini",
     input: ["text", "image"],
     maxTokens: 128_000,
     name: "GPT-5.4 mini",
+    reasoningEfforts: ["minimal", "low", "medium", "high", "xhigh"],
   },
   {
     contextWindow: 272_000,
@@ -40,27 +36,39 @@ const CODEX_MODELS: Array<CodexModelDefinition> = [
     input: ["text", "image"],
     maxTokens: 128_000,
     name: "GPT-5.5",
+    reasoningEfforts: ["minimal", "low", "medium", "high", "xhigh"],
   },
   {
-    contextWindow: 372_000,
+    contextWindow: 872_000,
     id: "gpt-5.6-sol",
     input: ["text", "image"],
     maxTokens: 128_000,
     name: "GPT-5.6 Sol",
+    reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"],
   },
   {
-    contextWindow: 372_000,
+    contextWindow: 872_000,
     id: "gpt-5.6-terra",
     input: ["text", "image"],
     maxTokens: 128_000,
     name: "GPT-5.6 Terra",
+    reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"],
   },
   {
-    contextWindow: 372_000,
+    contextWindow: 872_000,
     id: "gpt-5.6-luna",
     input: ["text", "image"],
     maxTokens: 128_000,
     name: "GPT-5.6 Luna",
+    reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"],
+  },
+  {
+    contextWindow: 872_000,
+    id: "gpt-6-astra",
+    input: ["text", "image"],
+    maxTokens: 128_000,
+    name: "GPT-6 Astra",
+    reasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
   },
 ]
 
@@ -107,7 +115,7 @@ function normalizeCodexModel(model: CodexModelDefinition): Model {
       supports: {
         adaptive_thinking: true,
         parallel_tool_calls: true,
-        reasoning_effort: ["minimal", "low", "medium", "high", "xhigh"],
+        reasoning_effort: model.reasoningEfforts,
         streaming: true,
         tool_calls: true,
         vision: supportsVision,

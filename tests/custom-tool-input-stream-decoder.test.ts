@@ -73,6 +73,47 @@ describe("CustomToolInputStreamDecoder", () => {
     expect(decodeChunks(['{"input":""', " \n}\t"]).input).toBe("")
   })
 
+  test("ignores extra properties after the input string", () => {
+    const input = 'quote: " brace: } slash: \\'
+    const wrapped = JSON.stringify({
+      input,
+      timeout_ms: 1000,
+      nested: { a: [1, true, null, { b: "]}" }], note: 'x"y\\z' },
+    })
+
+    for (let split = 0; split <= wrapped.length; split += 1) {
+      const result = decodeChunks([
+        wrapped.slice(0, split),
+        wrapped.slice(split),
+      ])
+      expect(result.deltas.join("")).toBe(input)
+      expect(result.input).toBe(input)
+    }
+  })
+
+  test("accepts whitespace around extra properties", () => {
+    const result = decodeChunks([
+      '{"input":"do work"',
+      ' , "timeout_ms": 120000 , "flag": false }',
+    ])
+
+    expect(result.deltas).toEqual(["do work"])
+    expect(result.input).toBe("do work")
+  })
+
+  test("rejects an unclosed wrapper after extra properties", () => {
+    const decoder = new CustomToolInputStreamDecoder()
+    decoder.append('{"input":"x", "timeout_ms": 1000')
+    expect(() => decoder.finish()).toThrow("Invalid tool input JSON")
+  })
+
+  test("rejects data after the wrapper closes behind extra properties", () => {
+    const decoder = new CustomToolInputStreamDecoder()
+    expect(() => decoder.append('{"input":"x", "a": [1, {"b": 2}]}x')).toThrow(
+      "Invalid tool input JSON",
+    )
+  })
+
   test.each([
     ["missing object", '"input":"x"}'],
     ["wrong prefix", '{"value":"x"}'],
@@ -85,32 +126,30 @@ describe("CustomToolInputStreamDecoder", () => {
     ["trailing data", '{"input":"x"}x'],
   ])("rejects %s", (_name, value) => {
     const decoder = new CustomToolInputStreamDecoder()
-    expect(() => decoder.append(value)).toThrow(
-      "Messages API returned invalid custom tool input JSON",
-    )
+    expect(() => decoder.append(value)).toThrow("Invalid tool input JSON")
   })
 
   test("rejects incomplete and repeated completion", () => {
     const incomplete = new CustomToolInputStreamDecoder()
     incomplete.append('{"input":"value"')
-    expect(() => incomplete.finish()).toThrow("wrapper was complete")
+    expect(() => incomplete.finish()).toThrow("Invalid tool input JSON")
 
     const complete = new CustomToolInputStreamDecoder()
     complete.append('{"input":"value"}')
     expect(complete.finish()).toBe("value")
-    expect(() => complete.finish()).toThrow("already completed")
+    expect(() => complete.finish()).toThrow("Invalid tool input JSON")
   })
 
   test("rejects data after completion and calls after failure", () => {
     const complete = new CustomToolInputStreamDecoder()
     complete.append('{"input":"value"}')
     complete.finish()
-    expect(() => complete.append(" ")).toThrow("after the input was done")
+    expect(() => complete.append(" ")).toThrow("Invalid tool input JSON")
 
     const failed = new CustomToolInputStreamDecoder()
     expect(() => failed.append("{")).not.toThrow()
-    expect(() => failed.append("x")).toThrow("unexpected custom tool input")
-    expect(() => failed.append("")).toThrow("failed state")
-    expect(() => failed.finish()).toThrow("failed state")
+    expect(() => failed.append("x")).toThrow("Invalid tool input JSON")
+    expect(() => failed.append("")).toThrow("Invalid tool input JSON")
+    expect(() => failed.finish()).toThrow("Invalid tool input JSON")
   })
 })

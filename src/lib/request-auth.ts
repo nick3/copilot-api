@@ -15,6 +15,7 @@ interface AuthMiddlewareOptions {
   allowUnauthenticatedPaths?: Array<string>
   allowUnauthenticatedPathPrefixes?: Array<string>
   allowOptionsBypass?: boolean
+  allowWhenNoApiKeys?: boolean
 }
 
 export function normalizeApiKeys(apiKeys: unknown): Array<string> {
@@ -42,7 +43,10 @@ export function normalizeApiKeys(apiKeys: unknown): Array<string> {
 export function getConfiguredApiKeys(): Array<string> {
   const config = getConfig()
   const configuredApiKeys = normalizeApiKeys(config.auth?.apiKeys)
-  if (configuredApiKeys.length > 0) {
+  if (
+    configuredApiKeys.length > 0
+    || config.auth?.allowLegacyApiKeyFallback === false
+  ) {
     return configuredApiKeys
   }
 
@@ -99,10 +103,11 @@ export function extractHeadersApiKey(headers: Headers): string | null {
 export function isAuthorizedHeaders(
   headers: Headers,
   getApiKeys: () => Array<string> = getConfiguredApiKeys,
+  allowWhenNoApiKeys = true,
 ): boolean {
   const apiKeys = getApiKeys()
   if (apiKeys.length === 0) {
-    return true
+    return allowWhenNoApiKeys
   }
 
   const requestApiKey = extractHeadersApiKey(headers)
@@ -201,10 +206,22 @@ export function createAuthMiddleware(
       return next()
     }
 
-    if (!isAuthorizedHeaders(c.req.raw.headers, getApiKeys)) {
+    if (
+      !isAuthorizedHeaders(
+        c.req.raw.headers,
+        getApiKeys,
+        options.allowWhenNoApiKeys ?? true,
+      )
+    ) {
       return createUnauthorizedResponse(c)
     }
 
     return next()
   }
+}
+
+export function getMissingApiKeysMessage(): string | null {
+  return getConfiguredApiKeys().length > 0 ?
+      null
+    : "Requests currently bypass authentication. Run `copilot-api auth keys --add <key>` to enable API key auth."
 }

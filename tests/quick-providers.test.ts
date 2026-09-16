@@ -24,7 +24,7 @@ describe("quick provider configs", () => {
   test("uses OpenAI-compatible defaults for Kimi", () => {
     expect(QUICK_PROVIDER_CONFIGS.kimi).toEqual({
       baseUrl: "https://api.kimi.com/coding",
-      editableType: false,
+      editableType: true,
       pricingCurrency: "USD",
       type: "openai-compatible",
     })

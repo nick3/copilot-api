@@ -442,7 +442,7 @@ export class AccountsManager {
 
     try {
       const ctx = toAccountContextFromSnapshot(account, snapshot)
-      const { token, refresh_in } = await getCopilotToken(ctx)
+      const { token, refresh_in, endpoints } = await getCopilotToken(ctx)
 
       if (!this.shouldContinueTokenRefresh(account, snapshot)) {
         return
@@ -452,6 +452,7 @@ export class AccountsManager {
         account,
         snapshot,
         token,
+        endpoints?.api,
       )
       if (!applied) {
         return
@@ -502,9 +503,11 @@ export class AccountsManager {
     try {
       // Get Copilot token
       const tokenCtx = toAccountContextFromSnapshot(account, snapshot)
-      const { token, refresh_in } = await getCopilotToken(tokenCtx)
+      const { token, refresh_in, endpoints } = await getCopilotToken(tokenCtx)
 
-      if (!applyCopilotTokenIfCurrent(account, snapshot, token)) {
+      if (
+        !applyCopilotTokenIfCurrent(account, snapshot, token, endpoints?.api)
+      ) {
         return
       }
 
@@ -2084,6 +2087,9 @@ export class AccountsManager {
         continue
       }
 
+      delete account.copilotApiUrl
+      delete account.copilotTokenApiUrl
+      delete account.copilotUsageApiUrl
       try {
         await this.initializeAccount(account)
         updated.push(meta.id)

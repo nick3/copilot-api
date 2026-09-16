@@ -87,12 +87,19 @@ export function createResponsesWebSocketHandler(
 export function handleResponsesWebSocketUpgrade(
   req: Request,
   server: Bun.Server<ResponsesWebSocketData>,
+  options: { allowWhenNoApiKeys?: boolean } = {},
 ): Response | null | undefined {
   if (!isResponsesWebSocketUpgrade(req)) {
     return null
   }
 
-  if (!isAuthorizedHeaders(req.headers)) {
+  if (
+    !isAuthorizedHeaders(
+      req.headers,
+      undefined,
+      options.allowWhenNoApiKeys ?? true,
+    )
+  ) {
     return createUnauthorizedRawResponse()
   }
 

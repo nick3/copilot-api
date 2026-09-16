@@ -1,0 +1,153 @@
+services:
+  data-init:
+    image: ${COPILOT_API_IMAGE:-copilot-api:local}
+    pull_policy: never
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      DATA_SRC: ${COPILOT_API_DATA_DIR:-./copilot-data}
+    command:
+      - |
+        set -eu
+        src="$${DATA_SRC:-}"
+        # Normalize the host path before the safety check: collapse repeated
+        # leading slashes (//etc -> /etc) and strip trailing slashes and
+        # trailing /. (/etc/ -> /etc), so the exact-match blocklist cannot
+        # be bypassed by an equivalent spelling.
+        while :; do
+          case "$$src" in
+            //*) src=/$${src#//} ;;
+            */) src=$${src%/} ;;
+            */.) src=$${src%/.} ;;
+            *) break ;;
+          esac
+        done
+        [ -z "$$src" ] && src=/
+        case "$$src" in
+          "/"|"/root"|"/home"|"/etc"|"/var"|"/usr"|"/bin"|"/sbin")
+            echo "refusing unsafe COPILOT_API_DATA_DIR: $$DATA_SRC" >&2
+            exit 1
+            ;;
+        esac
+        # A gateway data directory never contains system directories. Refuse
+        # mounts that resolve to a filesystem root, which the literal path
+        # check above cannot see through (for example `/etc/..` or a symlink
+        # pointing at `/`).
+        for marker in boot dev etc home lib proc root sbin sys usr var; do
+          if [ -e "/data/$$marker" ]; then
+            echo "refusing to use $$DATA_SRC: /data contains /$$marker, so the mount looks like a system root" >&2
+            exit 1
+          fi
+        done
+        mkdir -p /data/cache
+        chmod 700 /data
+        chown bun:bun /data
+        # Repair ownership for the gateway's own state only. A mistyped
+        # COPILOT_API_DATA_DIR must never rewrite unrelated files, so the
+        # gateway's paths are matched explicitly instead of walking the whole
+        # mount.
+        fix_state_permissions() {
+          for entry in \
+            cache \
+            logs \
+            codex_credentials.json \
+            config.json \
+            copilot-api.sqlite \
+            copilot-api.sqlite-journal \
+            copilot-api.sqlite-shm \
+            copilot-api.sqlite-wal \
+            tokens \
+            accounts-registry.json \
+            models.json \
+            admin.sqlite \
+            admin.sqlite-journal \
+            admin.sqlite-shm \
+            admin.sqlite-wal
+          do
+            if [ -e "/data/$$entry" ]; then
+              chown -R bun:bun "/data/$$entry"
+            fi
+          done
+
+          # The token file name is dynamic: `github_token`, or
+          # `ent_github_token` when COPILOT_API_ENTERPRISE_URL is set, and it
+          # can live in an OAuth app subdirectory such as
+          # `opencode/github_token`. Match the name suffix so neither the
+          # enterprise prefix nor the app directory can be missed.
+          for token in /data/*github_token /data/*/*github_token; do
+            if [ -f "$$token" ]; then
+              chown bun:bun "$$(dirname "$$token")"
+              chown bun:bun "$$token"
+            fi
+          done
+
+          return 0
+        }
+        fix_state_permissions
+    network_mode: none
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: ${COPILOT_API_DATA_DIR:-./copilot-data}
+        target: /data
+        bind:
+          create_host_path: false
+    restart: "no"
+
+  copilot-api:
+    build: .
+    image: ${COPILOT_API_IMAGE:-copilot-api:local}
+    pull_policy: never
+    user: bun
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=${COPILOT_API_TMP_SIZE:-512m},mode=1777
+    ports:
+      - "${COPILOT_API_BIND:-127.0.0.1}:${COPILOT_API_PORT:-4141}:4141"
+    environment:
+      HOST: 0.0.0.0
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      COPILOT_API_KEY: ${COPILOT_API_KEY:-}
+      COPILOT_API_HOME: /data
+      COPILOT_API_SQLITE_DB_PATH: ${COPILOT_API_SQLITE_DB_PATH:-/data/copilot-api.sqlite}
+      COPILOT_API_ENTERPRISE_URL: ${COPILOT_API_ENTERPRISE_URL:-}
+      COPILOT_API_OAUTH_APP: ${COPILOT_API_OAUTH_APP:-}
+      XDG_CACHE_HOME: /data/cache
+      COPILOT_API_GITHUB_TOKEN: ${COPILOT_API_GITHUB_TOKEN:-${GH_TOKEN:-}}
+      HTTP_PROXY: ${HTTP_PROXY:-${http_proxy:-}}
+      HTTPS_PROXY: ${HTTPS_PROXY:-${https_proxy:-}}
+      ALL_PROXY: ${ALL_PROXY:-${all_proxy:-}}
+      NO_PROXY: ${NO_PROXY:-${no_proxy:-127.0.0.1,localhost,::1}}
+    volumes:
+      - type: bind
+        source: ${COPILOT_API_DATA_DIR:-./copilot-data}
+        target: /data
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "-T", "4", "-Y", "off", "http://127.0.0.1:4141/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

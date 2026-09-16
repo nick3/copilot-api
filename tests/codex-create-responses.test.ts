@@ -235,25 +235,41 @@ describe("codex api helpers", () => {
     expect(models.object).toBe("list")
     expect(models.data.map((model) => model.id)).toEqual([
       "gpt-5.3-codex-spark",
-      "gpt-5.4",
       "gpt-5.4-mini",
       "gpt-5.5",
       "gpt-5.6-sol",
       "gpt-5.6-terra",
       "gpt-5.6-luna",
+      "gpt-6-astra",
     ])
     expect(
       models.data.every(
         (model) => !model.supported_endpoints?.includes("/v1/embeddings"),
       ),
     ).toBe(true)
+
+    const gpt56Models = models.data.filter((model) =>
+      model.id.startsWith("gpt-5.6-"),
+    )
+    expect(gpt56Models).toHaveLength(3)
+    for (const model of gpt56Models) {
+      expect(model.capabilities.supports.reasoning_effort).toEqual([
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+      ])
+      expect(model.capabilities.supports.reasoning_effort).not.toContain(
+        "ultra",
+      )
+      expect(model.capabilities.limits.max_output_tokens).toBe(128_000)
+    }
+
     expect(
-      models.data
-        .filter((model) => model.id.startsWith("gpt-5.6-"))
-        .every(
-          (model) =>
-            model.capabilities.limits.max_context_window_tokens === 372_000,
-        ),
-    ).toBe(true)
+      models.data.find((model) => model.id === "gpt-5.5")?.capabilities.supports
+        .reasoning_effort,
+    ).not.toContain("max")
   })
 })

@@ -1,6 +1,12 @@
+import {
+  getCodexResponsesSubagentMarker,
+  getIncomingResponsesSessionId,
+} from "./request-identity"
+import { isCodexUserAgent } from "~/routes/models/codex-models"
 import type { Context } from "hono"
 
 import { streamSSE } from "hono/streaming"
+import { writeSSEIfConnected } from "~/lib/sse"
 import { randomUUID } from "node:crypto"
 
 import type { SubagentMarker } from "~/lib/subagent"
@@ -12,6 +18,7 @@ import {
 import { awaitApproval } from "~/lib/approval"
 import {
   getAliasTargetSet,
+  getProviderConfig,
   isResponsesApiWebSearchEnabled,
   resolveMappedModel,
 } from "~/lib/config"
@@ -24,7 +31,7 @@ import {
 } from "~/lib/handler-utils"
 import { createHandlerLogger, debugJson, debugJsonTail } from "~/lib/logger"
 import { findEndpointModel } from "~/lib/models"
-import { parseProviderModelAlias } from "~/lib/provider-model"
+import { resolveExistingProviderModelAlias } from "~/lib/provider-model"
 import { checkRateLimit } from "~/lib/rate-limit"
 import {
   extractResponsesUsageFromResult,
@@ -71,6 +78,10 @@ import {
   removeWebSearchTool,
   sanitizeOversizedInputImages,
   stripInternalChatMetadataPassthrough,
+  filterReasoningForTransport,
+  normalizeInputImageDetails,
+  shouldUseMessagesAdapter,
+  fillEmptyNamespaceToolDescriptions,
 } from "./utils"
 import consola from "consola"
 
@@ -98,8 +109,13 @@ export const handleResponsesPayload = async (
     )
   }
   stripInternalChatMetadataPassthrough(payload)
+  normalizeInputImageDetails(payload)
+  fillEmptyNamespaceToolDescriptions(payload)
 
-  const providerModelAlias = parseProviderModelAlias(payload.model)
+  const providerModelAlias = resolveExistingProviderModelAlias(
+    payload.model,
+    getProviderConfig,
+  )
   if (providerModelAlias) {
     payload.model = providerModelAlias.model
     return await handleProviderResponsesForProvider(c, {
@@ -113,19 +129,24 @@ export const handleResponsesPayload = async (
   const responsesTransport = getResponsesTransportForModel(endpointModel)
   if (
     endpointModel
-    && !responsesTransport
-    && endpointModel.supported_endpoints?.some(
-      (endpoint) =>
-        endpoint === "/v1/messages" || endpoint === "/chat/completions",
-    )
+    && shouldUseMessagesAdapter({
+      model: payload.model,
+      codexClient: isCodexUserAgent(c.req.header("user-agent")),
+      transport: responsesTransport,
+      endpoints: endpointModel.supported_endpoints,
+    })
   ) {
+    filterReasoningForTransport(payload, true)
     return await handleResponsesViaMessages(c, {
       payload,
       publicModel: requestedModel,
       targetModel: endpointModel.id,
+      subagentMarker: getCodexResponsesSubagentMarker(c),
+      sessionId: getIncomingResponsesSessionId(c) ?? undefined,
     })
   }
 
+  filterReasoningForTransport(payload, false)
   const subagentMarker = getCodexResponsesSubagentMarker(c)
   if (subagentMarker) {
     debugJson(logger, "Detected Codex subagent headers:", subagentMarker)
@@ -430,7 +451,7 @@ async function writeResponsesStreamError(
 ): Promise<void> {
   try {
     const errorEvent = buildResponsesStreamError(message)
-    await stream.writeSSE({
+    await writeSSEIfConnected(stream, {
       event: errorEvent.type,
       data: JSON.stringify(errorEvent),
     })
@@ -638,6 +659,7 @@ async function handleStreamingResponses(params: {
     response = await createResponses(
       payload,
       {
+        clientSignal: c.req.raw.signal,
         vision,
         initiator,
         subagentMarker,
@@ -909,7 +931,7 @@ async function streamResponsesAndLog(params: {
 
       debugJson(logger, "Responses stream chunk:", chunk)
 
-      await stream.writeSSE({
+      await writeSSEIfConnected(stream, {
         id,
         event,
         data: processedData,
@@ -1021,6 +1043,7 @@ async function handleNonStreamingResponses(params: {
     const response = await createResponses(
       payload,
       {
+        clientSignal: c.req.raw.signal,
         vision,
         initiator,
         subagentMarker,
@@ -1117,40 +1140,4 @@ export const removeUnsupportedTools = (payload: ResponsesPayload): void => {
   }
 }
 
-const getTrimmedHeader = (c: Context, name: string): string | undefined => {
-  const value = c.req.header(name)?.trim()
-  return value ? value : undefined
-}
-
-const getIncomingResponsesSessionId = (c: Context): string | undefined =>
-  getTrimmedHeader(c, "session-id") ?? getTrimmedHeader(c, "x-session-id")
-
-const codexSubagentHeaderValues = new Set([
-  "collab_spawn",
-  "compact",
-  "memory_consolidation",
-  "review",
-])
-
-const getCodexResponsesSubagentMarker = (c: Context): SubagentMarker | null => {
-  const agentType = getTrimmedHeader(c, "x-openai-subagent")
-  if (!agentType || !codexSubagentHeaderValues.has(agentType)) {
-    return null
-  }
-
-  const threadId = getTrimmedHeader(c, "thread-id")
-  const rootSessionId = getIncomingResponsesSessionId(c)
-  const parentThreadId = getTrimmedHeader(c, "x-codex-parent-thread-id")
-  if (!threadId && !rootSessionId && !parentThreadId) {
-    return null
-  }
-
-  // At least one of these is non-null (checked above), so the cast is safe.
-  const agentId = (threadId ?? parentThreadId ?? rootSessionId) as string
-
-  return {
-    agent_id: agentId,
-    agent_type: agentType,
-    session_id: threadId ?? rootSessionId ?? agentId,
-  }
-}
+export { fillEmptyNamespaceToolDescriptions } from "./utils"

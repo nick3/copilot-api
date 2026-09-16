@@ -16,11 +16,15 @@ jobs:
         with:
           bun-version: latest
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
       - name: Install admin-ui dependencies
-        run: bun install --cwd admin-ui
+        run: bun install --frozen-lockfile --cwd admin-ui
 
       - name: Run linter
         run: bun run lint:all
@@ -36,6 +40,9 @@ jobs:
 
       - name: Run tests
         run: bun test --isolate
+
+      - name: Run admin-ui tests
+        run: cd admin-ui && bun test --isolate
 
       - name: Build
         run: bun run build

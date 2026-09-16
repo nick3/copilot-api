@@ -239,7 +239,7 @@ export type ModelAliasSpec = {
 
 export type ProviderType = "anthropic" | "openai-compatible" | "openai-responses"
 
-export type ProviderAuthType = "authorization" | "oauth2" | "x-api-key"
+export type ProviderAuthType = "authorization" | "oauth2" | "x-api-key" | "azure-entra"
 
 export type ToolContentSupportType = "array" | "image" | "pdf"
 
@@ -275,10 +275,13 @@ export type TokenUsagePricingTier = {
 }
 
 export type TokenUsagePricingConfig = TokenUsagePricingTier & {
+  offPeak?: TokenUsagePricingTier
+  peakWindows?: Array<{ startMinuteUtc: number; endMinuteUtc: number; weekdays?: Array<number> }>
   tiers?: Array<TokenUsagePricingTier>
 }
 
 export type ProviderModelConfig = {
+  reasoningField?: "reasoning" | "reasoning_content"
   temperature?: number
   topP?: number
   topK?: number
@@ -292,6 +295,7 @@ export type ProviderModelConfig = {
 }
 
 export type ProviderConfig = {
+  accountId?: string
   type?: ProviderType
   enabled?: boolean
   baseUrl?: string
@@ -302,7 +306,7 @@ export type ProviderConfig = {
   models?: Record<string, ProviderModelConfig>
 }
 
-export type TokenUsagePeriod = "day" | "week" | "month"
+export type TokenUsagePeriod = "today" | "this_week" | "last_7_days" | "this_month" | "last_30_days" | "lifetime"
 
 export type TokenUsageSource = "copilot" | "provider"
 
@@ -399,8 +403,10 @@ export type TokenUsageEventsPage = {
 }
 
 export type AdminConfig = {
+  upstreamTransport?: import("../../../shared/config-validation").UpstreamTransportSettings
   auth?: {
     apiKeys?: Array<string>
+    allowLegacyApiKeyFallback?: boolean
   }
   providers?: Record<string, ProviderConfig>
   extraPrompts?: Record<string, string>
@@ -790,6 +796,7 @@ export async function getAdminConfig(): Promise<AdminConfigResponse> {
 }
 
 const ADMIN_CONFIG_KEYS = new Set<keyof AdminConfig>([
+  "upstreamTransport",
   "auth",
   "providers",
   "extraPrompts",

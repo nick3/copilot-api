@@ -168,91 +168,18 @@ The lightweight MCP bridge is the exception and can still be launched with `npx`
 
 ## Using with Docker
 
-Build image
+Build the current all branch with the included [Compose template](docker-compose.yaml). The image includes Admin UI, runs as a non-root user, and stores gateway data under `/data`.
 
 ```sh
-docker build -t copilot-api .
+mkdir -p copilot-data
+docker compose build
+docker compose run --rm data-init
+docker compose run --rm --no-deps copilot-api auth keys --add '<gateway-key>'
+docker compose run --rm --no-deps copilot-api auth add
+docker compose up -d
 ```
 
-Run the container
-
-```sh
-# Create a directory on your host to persist the GitHub token and related data
-mkdir -p ./copilot-data
-
-# Run the container with a bind mount to persist the token
-# This ensures your authentication survives container restarts
-
-docker run -p 4141:4141 -v $(pwd)/copilot-data:/root/.local/share/copilot-api copilot-api
-```
-
-> **Note:**
-> The GitHub token and related data will be stored in `copilot-data` on your host. This is mapped to `/root/.local/share/copilot-api` inside the container, ensuring persistence across restarts. This directory also stores the admin request history database (`admin.sqlite`) used by `/admin`.
-
-### Adding Multiple Accounts in Docker
-
-To add multiple accounts when running in Docker:
-
-> **Note:** The Docker image uses an entrypoint that runs the `start` command by default. To run `auth` subcommands inside the container, prefix them with `--auth` (e.g. `--auth add`).
-
-```sh
-# Add accounts interactively (one at a time)
-docker run -it -v $(pwd)/copilot-data:/root/.local/share/copilot-api copilot-api --auth add
-docker run -it -v $(pwd)/copilot-data:/root/.local/share/copilot-api copilot-api --auth add
-
-# List registered accounts
-docker run -it -v $(pwd)/copilot-data:/root/.local/share/copilot-api copilot-api --auth ls -q
-```
-
-> **Note:** When using multiple accounts, all account data (tokens and registry) is stored in the mounted `copilot-data` directory.
-> Premium-model requests use accounts in order and automatically switch when premium quota is exhausted; free-model requests are distributed round-robin across accounts by default (configurable in config.json).
-
-### Docker with Environment Variables
-
-You can pass the GitHub token directly to the container using environment variables:
-
-```sh
-# Build with GitHub token
-docker build --build-arg GH_TOKEN=your_github_token_here -t copilot-api .
-
-# Run with GitHub token
-docker run -p 4141:4141 -e GH_TOKEN=your_github_token_here copilot-api
-
-# (Optional) Enable remote admin UI/API access
-# This requires setting ADMIN_TOKEN and sending it via request headers (x-admin-token / Authorization: Bearer)
-docker run -p 4141:4141 -e GH_TOKEN=your_github_token_here -e ADMIN_TOKEN=your_admin_token_here copilot-api
-
-# (Optional) Enable request authentication
-# Preferred: configure auth.apiKeys in config.json.
-# Legacy fallback: COPILOT_API_KEY is still supported during migration.
-docker run -p 4141:4141 -e GH_TOKEN=your_github_token_here -e COPILOT_API_KEY=your_api_key_here copilot-api
-
-# Run with additional options
-docker run -p 4141:4141 -e GH_TOKEN=your_token copilot-api --verbose --port 4141
-```
-
-### Docker Compose Example
-
-```yaml
-version: "3.8"
-services:
-  copilot-api:
-    build: .
-    ports:
-      - "4141:4141"
-    environment:
-      - GH_TOKEN=your_github_token_here
-      - ADMIN_TOKEN=your_admin_token_here
-      - COPILOT_API_KEY=your_api_key_here
-    restart: unless-stopped
-```
-
-The Docker image includes:
-
-- Multi-stage build for optimized image size
-- Non-root user for enhanced security
-- Health check for container monitoring
-- Pinned base image version for reproducible builds
+Configure a separate `ADMIN_TOKEN` for remote administration. The published host address defaults to `127.0.0.1`. See the [upgrade notes](docs/merge-v2.6.1-upgrade.md) for existing data mounts, listener changes, Codex accounts, transport settings and usage periods. Supply `COPILOT_API_GITHUB_TOKEN` at runtime; do not embed credentials in build arguments.
 
 ## Command Structure
 
@@ -281,6 +208,8 @@ The following options can be used with any subcommand. When passing them before 
 | --enterprise-url  | Enterprise URL for GitHub (sets COPILOT_API_ENTERPRISE_URL) | none | none |
 
 ### Start Command Options
+
+The default listener is `127.0.0.1`. Override it with `--host` or `HOST`; non-loopback listeners require a gateway API key.
 
 The following command line options are available for the `start` command:
 

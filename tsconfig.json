@@ -8,6 +8,7 @@
     "allowJs": true,
     "moduleResolution": "Bundler",
     "moduleDetection": "force",
+    "resolveJsonModule": true,
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
@@ -21,5 +22,5 @@
       "~/*": ["./src/*"]
     }
   },
-  "exclude": ["admin-ui", "vscode-extension"]
+  "exclude": ["admin-ui", "dist", "node_modules", "vscode-extension"]
 }

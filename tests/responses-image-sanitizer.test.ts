@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test"
 
 import type {
+  ResponseCustomToolCallOutputItem,
   ResponseFunctionCallOutputItem,
   ResponseInputImage,
   ResponsesPayload,
 } from "~/services/copilot/create-responses"
 
 import {
+  normalizeInputImageDetails,
   sanitizeAllInputImages,
   sanitizeOversizedInputImages,
 } from "~/routes/responses/utils"
@@ -139,5 +141,128 @@ describe("sanitizeOversizedInputImages", () => {
       toolOutputImage.image_url?.startsWith("data:image/png;base64,"),
     ).toBe(true)
     expect(toolOutputImage.image_url).not.toBe(toolImageUrl)
+  })
+
+  test("sanitizes images inside custom tool call outputs", () => {
+    const toolImageUrl = imageDataUrl(128)
+    const toolOutputImage: ResponseInputImage = {
+      detail: "high",
+      image_url: toolImageUrl,
+      type: "input_image",
+    }
+    const payload = {
+      input: [
+        {
+          call_id: "call_123",
+          output: [toolOutputImage],
+          status: "completed",
+          type: "custom_tool_call_output",
+        } satisfies ResponseCustomToolCallOutputItem,
+      ],
+      model: "gpt-test",
+    } satisfies ResponsesPayload
+
+    const sanitized = sanitizeOversizedInputImages(payload, 64)
+
+    expect(sanitized).toBe(1)
+    expect(toolOutputImage.type).toBe("input_image")
+    expect(toolOutputImage.detail).toBe("low")
+    expect(
+      toolOutputImage.image_url?.startsWith("data:image/png;base64,"),
+    ).toBe(true)
+    expect(toolOutputImage.image_url).not.toBe(toolImageUrl)
+  })
+
+  test("does not normalize image detail while checking image sizes", () => {
+    const imageUrl = imageDataUrl(8)
+    const image: ResponseInputImage = {
+      detail: "ultra" as ResponseInputImage["detail"],
+      image_url: imageUrl,
+      type: "input_image",
+    }
+    const payload = {
+      input: [{ content: [image], role: "user" }],
+      model: "gpt-test",
+    } as unknown as ResponsesPayload
+
+    const sanitized = sanitizeOversizedInputImages(payload, 64)
+
+    expect(sanitized).toBe(0)
+    expect(image.detail as unknown).toBe("ultra")
+    expect(image.image_url).toBe(imageUrl)
+  })
+})
+
+describe("normalizeInputImageDetails", () => {
+  test("normalizes unsupported detail values to auto", () => {
+    const image: ResponseInputImage = {
+      detail: "ultra" as ResponseInputImage["detail"],
+      image_url: imageDataUrl(8),
+      type: "input_image",
+    }
+    const payload = {
+      input: [{ content: [image], role: "user" }],
+      model: "gpt-test",
+    } as unknown as ResponsesPayload
+
+    const normalized = normalizeInputImageDetails(payload)
+
+    expect(normalized).toBe(1)
+    expect(image.detail).toBe("auto")
+  })
+
+  test("keeps images without a detail value unset", () => {
+    const image: ResponseInputImage = {
+      image_url: imageDataUrl(8),
+      type: "input_image",
+    }
+    const payload = {
+      input: [{ content: [image], role: "user" }],
+      model: "gpt-test",
+    } as unknown as ResponsesPayload
+
+    const normalized = normalizeInputImageDetails(payload)
+
+    expect(normalized).toBe(0)
+    expect(image.detail).toBeUndefined()
+  })
+
+  test("keeps supported detail values unchanged", () => {
+    const payload = makePayload(imageDataUrl(8))
+
+    const normalized = normalizeInputImageDetails(payload)
+
+    expect(normalized).toBe(0)
+    expect(
+      (
+        payload.input as Array<{
+          content: Array<{ detail?: string; type: string }>
+        }>
+      )[0].content[1].detail,
+    ).toBe("low")
+  })
+
+  test("normalizes detail values inside custom tool call outputs", () => {
+    const toolOutputImage: ResponseInputImage = {
+      detail: "original" as ResponseInputImage["detail"],
+      image_url: imageDataUrl(8),
+      type: "input_image",
+    }
+    const payload = {
+      input: [
+        {
+          call_id: "call_123",
+          output: [toolOutputImage],
+          status: "completed",
+          type: "custom_tool_call_output",
+        } satisfies ResponseCustomToolCallOutputItem,
+      ],
+      model: "gpt-test",
+    } satisfies ResponsesPayload
+
+    const normalized = normalizeInputImageDetails(payload)
+
+    expect(normalized).toBe(1)
+    expect(toolOutputImage.detail).toBe("auto")
   })
 })

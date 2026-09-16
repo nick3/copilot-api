@@ -628,7 +628,7 @@ test("Responses websocket stream failure includes the underlying reason", async 
 
   expect(thrown).toBeInstanceOf(Error)
   expect((thrown as Error).message).toBe(
-    "Responses websocket stream error: socket hang up",
+    "Upstream connection lost, responses websocket stream error: socket hang up",
   )
 })
 

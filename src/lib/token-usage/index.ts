@@ -118,7 +118,7 @@ function toPersistedEvent(
   }
 
   const now = new Date()
-  const cost = resolveTokenUsageCost(input)
+  const cost = resolveTokenUsageCost({ ...input, at: now })
   return {
     cache_creation_input_tokens: normalizeToken(
       input.cache_creation_input_tokens,

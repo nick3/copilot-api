@@ -1,6 +1,13 @@
 import consola from "consola"
 import fs from "node:fs"
 
+import { writeFileAtomically } from "./atomic-file"
+import type { TokenUsagePricingConfig } from "./token-usage/pricing"
+export type {
+  TokenUsagePricingConfig,
+  TokenUsagePricingTier,
+} from "./token-usage/pricing"
+
 import type { ReasoningEffort } from "~/lib/reasoning-effort"
 
 import { PATHS } from "./paths"
@@ -35,6 +42,7 @@ export type ConfiguredReasoningEffort = ReasoningEffort
 export interface AppConfig {
   auth?: {
     apiKeys?: Array<string>
+    allowLegacyApiKeyFallback?: boolean
   }
   providers?: Record<string, ProviderConfig>
   extraPrompts?: Record<string, string>
@@ -59,6 +67,7 @@ export interface AppConfig {
   sessionAffinityRetentionDays?: number
   useMessagesApi?: boolean
   useResponsesApiWebSocket?: boolean
+  upstreamTransport?: UpstreamTransportConfig
   anthropicApiKey?: string
   useResponsesApiWebSearch?: boolean
   alphaSearchCodexPriority?: boolean
@@ -90,6 +99,24 @@ export interface ContextManagementConfig {
   responses?: boolean
 }
 
+export interface UpstreamTransportConfig {
+  headersTimeoutMs?: number
+  streamInactivityTimeoutMs?: number
+  websocketMaxBufferedBytes?: number
+  websocketMaxBufferedMessages?: number
+  websocketOpenTimeoutMs?: number
+  websocketPoolIdleTimeoutMs?: number
+}
+
+export const defaultUpstreamTransportConfig = {
+  headersTimeoutMs: 5 * 60 * 1000,
+  streamInactivityTimeoutMs: 5 * 60 * 1000,
+  websocketMaxBufferedBytes: 8 * 1024 * 1024,
+  websocketMaxBufferedMessages: 1024,
+  websocketOpenTimeoutMs: 30_000,
+  websocketPoolIdleTimeoutMs: 60_000,
+} satisfies Required<UpstreamTransportConfig>
+
 export interface ModelConfig {
   temperature?: number
   topP?: number
@@ -101,7 +128,10 @@ export interface ModelConfig {
   toolContentSupportType?: Array<ToolContentSupportType>
   type?: ProviderType
   codex?: CodexModelCapabilitiesConfig
+  reasoningField?: ModelReasoningField
 }
+
+export type ModelReasoningField = "reasoning" | "reasoning_content"
 
 export interface CodexModelCapabilitiesConfig {
   enabled?: boolean
@@ -123,19 +153,6 @@ export type CodexReasoningEffort =
   | "max"
   | "ultra"
 
-export interface TokenUsagePricingTier {
-  cachedInput?: number
-  cacheCreationInput?: number
-  explicitCachedInput?: number
-  input?: number
-  maxInputTokens?: number
-  output?: number
-}
-
-export interface TokenUsagePricingConfig extends TokenUsagePricingTier {
-  tiers?: Array<TokenUsagePricingTier>
-}
-
 export const PROVIDER_TYPE_ANTHROPIC = "anthropic" as const
 export const SUPPORTED_PROVIDER_TYPES = [
   PROVIDER_TYPE_ANTHROPIC,
@@ -143,7 +160,11 @@ export const SUPPORTED_PROVIDER_TYPES = [
   "openai-responses",
 ] as const
 
-export type ProviderAuthType = "authorization" | "oauth2" | "x-api-key"
+export type ProviderAuthType =
+  | "authorization"
+  | "azure-entra"
+  | "oauth2"
+  | "x-api-key"
 export type ProviderType = (typeof SUPPORTED_PROVIDER_TYPES)[number]
 export type ToolContentSupportType = "array" | "image" | "pdf"
 
@@ -157,6 +178,7 @@ export interface ProviderConfig {
   baseUrl?: string
   apiKey?: string
   authType?: ProviderAuthType
+  accountId?: string
   pricingCurrency?: string
   models?: Record<string, ModelConfig>
   adjustInputTokens?: boolean
@@ -175,7 +197,7 @@ export interface ResolvedProviderConfig {
 
 const GPT_MODEL_PATTERN = /^gpt-(\d+)(?:\.(\d+))?/
 const OPENCODE_ANTHROPIC_MODEL_PATTERN = /^(?:qwen|minimax)/iu
-const OPENCODE_RESPONSES_MODEL_PATTERN = /^gpt(?:[-_.]|$)/iu
+const OPENCODE_RESPONSES_MODEL_PATTERN = /^(?:gpt|grok|muse-spark)(?:[-_.]|$)/iu
 
 function isGpt53OrAbove(model: string): boolean {
   const match = GPT_MODEL_PATTERN.exec(model)
@@ -280,6 +302,7 @@ const defaultConfig: AppConfig = {
   sessionAffinityRetentionDays: 7,
   useMessagesApi: true,
   useResponsesApiWebSocket: true,
+  upstreamTransport: defaultUpstreamTransportConfig,
   useResponsesApiWebSearch: true,
   alphaSearchCodexPriority: true,
   alphaSearchModel: "gpt-5-mini",
@@ -364,61 +387,89 @@ function normalizeLogLevel(value: unknown): LogLevel | undefined {
   return LOG_LEVELS.has(value as LogLevel) ? (value as LogLevel) : undefined
 }
 
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error
+}
+
 function ensureConfigFile(): void {
   try {
-    fs.accessSync(PATHS.CONFIG_PATH, fs.constants.R_OK)
-    return
-  } catch {
-    // Fall through to try creating the default config file.
-  }
+    fs.accessSync(PATHS.CONFIG_PATH, fs.constants.F_OK)
+  } catch (error) {
+    if (!isNodeError(error) || error.code !== "ENOENT") {
+      throw error
+    }
 
-  try {
-    fs.mkdirSync(PATHS.APP_DIR, { recursive: true })
-    fs.writeFileSync(
+    writeFileAtomically(
       PATHS.CONFIG_PATH,
       `${JSON.stringify(defaultConfig, null, 2)}\n`,
-      "utf8",
     )
-    try {
-      fs.chmodSync(PATHS.CONFIG_PATH, 0o600)
-    } catch {
-      // Ignore chmod errors (e.g. unsupported filesystem).
-    }
-  } catch {
-    // Best-effort only: if we can't create the file, reads will fall back to defaults.
   }
 }
 
 function readConfigFromDisk(): AppConfig {
   ensureConfigFile()
+  const raw = fs.readFileSync(PATHS.CONFIG_PATH, "utf8")
+  if (!raw.trim()) {
+    writeFileAtomically(
+      PATHS.CONFIG_PATH,
+      `${JSON.stringify(defaultConfig, null, 2)}\n`,
+    )
+    return defaultConfig
+  }
+
   try {
-    const raw = fs.readFileSync(PATHS.CONFIG_PATH, "utf8")
-    if (!raw.trim()) {
-      fs.writeFileSync(
-        PATHS.CONFIG_PATH,
-        `${JSON.stringify(defaultConfig, null, 2)}\n`,
-        "utf8",
-      )
-      return defaultConfig
-    }
     return JSON.parse(raw) as AppConfig
   } catch (error) {
-    consola.error("Failed to read config file, using default config", error)
-    return defaultConfig
+    // Fail closed: falling back to the default config here would let the
+    // startup merge overwrite the corrupt file (discarding providers, API
+    // keys, and model mappings) and, because the default has no apiKeys,
+    // silently disable API key authentication on normal routes.
+    const message = `Config file is not valid JSON: ${PATHS.CONFIG_PATH}. Refusing to start with the default config. Fix the JSON syntax or delete the file to regenerate a fresh config.`
+    consola.error(message, error)
+    throw new Error(message, { cause: error })
   }
 }
 
-function writeConfigToDisk(config: AppConfig): void {
-  fs.mkdirSync(PATHS.APP_DIR, { recursive: true })
-  fs.writeFileSync(
-    PATHS.CONFIG_PATH,
-    `${JSON.stringify(config, null, 2)}\n`,
-    "utf8",
-  )
+export function readEditableConfigFromDisk(): AppConfig {
+  try {
+    const raw = fs.readFileSync(PATHS.CONFIG_PATH, "utf8")
+    if (!raw.trim()) {
+      return {}
+    }
+    return JSON.parse(raw) as AppConfig
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return {}
+    }
+    if (error instanceof SyntaxError) {
+      throw new Error(`Config file is not valid JSON: ${PATHS.CONFIG_PATH}`)
+    }
+    throw error
+  }
 }
 
-function reloadConfig(): AppConfig {
-  return mergeConfigWithDefaults()
+export function writeConfigToDisk(config: AppConfig): void {
+  writeFileAtomically(PATHS.CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`)
+}
+
+export function setConfiguredApiKeys(apiKeys: Array<string>): Array<string> {
+  const normalizedKeys = apiKeys
+    .map((key) => key.trim())
+    .filter((key) => key.length > 0)
+  const uniqueKeys = [...new Set(normalizedKeys)]
+
+  const editableConfig = readEditableConfigFromDisk()
+  const { apiKey: _legacyApiKey, ...currentConfig } = editableConfig
+  writeConfigToDisk({
+    ...currentConfig,
+    auth: {
+      ...editableConfig.auth,
+      apiKeys: uniqueKeys,
+      ...(uniqueKeys.length === 0 ? { allowLegacyApiKeyFallback: false } : {}),
+    },
+  })
+  reloadConfig()
+  return [...uniqueKeys]
 }
 
 function mergeDefaultConfig(config: AppConfig): {
@@ -710,6 +761,7 @@ export function mergeConfigWithDefaults(): AppConfig {
 
   const { mergedConfig, changed } = applyConfigMerges(config, [
     mergeDefaultAuth,
+    mergeDefaultTransportConfig,
     mergeDefaultConfig,
     mergeDefaultAccountAffinity,
     mergeDefaultModelRefreshInterval,
@@ -732,8 +784,16 @@ export function mergeConfigWithDefaults(): AppConfig {
 }
 
 export function getConfig(): AppConfig {
-  cachedConfig ??= mergeDefaultConfig(readConfigFromDisk()).mergedConfig
+  cachedConfig ??= applyConfigMerges(readConfigFromDisk(), [
+    mergeDefaultConfig,
+    mergeDefaultTransportConfig,
+  ]).mergedConfig
   return cachedConfig
+}
+
+export function reloadConfig(): AppConfig {
+  cachedConfig = null
+  return getConfig()
 }
 
 type ModelAliasSpec = {
@@ -1183,7 +1243,7 @@ export function resolveProviderAuthType(
     return defaultAuthType
   }
 
-  if (authType === "authorization") {
+  if (authType === "authorization" || authType === "azure-entra") {
     return authType
   }
 
@@ -1197,7 +1257,10 @@ function isProviderApiKeyRequired(
   providerName: string,
   authType: ProviderAuthType,
 ): boolean {
-  return !(providerName === "codex" && authType === "oauth2")
+  return (
+    authType !== "azure-entra"
+    && !(providerName === "codex" && authType === "oauth2")
+  )
 }
 
 export function getRawProviderConfig(name: string): ProviderConfig | null {
@@ -1334,7 +1397,13 @@ export function resolveEffectiveProviderConfig(
 
   return {
     ...providerConfig,
-    authType: resolveProviderAuthType(providerConfig.name, undefined, type),
+    authType:
+      (
+        providerConfig.authType === "azure-entra"
+        || providerConfig.authType === "oauth2"
+      ) ?
+        providerConfig.authType
+      : resolveProviderAuthType(providerConfig.name, undefined, type),
     type,
   }
 }
@@ -1399,4 +1468,97 @@ export function getClaudeTokenMultiplier(): number {
 export function isCopilotUseLocalModelsEnabled(): boolean {
   const config = getConfig()
   return config.copilotUseLocalModels ?? false
+}
+
+// responsesTransport was renamed to upstreamTransport, and headersTimeoutMsV2
+// to headersTimeoutMs, when this block started applying to every upstream HTTP
+// transport. Legacy configs are migrated once during the startup merge and the
+// old keys are dropped from disk.
+interface LegacyAppConfig extends AppConfig {
+  responsesTransport?: LegacyUpstreamTransportConfig
+}
+
+interface LegacyUpstreamTransportConfig extends UpstreamTransportConfig {
+  headersTimeoutMsV2?: number
+}
+
+const migrateUpstreamTransportConfig = (
+  config: AppConfig,
+): { changed: boolean; migrated: UpstreamTransportConfig } => {
+  const legacyBlock = (config as LegacyAppConfig).responsesTransport
+  const { headersTimeoutMsV2, ...migrated } = (config.upstreamTransport
+    ?? legacyBlock
+    ?? {}) as LegacyUpstreamTransportConfig
+
+  const hasLegacyBlock = legacyBlock !== undefined
+  const hasLegacyHeadersTimeout = headersTimeoutMsV2 !== undefined
+  if (!hasLegacyBlock && !hasLegacyHeadersTimeout) {
+    return { changed: false, migrated }
+  }
+
+  consola.info(
+    "Migrating deprecated transport config: responsesTransport -> upstreamTransport, headersTimeoutMsV2 -> headersTimeoutMs",
+  )
+
+  return {
+    changed: true,
+    migrated:
+      migrated.headersTimeoutMs === undefined && hasLegacyHeadersTimeout ?
+        { ...migrated, headersTimeoutMs: headersTimeoutMsV2 }
+      : migrated,
+  }
+}
+
+export function getUpstreamTransportConfig(): Required<UpstreamTransportConfig> {
+  return normalizeUpstreamTransportConfig(getConfig().upstreamTransport)
+}
+
+export const normalizeUpstreamTransportConfig = (
+  configured: UpstreamTransportConfig | undefined,
+): Required<UpstreamTransportConfig> => ({
+  headersTimeoutMs: positiveIntegerOrDefault(
+    configured?.headersTimeoutMs,
+    defaultUpstreamTransportConfig.headersTimeoutMs,
+  ),
+  streamInactivityTimeoutMs: positiveIntegerOrDefault(
+    configured?.streamInactivityTimeoutMs,
+    defaultUpstreamTransportConfig.streamInactivityTimeoutMs,
+  ),
+  websocketMaxBufferedBytes: positiveIntegerOrDefault(
+    configured?.websocketMaxBufferedBytes,
+    defaultUpstreamTransportConfig.websocketMaxBufferedBytes,
+  ),
+  websocketMaxBufferedMessages: positiveIntegerOrDefault(
+    configured?.websocketMaxBufferedMessages,
+    defaultUpstreamTransportConfig.websocketMaxBufferedMessages,
+  ),
+  websocketOpenTimeoutMs: positiveIntegerOrDefault(
+    configured?.websocketOpenTimeoutMs,
+    defaultUpstreamTransportConfig.websocketOpenTimeoutMs,
+  ),
+  websocketPoolIdleTimeoutMs: positiveIntegerOrDefault(
+    configured?.websocketPoolIdleTimeoutMs,
+    defaultUpstreamTransportConfig.websocketPoolIdleTimeoutMs,
+  ),
+})
+
+const positiveIntegerOrDefault = (value: unknown, fallback: number): number => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback
+
+  const normalized = Math.floor(value)
+  return normalized > 0 ? normalized : fallback
+}
+
+function mergeDefaultTransportConfig(config: AppConfig): ConfigMergeResult {
+  const result = migrateUpstreamTransportConfig(config)
+  const upstreamTransport = normalizeUpstreamTransportConfig(result.migrated)
+  const changed =
+    result.changed
+    || JSON.stringify(config.upstreamTransport)
+      !== JSON.stringify(upstreamTransport)
+  const { responsesTransport: _legacy, ...current } = config as LegacyAppConfig
+  return {
+    mergedConfig: changed ? { ...current, upstreamTransport } : config,
+    changed,
+  }
 }

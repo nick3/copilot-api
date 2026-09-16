@@ -5,10 +5,17 @@ import {
   type RequestInit as UndiciRequestInit,
 } from "undici"
 
-import type { ResolvedProviderConfig } from "~/lib/config"
+import {
+  getUpstreamTransportConfig,
+  type ResolvedProviderConfig,
+} from "~/lib/config"
+import { requestContext } from "~/lib/request-context"
+import consola from "consola"
 import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
-import type { ChatCompletionsPayload } from "~/services/copilot/create-chat-completions"
-import type { ResponsesPayload } from "~/services/copilot/create-responses"
+import type { ChatCompletionsPayload } from "~/lib/types/chat-completions"
+import type { ResponsesPayload } from "~/lib/types/responses"
+import { parseUserIdMetadata } from "~/lib/utils"
+import { fetchUpstreamWithLifecycle } from "~/services/upstream-http"
 
 const SHARED_FORWARDABLE_HEADERS = ["accept", "user-agent"] as const
 
@@ -68,6 +75,37 @@ export function buildProviderUpstreamHeaders(
   return headers
 }
 
+const OPENCODE_GO_PROVIDER_NAME = "opencode-go"
+const OPENCODE_SESSION_HEADER = "x-opencode-session"
+
+const resolveOpencodeMessagesSession = (
+  payload: AnthropicMessagesPayload,
+): string | undefined => {
+  const sessionAffinity = requestContext.getStore()?.sessionAffinity?.trim()
+  if (sessionAffinity) {
+    return sessionAffinity
+  }
+
+  const userId = payload.metadata?.user_id
+  if (!userId?.trim()) {
+    return undefined
+  }
+
+  const { sessionId } = parseUserIdMetadata(userId)
+  return sessionId ?? userId
+}
+
+const applyOpencodeSessionHeader = (
+  providerConfig: ResolvedProviderConfig,
+  headers: Record<string, string>,
+  session: string | undefined,
+): void => {
+  if (providerConfig.name !== OPENCODE_GO_PROVIDER_NAME || !session) {
+    return
+  }
+  headers[OPENCODE_SESSION_HEADER] = session
+}
+
 export function createProviderProxyResponse(
   upstreamResponse: Response,
   body?: ReadableStream<Uint8Array> | null,
@@ -89,38 +127,108 @@ export async function forwardProviderMessages(
   providerConfig: ResolvedProviderConfig,
   payload: AnthropicMessagesPayload,
   requestHeaders: Headers,
-  fetchImpl: typeof fetch = fetch,
+  inputOptions:
+    | { clientSignal?: AbortSignal; fetchImpl?: typeof fetch }
+    | typeof fetch = {},
 ): Promise<Response> {
-  return await fetchImpl(`${providerConfig.baseUrl}/v1/messages`, {
-    method: "POST",
-    headers: buildProviderUpstreamHeaders(providerConfig, requestHeaders),
-    body: JSON.stringify(payload),
-  })
+  const options =
+    typeof inputOptions === "function" ?
+      { fetchImpl: inputOptions }
+    : inputOptions
+  consola.log(`<-- model: ${payload.model}`)
+  const headers = buildProviderUpstreamHeaders(providerConfig, requestHeaders)
+  applyOpencodeSessionHeader(
+    providerConfig,
+    headers,
+    resolveOpencodeMessagesSession(payload),
+  )
+  const transportConfig = getUpstreamTransportConfig()
+  return await fetchUpstreamWithLifecycle(
+    `${providerConfig.baseUrl}/v1/messages`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    },
+    {
+      clientSignal: options.clientSignal,
+      fetchImpl: options.fetchImpl,
+      headersTimeoutMs: transportConfig.headersTimeoutMs,
+      streamInactivityTimeoutMs: transportConfig.streamInactivityTimeoutMs,
+    },
+  )
 }
 
 export async function forwardProviderChatCompletions(
   providerConfig: ResolvedProviderConfig,
   payload: ChatCompletionsPayload,
   requestHeaders: Headers,
-  fetchImpl: typeof fetch = fetch,
+  inputOptions:
+    | { clientSignal?: AbortSignal; fetchImpl?: typeof fetch }
+    | typeof fetch = {},
 ): Promise<Response> {
-  return await fetchImpl(`${providerConfig.baseUrl}/v1/chat/completions`, {
-    method: "POST",
-    headers: buildProviderUpstreamHeaders(providerConfig, requestHeaders),
-    body: JSON.stringify(payload),
-  })
+  const options =
+    typeof inputOptions === "function" ?
+      { fetchImpl: inputOptions }
+    : inputOptions
+  consola.log(`<-- model: ${payload.model}`)
+  const headers = buildProviderUpstreamHeaders(providerConfig, requestHeaders)
+  applyOpencodeSessionHeader(
+    providerConfig,
+    headers,
+    payload.prompt_cache_key?.trim() || undefined,
+  )
+  const transportConfig = getUpstreamTransportConfig()
+  return await fetchUpstreamWithLifecycle(
+    `${providerConfig.baseUrl}/v1/chat/completions`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    },
+    {
+      clientSignal: options.clientSignal,
+      fetchImpl: options.fetchImpl,
+      headersTimeoutMs: transportConfig.headersTimeoutMs,
+      streamInactivityTimeoutMs: transportConfig.streamInactivityTimeoutMs,
+    },
+  )
 }
 
 export async function forwardProviderResponses(
   providerConfig: ResolvedProviderConfig,
   payload: ResponsesPayload,
   requestHeaders: Headers,
+  inputOptions:
+    | { clientSignal?: AbortSignal; fetchImpl?: typeof fetch }
+    | typeof fetch = {},
 ): Promise<Response> {
-  return await fetch(`${providerConfig.baseUrl}/v1/responses`, {
-    method: "POST",
-    headers: buildProviderUpstreamHeaders(providerConfig, requestHeaders),
-    body: JSON.stringify(payload),
-  })
+  const options =
+    typeof inputOptions === "function" ?
+      { fetchImpl: inputOptions }
+    : inputOptions
+  consola.log(`<-- model: ${payload.model}`)
+  const transportConfig = getUpstreamTransportConfig()
+  const headers = buildProviderUpstreamHeaders(providerConfig, requestHeaders)
+  applyOpencodeSessionHeader(
+    providerConfig,
+    headers,
+    payload.prompt_cache_key?.trim() || undefined,
+  )
+  return await fetchUpstreamWithLifecycle(
+    `${providerConfig.baseUrl}/v1/responses`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    },
+    {
+      headersTimeoutMs: transportConfig.headersTimeoutMs,
+      clientSignal: options.clientSignal,
+      fetchImpl: options.fetchImpl,
+      streamInactivityTimeoutMs: transportConfig.streamInactivityTimeoutMs,
+    },
+  )
 }
 
 export async function forwardProviderModels(
@@ -166,16 +274,30 @@ function resolveProviderRequestUrl(
 export async function forwardProviderAlphaSearch(
   providerConfig: ResolvedProviderConfig,
   request: Request,
+  inputOptions:
+    | { clientSignal?: AbortSignal; fetchImpl?: typeof fetch }
+    | typeof fetch = {},
 ): Promise<Response> {
+  const options =
+    typeof inputOptions === "function" ?
+      { fetchImpl: inputOptions }
+    : inputOptions
   const headers = buildProviderUpstreamHeaders(providerConfig, request.headers)
   const body = await request.arrayBuffer()
+  const transportConfig = getUpstreamTransportConfig()
 
-  return await fetch(
+  return await fetchUpstreamWithLifecycle(
     resolveProviderRequestUrl(providerConfig, request.url, "/v1/alpha/search"),
     {
       method: "POST",
       headers,
       body,
+    },
+    {
+      clientSignal: options.clientSignal,
+      fetchImpl: options.fetchImpl,
+      headersTimeoutMs: transportConfig.headersTimeoutMs,
+      streamInactivityTimeoutMs: transportConfig.streamInactivityTimeoutMs,
     },
   )
 }

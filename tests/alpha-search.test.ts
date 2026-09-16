@@ -494,7 +494,8 @@ describe("Codex alpha search forwarding", () => {
     )
 
     expect(response.status).toBe(200)
-    expect(alphaSearchResponseCloneCount).toBe(1)
+    // The transport wraps the raw response; debug logging clones that managed response.
+    expect(alphaSearchResponseCloneCount).toBe(0)
   })
 
   test("returns 404 for an unavailable provider-scoped alpha search", async () => {

@@ -36,7 +36,11 @@ export const applyDashScopePreserveThinkingDefault = (
 
 export const applyOpenAICompatibleContextCache = (payload: {
   messages: Array<Message>
+  model: string
 }): void => {
+  if (payload.model.includes("/")) {
+    return
+  }
   const messageIndexes = selectContextCacheMessageIndexes(payload.messages)
   for (const messageIndex of messageIndexes) {
     applyContextCacheControl(payload.messages[messageIndex])

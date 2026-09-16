@@ -4,6 +4,12 @@ import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
+import type { ProviderConfig, ResolvedProviderConfig } from "~/lib/config"
+import {
+  ensureConfiguredProviderModelAlias,
+  resolveConfiguredProviderModelAlias,
+} from "~/lib/provider-resolver"
+
 interface CodexCredentialsShape {
   accessToken: string
   accountId: string
@@ -12,14 +18,7 @@ interface CodexCredentialsShape {
 }
 
 interface ConfigFileShape {
-  providers?: {
-    codex?: {
-      type?: string
-      enabled?: boolean
-      baseUrl?: string
-      authType?: string
-    }
-  }
+  providers?: Record<string, ProviderConfig>
 }
 
 const cwd = fileURLToPath(new URL("../", import.meta.url))
@@ -55,6 +54,17 @@ function writeCodexCredentials(
   fs.writeFileSync(
     path.join(tempDir, "codex_credentials.json"),
     `${JSON.stringify(credentials, null, 2)}\n`,
+    "utf8",
+  )
+}
+
+function writeCodexAccountStore(
+  tempDir: string,
+  accounts: Array<CodexCredentialsShape & { alias?: string }>,
+): void {
+  fs.writeFileSync(
+    path.join(tempDir, "codex_credentials.json"),
+    `${JSON.stringify({ version: 1, accounts }, null, 2)}\n`,
     "utf8",
   )
 }
@@ -160,10 +170,87 @@ describe("provider resolver", () => {
       type: "openai-responses",
     })
     expect(readConfigFile(tempDir).providers?.codex).toMatchObject({
+      accountId: "acct_test",
       type: "openai-responses",
       authType: "oauth2",
       baseUrl: "https://chatgpt.com/backend-api",
     })
+  })
+
+  test("loads the Codex account selected in provider config", () => {
+    const tempDir = createTempDir()
+    writeConfigFile(tempDir, {
+      providers: {
+        codex: {
+          accountId: "acct_two",
+          type: "openai-responses",
+          enabled: true,
+          authType: "oauth2",
+          baseUrl: "https://chatgpt.com/backend-api",
+        },
+      },
+    })
+    writeCodexAccountStore(tempDir, [
+      {
+        accessToken: "first-access-token",
+        accountId: "acct_one",
+        expiresAt: Date.now() + 60 * 60 * 1000,
+        refreshToken: "first-refresh-token",
+      },
+      {
+        accessToken: "second-access-token",
+        accountId: "acct_two",
+        expiresAt: Date.now() + 60 * 60 * 1000,
+        refreshToken: "second-refresh-token",
+      },
+    ])
+
+    const output = runScript(
+      tempDir,
+      'const { resolveProviderConfig } = await import("./src/lib/provider-resolver"); const { state } = await import("./src/lib/state"); const { stopCodexRefreshLoop } = await import("./src/lib/token"); const config = await resolveProviderConfig("codex"); console.log(JSON.stringify({ apiKey: config?.apiKey, accountId: state.codexAccountId })); stopCodexRefreshLoop();',
+    )
+
+    expect(JSON.parse(output)).toEqual({
+      apiKey: "second-access-token",
+      accountId: "acct_two",
+    })
+  })
+
+  test("requires an explicit selection when multiple Codex accounts exist", () => {
+    const tempDir = createTempDir()
+    writeConfigFile(tempDir, {
+      providers: {
+        codex: {
+          type: "openai-responses",
+          enabled: true,
+          authType: "oauth2",
+          baseUrl: "https://chatgpt.com/backend-api",
+        },
+      },
+    })
+    writeCodexAccountStore(tempDir, [
+      {
+        accessToken: "first-access-token",
+        accountId: "acct_one",
+        expiresAt: Date.now() + 60 * 60 * 1000,
+        refreshToken: "first-refresh-token",
+      },
+      {
+        accessToken: "second-access-token",
+        accountId: "acct_two",
+        expiresAt: Date.now() + 60 * 60 * 1000,
+        refreshToken: "second-refresh-token",
+      },
+    ])
+
+    const output = runScript(
+      tempDir,
+      'const { resolveProviderConfig } = await import("./src/lib/provider-resolver"); try { await resolveProviderConfig("codex"); } catch (error) { console.log(error instanceof Error ? error.message : String(error)); }',
+    )
+
+    expect(output).toContain(
+      "Multiple Codex accounts found but no account is selected",
+    )
   })
 
   test("preserves a disabled codex provider when credentials are persisted", () => {
@@ -190,5 +277,76 @@ describe("provider resolver", () => {
       authType: "oauth2",
       baseUrl: "https://chatgpt.com/backend-api",
     })
+  })
+
+  test("resolves azure-entra providers with an Azure access token", () => {
+    const tempDir = createTempDir()
+    writeConfigFile(tempDir, {
+      providers: {
+        foundry: {
+          type: "openai-compatible",
+          authType: "azure-entra",
+          baseUrl: "https://example.openai.azure.com/openai",
+        },
+      },
+    })
+
+    const output = runScript(
+      tempDir,
+      'const { resolveProviderConfig } = await import("./src/lib/provider-resolver"); console.log(JSON.stringify(await resolveProviderConfig("foundry", async () => "entra-access-token")));',
+    )
+
+    expect(JSON.parse(output)).toMatchObject({
+      apiKey: "entra-access-token",
+      authType: "azure-entra",
+      baseUrl: "https://example.openai.azure.com/openai",
+      name: "foundry",
+      type: "openai-compatible",
+    })
+  })
+})
+
+describe("configured provider/model alias helpers", () => {
+  const configuredResolver = () => Promise.resolve({} as ResolvedProviderConfig)
+  const missingResolver = () => Promise.resolve(null)
+
+  test("returns null without calling the resolver for plain model ids", async () => {
+    let calls = 0
+    const countingResolver = (_providerName: string) => {
+      calls += 1
+      return Promise.resolve(null)
+    }
+
+    expect(
+      await resolveConfiguredProviderModelAlias("gpt-5-mini", countingResolver),
+    ).toBeNull()
+    expect(
+      await ensureConfiguredProviderModelAlias(null, countingResolver),
+    ).toBeNull()
+    expect(calls).toBe(0)
+  })
+
+  test("returns the alias when the provider is configured", async () => {
+    expect(
+      await resolveConfiguredProviderModelAlias(
+        "dash/qwen-plus",
+        configuredResolver,
+      ),
+    ).toEqual({ provider: "dash", model: "qwen-plus" })
+  })
+
+  test("returns null when the provider is not configured", async () => {
+    expect(
+      await resolveConfiguredProviderModelAlias(
+        "contoso/glm-5.2",
+        missingResolver,
+      ),
+    ).toBeNull()
+    expect(
+      await ensureConfiguredProviderModelAlias(
+        { provider: "contoso", model: "family/glm-5.2" },
+        missingResolver,
+      ),
+    ).toBeNull()
   })
 })

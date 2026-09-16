@@ -1,0 +1,142 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="700" viewBox="0 0 1600 700" role="img" aria-label="Copilot API - Universal AI Gateway">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="1" stop-color="#101826"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.42" r="0.55">
+      <stop offset="0" stop-color="#1f6feb" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#1f6feb" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#58a6ff"/>
+      <stop offset="0.5" stop-color="#79c0ff"/>
+      <stop offset="1" stop-color="#39d0d8"/>
+    </linearGradient>
+    <linearGradient id="box" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#161b26"/>
+      <stop offset="1" stop-color="#10141d"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#ffffff" stroke-opacity="0.035" stroke-width="1"/>
+    </pattern>
+    <marker id="arrow-in" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#58a6ff"/>
+    </marker>
+    <marker id="arrow-out" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#3fb950"/>
+    </marker>
+    <style>
+      .sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+      .mono { font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+      .flow { stroke-dasharray: 6 6; animation: dash 1.6s linear infinite; }
+      @keyframes dash { to { stroke-dashoffset: -12; } }
+    </style>
+  </defs>
+
+  <rect width="1600" height="700" fill="url(#bg)"/>
+  <rect width="1600" height="700" fill="url(#grid)"/>
+  <rect width="1600" height="700" fill="url(#glow)"/>
+
+  <!-- Header -->
+  <text x="800" y="88" text-anchor="middle" class="sans" font-size="56" font-weight="800" letter-spacing="6" fill="url(#title)">COPILOT API</text>
+  <text x="800" y="130" text-anchor="middle" class="sans" font-size="24" font-weight="600" fill="#e6edf3">Universal AI Gateway</text>
+  <text x="800" y="163" text-anchor="middle" class="sans" font-size="17" fill="#8b949e">One Gateway. Any Client. Multiple AI Providers.</text>
+
+  <!-- Protocol pills -->
+  <g class="mono" font-size="14" font-weight="600">
+    <rect x="528" y="186" width="160" height="30" rx="15" fill="#1f6feb" fill-opacity="0.16" stroke="#1f6feb" stroke-opacity="0.55"/>
+    <text x="608" y="206" text-anchor="middle" fill="#79c0ff">Chat Completions</text>
+    <rect x="706" y="186" width="150" height="30" rx="15" fill="#8957e5" fill-opacity="0.16" stroke="#8957e5" stroke-opacity="0.55"/>
+    <text x="781" y="206" text-anchor="middle" fill="#d2a8ff">OpenAI Responses</text>
+    <rect x="874" y="186" width="158" height="30" rx="15" fill="#3fb950" fill-opacity="0.14" stroke="#3fb950" stroke-opacity="0.5"/>
+    <text x="953" y="206" text-anchor="middle" fill="#56d364">Anthropic Messages</text>
+  </g>
+
+  <!-- Column labels -->
+  <text x="215" y="262" text-anchor="middle" class="sans" font-size="13" font-weight="700" letter-spacing="3" fill="#6e7681">CLIENTS</text>
+  <text x="1385" y="262" text-anchor="middle" class="sans" font-size="13" font-weight="700" letter-spacing="3" fill="#6e7681">PROVIDERS</text>
+
+  <!-- Client chips -->
+  <g class="sans" font-size="17" font-weight="600">
+    <rect x="90" y="282" width="250" height="46" rx="10" fill="url(#box)" stroke="#30363d"/>
+    <circle cx="118" cy="305" r="5" fill="#d97757"/>
+    <text x="134" y="311" fill="#e6edf3">Claude Code</text>
+    <rect x="90" y="342" width="250" height="46" rx="10" fill="url(#box)" stroke="#30363d"/>
+    <circle cx="118" cy="365" r="5" fill="#39d0d8"/>
+    <text x="134" y="371" fill="#e6edf3">OpenCode</text>
+    <rect x="90" y="402" width="250" height="46" rx="10" fill="url(#box)" stroke="#30363d"/>
+    <circle cx="118" cy="425" r="5" fill="#f778ba"/>
+    <text x="134" y="431" fill="#e6edf3">Codex</text>
+    <rect x="90" y="462" width="250" height="46" rx="10" fill="url(#box)" stroke="#30363d"/>
+    <circle cx="118" cy="485" r="5" fill="#8b949e"/>
+    <text x="134" y="491" fill="#e6edf3">Other Clients</text>
+  </g>
+
+  <!-- Provider chips -->
+  <g class="sans" font-size="15" font-weight="600">
+    <rect x="1260" y="278" width="250" height="34" rx="9" fill="url(#box)" stroke="#30363d"/>
+    <circle cx="1284" cy="295" r="4.5" fill="#79c0ff"/>
+    <text x="1298" y="300" fill="#e6edf3">GitHub Copilot</text>
+    <rect x="1260" y="318" width="250" height="34" rx="9" fill="url(#box)" stroke="#30363d"/>
+    <circle cx="1284" cy="335" r="4.5" fill="#f778ba"/>
+    <text x="1298" y="340" fill="#e6edf3">Codex</text>
+    <rect x="1260" y="358" width="250" height="34" rx="9" fill="url(#box)" stroke="#30363d"/>
+    <circle cx="1284" cy="375" r="4.5" fill="#e3b341"/>
+    <text x="1298" y="380" fill="#e6edf3">OpenCode Go</text>
+    <rect x="1260" y="398" width="250" height="34" rx="9" fill="url(#box)" stroke="#30363d"/>
+    <circle cx="1284" cy="415" r="4.5" fill="#39d0d8"/>
+    <text x="1298" y="420" fill="#e6edf3">Kimi</text>
+    <rect x="1260" y="438" width="250" height="34" rx="9" fill="url(#box)" stroke="#30363d"/>
+    <circle cx="1284" cy="455" r="4.5" fill="#3fb950"/>
+    <text x="1298" y="460" fill="#e6edf3">DeepSeek</text>
+    <rect x="1260" y="478" width="250" height="34" rx="9" fill="url(#box)" stroke="#30363d"/>
+    <circle cx="1284" cy="495" r="4.5" fill="#f0883e"/>
+    <text x="1298" y="500" fill="#e6edf3">DashScope</text>
+    <rect x="1260" y="518" width="250" height="34" rx="9" fill="url(#box)" stroke="#30363d"/>
+    <circle cx="1284" cy="535" r="4.5" fill="#d2a8ff"/>
+    <text x="1298" y="540" fill="#e6edf3">OpenRouter</text>
+    <rect x="1260" y="558" width="250" height="34" rx="9" fill="url(#box)" stroke="#30363d" stroke-dasharray="5 4"/>
+    <circle cx="1284" cy="575" r="4.5" fill="#8b949e"/>
+    <text x="1298" y="580" fill="#8b949e">Custom Providers</text>
+  </g>
+
+  <!-- Flow arrows: clients -> gateway -->
+  <g fill="none" stroke="#1f6feb" stroke-width="1.6" stroke-opacity="0.8">
+    <path class="flow" marker-end="url(#arrow-in)" d="M 340 305 C 470 305, 504 372, 642 385"/>
+    <path class="flow" marker-end="url(#arrow-in)" d="M 340 365 C 470 365, 524 385, 642 392"/>
+    <path class="flow" marker-end="url(#arrow-in)" d="M 340 425 C 470 425, 524 408, 642 402"/>
+    <path class="flow" marker-end="url(#arrow-in)" d="M 340 485 C 470 485, 504 422, 642 410"/>
+  </g>
+
+  <!-- Flow arrows: gateway -> providers -->
+  <g fill="none" stroke="#2ea043" stroke-width="1.6" stroke-opacity="0.75">
+    <path class="flow" marker-end="url(#arrow-out)" d="M 964 352 C 1100 329, 1150 295, 1252 295"/>
+    <path class="flow" marker-end="url(#arrow-out)" d="M 964 364 C 1100 352, 1150 335, 1252 335"/>
+    <path class="flow" marker-end="url(#arrow-out)" d="M 964 376 C 1100 376, 1150 375, 1252 375"/>
+    <path class="flow" marker-end="url(#arrow-out)" d="M 964 388 C 1100 399, 1150 415, 1252 415"/>
+    <path class="flow" marker-end="url(#arrow-out)" d="M 964 400 C 1100 422, 1150 455, 1252 455"/>
+    <path class="flow" marker-end="url(#arrow-out)" d="M 964 412 C 1100 445, 1150 495, 1252 495"/>
+    <path class="flow" marker-end="url(#arrow-out)" d="M 964 424 C 1100 468, 1150 535, 1252 535"/>
+    <path class="flow" marker-end="url(#arrow-out)" d="M 964 436 C 1100 492, 1150 575, 1252 575"/>
+  </g>
+
+  <!-- Gateway box -->
+  <rect x="648" y="330" width="316" height="132" rx="16" fill="#11151d" stroke="#1f6feb" stroke-width="1.6"/>
+  <rect x="648" y="330" width="316" height="132" rx="16" fill="none" stroke="#58a6ff" stroke-opacity="0.35" stroke-width="4"/>
+  <text x="806" y="382" text-anchor="middle" class="sans" font-size="26" font-weight="800" letter-spacing="3" fill="#79c0ff">COPILOT API</text>
+  <text x="806" y="410" text-anchor="middle" class="mono" font-size="14" fill="#8b949e">http://localhost:4141</text>
+  <text x="806" y="440" text-anchor="middle" class="sans" font-size="13" fill="#6e7681">Route &#183; Translate &#183; Stream</text>
+
+  <!-- Footer chips -->
+  <g class="sans" font-size="15" font-weight="600">
+    <rect x="468" y="612" width="152" height="34" rx="17" fill="#161b26" stroke="#30363d"/>
+    <text x="544" y="634" text-anchor="middle" fill="#8b949e">Multi-Provider</text>
+    <rect x="636" y="612" width="130" height="34" rx="17" fill="#161b26" stroke="#30363d"/>
+    <text x="701" y="634" text-anchor="middle" fill="#8b949e">Streaming</text>
+    <rect x="782" y="612" width="130" height="34" rx="17" fill="#161b26" stroke="#30363d"/>
+    <text x="847" y="634" text-anchor="middle" fill="#8b949e">WebSocket</text>
+    <rect x="928" y="612" width="164" height="34" rx="17" fill="#161b26" stroke="#30363d"/>
+    <text x="1010" y="634" text-anchor="middle" fill="#8b949e">Usage Tracking</text>
+  </g>
+</svg>

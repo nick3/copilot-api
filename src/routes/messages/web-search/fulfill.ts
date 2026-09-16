@@ -8,7 +8,9 @@ import type { SubagentMarker } from "~/lib/subagent"
 import type { AccountContext } from "~/lib/types/account"
 import type { Model } from "~/services/copilot/get-models"
 
+import { resolveProviderConfig } from "~/lib/provider-resolver"
 import { findEndpointModel } from "~/lib/models"
+import { writeSSEIfConnected } from "~/lib/sse"
 import {
   parseProviderModelAlias,
   type ProviderModelAlias,
@@ -55,6 +57,7 @@ import { debugJson } from "~/lib/logger"
 
 export const webSearchFlowDependencies = {
   createResponses: createCopilotResponses,
+  resolveProviderConfig,
   createUsageRecorder: (
     payload: AnthropicMessagesPayload,
     sessionId?: string,
@@ -113,13 +116,17 @@ export const stripWebSearchServerTool = (
 
 /**
  * Decides how a web-search request should be handled. Pure so the routing is
- * unit-testable. Assumes the caller already confirmed a web_search tool exists.
+ * unit-testable (the provider resolver is injectable). Assumes the caller
+ * already confirmed a web_search tool exists.
  *
  * - `provider`: messageApiWebSearchModel is a `provider/model` alias whose
- *   message API supports websearch natively — pass the tool straight through.
+ *   provider is actually configured and whose message API supports websearch
+ *   natively — pass the tool straight through.
  * - `responses`: a Copilot GPT model — run it via the /responses web_search.
  * - `strip`: mixing with other tools, no model configured, or web search off —
- *   drop the tool and continue normally.
+ *   drop the tool and continue normally. An alias pointing at an unconfigured
+ *   provider also strips: routing it would 404, and the "provider/model"
+ *   string is not a usable Copilot model id for the responses path.
  */
 export type WebSearchRoute =
   | { kind: "provider"; alias: ProviderModelAlias }
@@ -231,11 +238,15 @@ export const prepareWebSearchResponsesPayload = (
   const responsesPayload = translateAnthropicMessagesToResponsesPayload(
     switchedPayload,
     {
-      reasoningEffort: options.reasoningEffort,
+      reasoningEffort:
+        options.reasoningEffort
+        ?? (payload.output_config?.effort === null ? undefined : "low"),
       subagentAgentId: options.subagentAgentId,
     },
   )
-  responsesPayload.tools = [buildResponsesWebSearchTool(config)]
+  responsesPayload.tools = [
+    buildResponsesWebSearchTool({ ...config, searchContextSize: "low" }),
+  ]
   responsesPayload.tool_choice = undefined
   return responsesPayload
 }
@@ -678,6 +689,7 @@ export const handleWebSearchViaResponses = async (
       subagentMarker: options.subagentMarker,
       requestId: options.requestId,
       sessionId: options.sessionId,
+      clientSignal: c.req?.raw?.signal,
       compactType: options.compactType,
     },
     options.account,
@@ -829,7 +841,7 @@ export async function writeSyntheticWebSearchResponseStream(
   response: ReconstructedWebSearchResponse,
 ): Promise<void> {
   for (const event of buildSyntheticStreamEvents(response)) {
-    await stream.writeSSE({
+    await writeSSEIfConnected(stream, {
       event: event.type,
       data: JSON.stringify(event),
     })

@@ -248,7 +248,7 @@ describe("model routes", () => {
 
     expect(response.status).toBe(200)
     const body = (await response.json()) as { data: Array<{ id: string }> }
-    expect(body.data.map((model) => model.id)).toContain("codex/gpt-5.4")
+    expect(body.data.map((model) => model.id)).toContain("codex/gpt-5.5")
     expect(body.data.map((model) => model.id)).toContain("codex/gpt-5.6-sol")
     expect(fetchMock).not.toHaveBeenCalled()
   })
@@ -319,13 +319,17 @@ describe("model routes", () => {
     expect(codexModelsResponseCloneCount).toBe(0)
   })
 
-  test("returns an empty merged catalog when Codex and fallback models are unavailable", async () => {
+  test("serves the offline model catalog when remote models are unavailable", async () => {
     const response = await createApp().request("/v1/models", {
       headers: { "user-agent": "codex/1.2.3" },
     })
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ models: [] })
+    expect(
+      (
+        (await response.json()) as { models: Array<{ slug: string }> }
+      ).models.some((model) => model.slug === "gpt-5.5"),
+    ).toBe(true)
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -348,7 +352,11 @@ describe("model routes", () => {
     )
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ models: [] })
+    expect(
+      (
+        (await response.json()) as { models: Array<{ slug: string }> }
+      ).models.some((model) => model.slug === "gpt-5.5"),
+    ).toBe(true)
   })
 
   test("synthesizes Messages-only Copilot models for Codex clients", async () => {
@@ -369,8 +377,12 @@ describe("model routes", () => {
     const body = (await response.json()) as {
       models: Array<Record<string, unknown>>
     }
-    expect(body.models).toHaveLength(1)
-    expect(body.models[0]).toMatchObject({
+    expect(
+      body.models.filter((model) => model.slug === "claude-test"),
+    ).toHaveLength(1)
+    expect(
+      body.models.find((model) => model.slug === "claude-test"),
+    ).toMatchObject({
       slug: "claude-test",
       use_responses_lite: true,
       context_window: 200_000,
@@ -381,6 +393,7 @@ describe("model routes", () => {
         { effort: "low", description: "low reasoning effort" },
         { effort: "high", description: "high reasoning effort" },
         { effort: "max", description: "max reasoning effort" },
+        { effort: "ultra", description: "ultra reasoning effort" },
       ],
     })
     expect(fetchMock).not.toHaveBeenCalled()
@@ -458,7 +471,7 @@ describe("model routes", () => {
     const modelIds = body.data.map((model) => model.id)
     expect(modelIds).toContain("gpt-5-mini")
     expect(modelIds).toContain("dash/qwen-plus")
-    expect(modelIds).toContain("codex/gpt-5.4")
+    expect(modelIds).toContain("codex/gpt-5.5")
   })
 
   test("forwards Codex clients on the provider-scoped models route", async () => {
@@ -509,8 +522,53 @@ describe("model routes", () => {
 
     expect(response.status).toBe(200)
     const body = (await response.json()) as { data: Array<{ id: string }> }
-    expect(body.data.map((model) => model.id)).toContain("gpt-5.4")
+    expect(body.data.map((model) => model.id)).toContain("gpt-5.5")
     expect(body.data.map((model) => model.id)).toContain("gpt-5.6-sol")
     expect(fetchMock).not.toHaveBeenCalled()
   })
+})
+
+test("explicit provider Codex capabilities override matching offline catalog entries", async () => {
+  enabledProviders = ["kimi"]
+  providerConfigs = {
+    kimi: {
+      ...createProviderConfig("kimi", "https://kimi.example"),
+      models: {
+        "gpt-5.5": {
+          codex: {
+            contextWindow: 123000,
+            maxOutputTokens: 4000,
+            inputModalities: ["text"],
+            supportsParallelToolCalls: false,
+            reasoningEfforts: ["low", "high"],
+            defaultReasoningEffort: "low",
+          },
+        },
+        "gpt-5.6-sol": { codex: { enabled: false } },
+      },
+    },
+  }
+  const response = await createApp().request("/v1/models", {
+    headers: { "user-agent": "codex/1.2.3" },
+  })
+  const body = (await response.json()) as {
+    models: Array<Record<string, unknown>>
+  }
+  expect(
+    body.models.find((model) => model.slug === "kimi/gpt-5.5"),
+  ).toMatchObject({
+    context_window: 123000,
+    max_context_window: 123000,
+    max_output_tokens: 4000,
+    input_modalities: ["text"],
+    supports_parallel_tool_calls: false,
+    default_reasoning_level: "low",
+    supported_reasoning_levels: [
+      { effort: "low", description: "low reasoning effort" },
+      { effort: "high", description: "high reasoning effort" },
+    ],
+  })
+  expect(body.models.some((model) => model.slug === "kimi/gpt-5.6-sol")).toBe(
+    false,
+  )
 })

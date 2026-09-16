@@ -57,7 +57,6 @@ import {
   getTokenUsageDailySummary,
   getTokenUsageEventsPage,
   getTokenUsageSummary,
-  type TokenUsagePeriod,
 } from "~/lib/token-usage"
 import { isAccountType } from "~/lib/types/account"
 import type {
@@ -199,14 +198,12 @@ function parseTriStateBool(value: string | null): boolean | undefined {
   return undefined
 }
 
-const TOKEN_USAGE_PERIODS = new Set<TokenUsagePeriod>(["day", "week", "month"])
+import { parseTokenUsagePeriod } from "~/lib/token-usage/period"
+import {
+  validatePeakPricing,
+  validateUpstreamTransport,
+} from "../../../shared/config-validation"
 const DEFAULT_TOKEN_USAGE_EVENTS_PAGE_SIZE = 20
-
-function parseTokenUsagePeriod(value: string | null): TokenUsagePeriod {
-  return TOKEN_USAGE_PERIODS.has(value as TokenUsagePeriod) ?
-      (value as TokenUsagePeriod)
-    : "day"
-}
 
 function parsePositiveInt(value: string | null, fallback: number): number {
   const parsed = Number.parseInt(value ?? "", 10)
@@ -221,6 +218,7 @@ type ConfigErrorPayload = {
 }
 
 const CONFIG_KEYS = new Set<keyof AppConfig>([
+  "upstreamTransport",
   "auth",
   "extraPrompts",
   "smallModel",
@@ -360,7 +358,7 @@ function parseAuthConfig(value: unknown): ParseFieldResult<AuthConfig> {
   }
 
   for (const key of Object.keys(value)) {
-    if (key !== "apiKeys") {
+    if (key !== "apiKeys" && key !== "allowLegacyApiKeyFallback") {
       return { error: `auth.${key} is not supported` }
     }
   }
@@ -386,7 +384,19 @@ function parseAuthConfig(value: unknown): ParseFieldResult<AuthConfig> {
     return { error: "auth.apiKeys must contain non-empty strings only" }
   }
 
-  return { value: { apiKeys: [...new Set(normalizedApiKeys)] } }
+  if (
+    value.allowLegacyApiKeyFallback !== undefined
+    && typeof value.allowLegacyApiKeyFallback !== "boolean"
+  )
+    return { error: "auth.allowLegacyApiKeyFallback must be a boolean" }
+  return {
+    value: {
+      apiKeys: [...new Set(normalizedApiKeys)],
+      ...(normalizedApiKeys.length === 0 ? { allowLegacyApiKeyFallback: false }
+      : value.allowLegacyApiKeyFallback === undefined ? {}
+      : { allowLegacyApiKeyFallback: value.allowLegacyApiKeyFallback }),
+    },
+  }
 }
 
 function parseStringRecord(
@@ -422,6 +432,7 @@ const PROVIDER_MODEL_CONFIG_FIELDS = [
   "pricing",
   "supportPdf",
   "toolContentSupportType",
+  "reasoningField",
   "codex",
 ] as const
 
@@ -483,6 +494,8 @@ const TOKEN_USAGE_PRICING_NUMBER_FIELDS = [
 const TOKEN_USAGE_PRICING_FIELDS = [
   ...TOKEN_USAGE_PRICING_NUMBER_FIELDS,
   "tiers",
+  "offPeak",
+  "peakWindows",
 ] as const
 
 const TOKEN_USAGE_PRICING_KEYS = new Set<string>(TOKEN_USAGE_PRICING_FIELDS)
@@ -493,6 +506,7 @@ const PROVIDER_CONFIG_FIELDS = [
   "baseUrl",
   "apiKey",
   "authType",
+  "accountId",
   "pricingCurrency",
   "models",
   "adjustInputTokens",
@@ -502,7 +516,12 @@ type ProviderConfigField = (typeof PROVIDER_CONFIG_FIELDS)[number]
 
 type ProviderAuthTypeValue = NonNullable<ProviderConfig["authType"]>
 
-const PROVIDER_AUTH_TYPES = ["authorization", "oauth2", "x-api-key"] as const
+const PROVIDER_AUTH_TYPES = [
+  "authorization",
+  "oauth2",
+  "x-api-key",
+  "azure-entra",
+] as const
 
 const PROVIDER_CONFIG_KEYS = new Set<ProviderConfigField>(
   PROVIDER_CONFIG_FIELDS,
@@ -847,7 +866,7 @@ function parseTokenUsagePricingTier(
     if (!TOKEN_USAGE_PRICING_KEYS.has(key)) {
       return { error: `${field}.${key} is not supported` }
     }
-    if (key === "tiers" && !allowTiers) {
+    if (["tiers", "offPeak", "peakWindows"].includes(key) && !allowTiers) {
       return { error: `${field}.tiers is not supported` }
     }
   }
@@ -874,6 +893,16 @@ function parseTokenUsagePricingConfig(
   if ("clear" in parsed) return { value: {} }
 
   const pricing: TokenUsagePricingConfig = { ...parsed.value }
+  if (isPlainObject(value)) {
+    const error = validatePeakPricing(value, field)
+    if (error) return { error }
+    if (value.offPeak !== undefined)
+      pricing.offPeak = value.offPeak as TokenUsagePricingTier
+    if (value.peakWindows !== undefined)
+      pricing.peakWindows = value.peakWindows as NonNullable<
+        TokenUsagePricingConfig["peakWindows"]
+      >
+  }
   if (!isPlainObject(value) || !Object.hasOwn(value, "tiers")) {
     return { value: pricing }
   }
@@ -937,6 +966,14 @@ function parseProviderModelConfig(
   if (keyError) return { error: keyError }
 
   const config: ModelConfig = {}
+  if (value.reasoningField !== undefined) {
+    if (
+      value.reasoningField !== "reasoning"
+      && value.reasoningField !== "reasoning_content"
+    )
+      return { error: `${field}.reasoningField is not supported` }
+    config.reasoningField = value.reasoningField
+  }
 
   const temperatureError = applyProviderModelTemperature(config, value, field)
   if (temperatureError) return { error: temperatureError }
@@ -1155,6 +1192,11 @@ function parseProviderConfig(
   if (keyError) return { error: keyError }
 
   const provider: ProviderConfig = {}
+  if (value.accountId !== undefined) {
+    if (typeof value.accountId !== "string")
+      return { error: `${field}.accountId must be a string` }
+    provider.accountId = value.accountId.trim()
+  }
 
   const typeError = applyProviderType(provider, value, field)
   if (typeError) return { error: typeError }
@@ -1840,6 +1882,17 @@ type ConfigPatchHandler = (
 ) => string | undefined
 
 const CONFIG_PATCH_HANDLERS: Partial<Record<string, ConfigPatchHandler>> = {
+  upstreamTransport: (next, value) => {
+    if (value === null) {
+      delete next.upstreamTransport
+      return
+    }
+    const error = validateUpstreamTransport(value)
+    if (error) return error
+    next.upstreamTransport = {
+      ...(value as NonNullable<AppConfig["upstreamTransport"]>),
+    }
+  },
   auth: applyAuthConfig,
   extraPrompts: applyExtraPrompts,
   smallModel: (next, value) => applyOptionalString(next, "smallModel", value),

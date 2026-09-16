@@ -6,6 +6,7 @@ import type { Model } from "~/services/copilot/get-models"
 
 import { accountsManager } from "../src/lib/accounts-manager"
 import { COMPACT_REQUEST } from "../src/lib/compact"
+import { requestContext } from "~/lib/request-context"
 import {
   RICH_TOOL_RESULT_MOVED_TEXT,
   translateToOpenAI,
@@ -109,6 +110,48 @@ function createThinkingModel(): Model {
 }
 
 describe("Anthropic to OpenAI translation logic", () => {
+  test("maps request session affinity to prompt_cache_key", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-4o",
+      messages: [{ role: "user", content: "Hello!" }],
+      max_tokens: 0,
+    }
+
+    const openAIPayload = requestContext.run(
+      {
+        parentSessionId: undefined,
+        sessionAffinity: " opencode-session ",
+        startTime: Date.now(),
+        traceId: "trace-123",
+        userAgent: "test",
+      },
+      () => translateToOpenAI(anthropicPayload),
+    )
+
+    expect(openAIPayload.prompt_cache_key).toBe("opencode-session")
+  })
+
+  test("omits prompt_cache_key when request session affinity is blank", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-4o",
+      messages: [{ role: "user", content: "Hello!" }],
+      max_tokens: 0,
+    }
+
+    const openAIPayload = requestContext.run(
+      {
+        parentSessionId: undefined,
+        sessionAffinity: "   ",
+        startTime: Date.now(),
+        traceId: "trace-123",
+        userAgent: "test",
+      },
+      () => translateToOpenAI(anthropicPayload),
+    )
+
+    expect(openAIPayload).not.toHaveProperty("prompt_cache_key")
+  })
+
   test("should translate minimal Anthropic payload to valid OpenAI payload", () => {
     const anthropicPayload: AnthropicMessagesPayload = {
       model: "gpt-4o",
@@ -141,12 +184,40 @@ describe("Anthropic to OpenAI translation logic", () => {
           name: "getWeather",
           description: "Gets weather info",
           input_schema: { location: { type: "string" } },
+          strict: true,
         },
       ],
       tool_choice: { type: "auto" },
     }
     const openAIPayload = translateToOpenAI(anthropicPayload)
+    expect(openAIPayload.tools?.[0]?.function.strict).toBe(true)
     expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+  })
+
+  test("maps inline Anthropic system messages to OpenAI user messages", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-4o",
+      messages: [
+        { role: "user", content: "Hello!" },
+        { role: "system", content: "Follow the repo style." },
+        {
+          role: "system",
+          content: [{ type: "text", text: "Keep the change focused." }],
+        },
+      ],
+      max_tokens: 128,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    expect(openAIPayload.messages).toEqual([
+      { role: "user", content: "Hello!" },
+      { role: "user", content: "Follow the repo style." },
+      {
+        role: "user",
+        content: [{ type: "text", text: "Keep the change focused." }],
+      },
+    ])
   })
 
   test("maps non-empty output_config effort to reasoning_effort", () => {
@@ -352,12 +423,7 @@ describe("Anthropic to OpenAI tool and document content translation", () => {
       {
         role: "tool",
         tool_call_id: "tool_123",
-        content: [
-          {
-            type: "text",
-            text: "Tool AskUserQuestion loaded",
-          },
-        ],
+        content: "Tool AskUserQuestion loaded",
       },
     ])
   })
@@ -409,7 +475,7 @@ describe("Anthropic to OpenAI tool and document content translation", () => {
 })
 
 describe("tool content support translation", () => {
-  test("keeps Copilot chat translation compatible with array and image tool results", () => {
+  test("moves Copilot image tool results to a user message by default", () => {
     const anthropicPayload: AnthropicMessagesPayload = {
       model: "gpt-4o",
       messages: [
@@ -446,7 +512,15 @@ describe("tool content support translation", () => {
       {
         role: "tool",
         tool_call_id: "tool_image",
+        content: "screenshot",
+      },
+      {
+        role: "user",
         content: [
+          {
+            type: "text",
+            text: "Tool result for tool_image:",
+          },
           {
             type: "text",
             text: "screenshot",
@@ -462,7 +536,7 @@ describe("tool content support translation", () => {
     ])
   })
 
-  test("keeps Copilot image tool content while downgrading unsupported PDFs", () => {
+  test("downgrades PDFs and moves rich Copilot tool results to a user message by default", () => {
     const anthropicPayload: AnthropicMessagesPayload = {
       model: "gpt-4o",
       messages: [
@@ -512,7 +586,16 @@ describe("tool content support translation", () => {
       {
         role: "tool",
         tool_call_id: "tool_pdf",
+        content:
+          "screenshot\nPDF file read: report.pdf\nPDF/document content is not supported by this Chat Completions upstream. Use the available text extracted from the document.",
+      },
+      {
+        role: "user",
         content: [
+          {
+            type: "text",
+            text: "Tool result for tool_pdf:",
+          },
           {
             type: "text",
             text: "screenshot",

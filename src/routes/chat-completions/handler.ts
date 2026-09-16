@@ -1,3 +1,4 @@
+import { writeSSEIfConnected } from "~/lib/sse"
 import type { Context } from "hono"
 
 import { streamSSE, type SSEMessage } from "hono/streaming"
@@ -303,7 +304,7 @@ async function writeChatCompletionsStreamError(
   message: string,
 ): Promise<void> {
   try {
-    await stream.writeSSE({
+    await writeSSEIfConnected(stream, {
       data: JSON.stringify({
         error: {
           message,
@@ -311,7 +312,7 @@ async function writeChatCompletionsStreamError(
         },
       }),
     })
-    await stream.writeSSE({ data: "[DONE]" })
+    await writeSSEIfConnected(stream, { data: "[DONE]" })
   } catch (streamError) {
     logger.warn(
       "Failed to write chat completions stream error event:",
@@ -403,17 +404,17 @@ function applyDefaultMaxTokens(
   payload: ChatCompletionsPayload,
   selectedModel: AccountSelectionOk["selectedModel"],
 ): ChatCompletionsPayload {
-  if (!isNullish(payload.max_tokens)) {
-    return payload
+  const updated = { ...payload }
+  if (
+    isNullish(updated.max_tokens)
+    && isNullish(updated.max_completion_tokens)
+  ) {
+    updated.max_tokens = selectedModel.capabilities.limits.max_output_tokens
   }
-
-  const updated = {
-    ...payload,
-    max_tokens: selectedModel.capabilities.limits.max_output_tokens,
+  if (updated.model.includes("gpt")) {
+    updated.max_completion_tokens ??= updated.max_tokens
+    delete updated.max_tokens
   }
-
-  debugJson(logger, "Set max_tokens to:", updated.max_tokens)
-
   return updated
 }
 
@@ -446,6 +447,7 @@ async function handleStreamingRequest(params: {
 
   try {
     response = await createChatCompletions(payload, accountCtx, {
+      clientSignal: c.req.raw.signal,
       upstreamRequestId: request.upstreamRequestId,
       sessionId: request.upstreamSessionId,
       requestId: request.requestId,
@@ -694,7 +696,7 @@ async function streamChatCompletionsAndLog(params: {
       }
 
       debugJson(logger, "Streaming chunk:", chunk)
-      await stream.writeSSE(chunk)
+      await writeSSEIfConnected(stream, chunk)
     }
   } catch (error) {
     const details = await extractErrorObservability(error)
@@ -837,6 +839,7 @@ async function handleNonStreamingRequest(params: {
 
   try {
     const response = await createChatCompletions(payload, accountCtx, {
+      clientSignal: c.req.raw.signal,
       upstreamRequestId: request.upstreamRequestId,
       sessionId: request.upstreamSessionId,
       requestId: request.requestId,

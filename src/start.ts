@@ -15,6 +15,13 @@ import {
   handleResponsesWebSocketUpgrade,
 } from "~/routes/responses/websocket"
 
+import {
+  DEFAULT_SERVER_HOST,
+  resolveServerBinding,
+  formatServerUrl,
+} from "./lib/server-host"
+import { getConfiguredApiKeys } from "./lib/request-auth"
+
 import { accountsManager } from "./lib/accounts-manager"
 import { addAccountToRegistry, saveAccountToken } from "./lib/accounts-registry"
 import {
@@ -42,6 +49,7 @@ import { pollAccessToken } from "./services/github/poll-access-token"
 
 interface RunServerOptions {
   port: number
+  host?: string
   verbose: boolean
   accountType: AccountType
   manual: boolean
@@ -121,6 +129,9 @@ function setupClaudeCode(models: AvailableModels, serverUrl: string): void {
   const command = generateEnvScript(
     {
       ANTHROPIC_BASE_URL: serverUrl,
+      API_TIMEOUT_MS: process.env.API_TIMEOUT_MS ?? "600000",
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:
+        process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC ?? "1",
       ANTHROPIC_AUTH_TOKEN: "dummy",
       ANTHROPIC_MODEL: sonnetModel ?? opusModel,
       ANTHROPIC_DEFAULT_OPUS_MODEL: opusModel,
@@ -129,12 +140,15 @@ function setupClaudeCode(models: AvailableModels, serverUrl: string): void {
       CLAUDE_CODE_USE_VERTEX: "0",
       CLAUDE_CODE_USE_BEDROCK: "0",
       DISABLE_NON_ESSENTIAL_MODEL_CALLS: "1",
-      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
       CLAUDE_CODE_ATTRIBUTION_HEADER: "0",
       CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false",
       CLAUDE_CODE_DISABLE_TERMINAL_TITLE: "true",
       CLAUDE_CODE_ENABLE_AWAY_SUMMARY: "0",
       CLAUDE_PLUGIN_ENABLE_QUESTION_RULES: "true",
+      CLAUDE_CODE_TOTAL_TOKENS_REMINDER:
+        process.env.CLAUDE_CODE_TOTAL_TOKENS_REMINDER ?? "off",
+      MCP_CONNECT_TIMEOUT_MS: process.env.MCP_CONNECT_TIMEOUT_MS ?? "20000",
+      CLAUDE_CODE_EFFORT_LEVEL: process.env.CLAUDE_CODE_EFFORT_LEVEL,
     },
     "claude",
   )
@@ -202,6 +216,10 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   state.rateLimitWait = options.rateLimitWait
   state.showToken = options.showToken
 
+  const binding = resolveServerBinding(
+    options.host ?? process.env.HOST ?? DEFAULT_SERVER_HOST,
+    getConfiguredApiKeys().length > 0,
+  )
   await ensurePaths()
   applySharedSessionAffinityRetention()
   await cacheVSCodeVersion()
@@ -213,9 +231,11 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   await accountsManager.initialize(state.vsCodeVersion)
 
   // If --github-token is provided, set it as a temporary (high priority) account
-  if (options.githubToken) {
+  const temporaryGithubToken =
+    options.githubToken ?? process.env.COPILOT_API_GITHUB_TOKEN?.trim()
+  if (temporaryGithubToken) {
     await accountsManager.setTemporaryAccount(
-      options.githubToken,
+      temporaryGithubToken,
       options.accountType,
     )
     consola.info("Using provided GitHub token as temporary account")
@@ -253,7 +273,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     `Available models: \n${models?.data.map((model) => `- ${model.id}`).join("\n") ?? "(no models loaded)"}`,
   )
 
-  const serverUrl = `http://localhost:${options.port}`
+  const serverUrl = formatServerUrl(binding.clientHostname, options.port)
 
   if (options.claudeCode) {
     logClaudeCodeTip()
@@ -269,18 +289,23 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   consola.box(`🌐 Admin UI: ${serverUrl}/admin`)
 
   const { createServer } = await import("./server")
-  const server = createServer({ enableMcpHttp })
+  const server = createServer({
+    enableMcpHttp,
+    networkExposed: binding.networkExposed,
+  })
   const responsesWebSocketHandler = createResponsesWebSocketHandler(
     server.fetch,
   )
 
   Bun.serve({
+    hostname: binding.hostname,
     port: options.port,
     idleTimeout: 0,
     fetch: (request, bunServer) => {
       const websocketResponse = handleResponsesWebSocketUpgrade(
         request,
         bunServer,
+        { allowWhenNoApiKeys: !binding.networkExposed },
       )
       if (websocketResponse !== null) {
         return websocketResponse
@@ -298,6 +323,10 @@ export const start = defineCommand({
     description: "Start the Copilot API server",
   },
   args: {
+    host: {
+      type: "string",
+      description: "Host to listen on (defaults to HOST or 127.0.0.1)",
+    },
     port: {
       alias: "p",
       type: "string",
@@ -385,6 +414,7 @@ export const start = defineCommand({
 
     return runServer({
       port: Number.parseInt(args.port, 10),
+      host: args.host,
       verbose: args.verbose,
       accountType,
       manual: args.manual,

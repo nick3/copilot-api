@@ -1,5 +1,5 @@
 import consola from "consola"
-import { events } from "fetch-event-stream"
+import { createResponsesHttpEventStream } from "~/services/responses-http"
 
 import type { CompactType } from "~/lib/compact"
 import type { ReasoningEffort } from "~/lib/reasoning-effort"
@@ -48,6 +48,7 @@ export const createChatCompletions = async (
     compactType?: CompactType
     requestId?: string
     fetchImpl?: typeof fetch
+    clientSignal?: AbortSignal
   },
 ) => {
   const ctx = account ?? accountFromState()
@@ -95,6 +96,7 @@ export const createChatCompletions = async (
       requestId: options?.requestId,
       callSite: "chat-completions",
       fetchImpl: options?.fetchImpl,
+      clientSignal: options?.clientSignal,
     },
   )
 
@@ -106,7 +108,7 @@ export const createChatCompletions = async (
   }
 
   if (payload.stream) {
-    return events(response)
+    return createResponsesHttpEventStream(response)
   }
 
   return (await response.json()) as ChatCompletionResponse
@@ -153,6 +155,7 @@ export interface Delta {
   }>
   reasoning_text?: string | null
   reasoning_content?: string | null
+  reasoning?: string | null
   reasoning_opaque?: string | null
 }
 
@@ -195,6 +198,7 @@ interface ResponseMessage {
   content: string | null
   reasoning_text?: string | null
   reasoning_content?: string | null
+  reasoning?: string | null
   reasoning_opaque?: string | null
   tool_calls?: Array<ToolCall>
 }
@@ -242,6 +246,7 @@ export interface ChatCompletionsPayload {
   thinking_budget?: number
   top_k?: number | null
   parallel_tool_calls?: boolean | null
+  prompt_cache_key?: string | null
 }
 
 export interface Tool {
@@ -250,6 +255,7 @@ export interface Tool {
     name: string
     description?: string
     parameters: Record<string, unknown>
+    strict?: boolean | null
   }
 }
 
@@ -261,6 +267,7 @@ export interface Message {
   tool_calls?: Array<ToolCall>
   tool_call_id?: string
   reasoning_content?: string | null
+  reasoning?: string | null
   reasoning_text?: string | null
   reasoning_opaque?: string | null
   copilot_cache_control?: CopilotCacheControl

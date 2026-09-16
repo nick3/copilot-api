@@ -476,7 +476,9 @@ describe("handleWebSearchViaResponses", () => {
     // Request was switched to the GPT model with a Responses web_search tool.
     expect(sentPayload?.model).toBe("gpt-5-mini")
     expect(sentPayload?.stream).toBe(true)
-    expect(sentPayload?.tools).toEqual([{ type: "web_search" }])
+    expect(sentPayload?.tools).toEqual([
+      { type: "web_search", search_context_size: "low" },
+    ])
 
     const response = captured.json as AnthropicResponse
     const types = response.content.map((b) => b.type)

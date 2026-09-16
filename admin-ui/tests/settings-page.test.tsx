@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import { renderToStaticMarkup } from "react-dom/server"
 
 import {
+  getAuthApiKeysFromConfig,
   ModelMappingsCard,
   ReasoningEffortsCard,
   ResponsesApiSettingsCard,
@@ -582,4 +583,25 @@ test("provider quick add maps presets to safe defaults", () => {
     adjustInputTokens: false,
     models: [],
   })
+})
+
+test("provider editor preserves new common capabilities through a form round trip", () => {
+  const model = {
+    reasoningField: "reasoning" as const,
+    codex: { enabled: false, supportsParallelToolCalls: false },
+    pricing: { input: 1, offPeak: { input: 0.5 }, peakWindows: [{ startMinuteUtc: 60, endMinuteUtc: 240, weekdays: [1, 5] }] },
+  }
+  const [provider] = providerItemsFromRecord({ azure: { type: "openai-responses", authType: "azure-entra", accountId: "keep-selection", models: { test: model } } })
+  expect(provider.authType).toBe("azure-entra")
+  expect(provider.accountId).toBe("keep-selection")
+  const result = parseProviderModelItems(provider.models, "azure")
+  expect(result).toEqual({ record: { test: model } })
+  provider.models[0].pricingJson = JSON.stringify({ peakWindows: [{ startMinuteUtc: -1, endMinuteUtc: 20 }] })
+  expect(parseProviderModelItems(provider.models, "azure")).toHaveProperty("error")
+})
+
+test("cleared gateway keys stay empty in the editor despite legacy config values", () => {
+  expect(getAuthApiKeysFromConfig({ auth: { apiKeys: [], allowLegacyApiKeyFallback: false }, apiKey: "legacy-test" })).toEqual([])
+  expect(getAuthApiKeysFromConfig({ apiKey: "legacy-test" })).toEqual(["legacy-test"])
+  expect(getAuthApiKeysFromConfig({ auth: { apiKeys: ["current-test"] }, apiKey: "legacy-test" })).toEqual(["current-test"])
 })

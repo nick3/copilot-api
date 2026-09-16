@@ -1,21 +1,31 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test"
+import { Hono } from "hono"
 
-import type { AnthropicMessagesPayload } from "../src/routes/messages/anthropic-types"
-import type { Model } from "../src/services/copilot/get-models"
 import type {
+  AnthropicMessagesPayload,
+  AnthropicResponse,
+} from "~/routes/messages/anthropic-types"
+import type { Model } from "~/services/copilot/get-models"
+import type {
+  ChatCompletionChunk,
   ChatCompletionResponse,
   ChatCompletionsPayload,
-} from "../src/services/copilot/create-chat-completions"
+} from "~/lib/types/chat-completions"
+import type { CreateMessagesReturn } from "~/services/copilot/create-messages"
 import type {
   CreateResponsesReturn,
   ResponsesPayload,
   ResponsesResult,
   ResponsesTransport,
-} from "../src/services/copilot/create-responses"
+} from "~/lib/types/responses"
 
-import { COMPACT_REQUEST } from "../src/lib/compact"
+import { COMPACT_REQUEST } from "~/lib/compact"
+import { closeUsageStore, getTokenUsageEventsPage } from "~/lib/token-usage"
+
+const DB_PATH_ENV = "COPILOT_API_SQLITE_DB_PATH"
 
 let capturedPayload: ChatCompletionsPayload | null = null
+let capturedMessagesPayload: AnthropicMessagesPayload | null = null
 let capturedResponsesPayload: ResponsesPayload | null = null
 let capturedResponsesOptions: {
   transport?: ResponsesTransport
@@ -44,6 +54,12 @@ const createChatCompletions = mock(
     })
   },
 )
+const createMessages = mock(
+  (payload: AnthropicMessagesPayload): Promise<CreateMessagesReturn> => {
+    capturedMessagesPayload = payload
+    return Promise.resolve(createMessagesResult(payload.model))
+  },
+)
 const createResponses = mock(
   (
     payload: ResponsesPayload,
@@ -59,12 +75,12 @@ const createResponses = mock(
 
 const {
   handleWithChatCompletions,
+  handleWithMessagesApi,
   handleWithResponsesApi,
   messagesApiFlowDependencies,
   prepareCopilotChatCompletionsPayload,
-} = await import("../src/routes/messages/api-flows")
-const { responsesUtilsDependencies } =
-  await import("../src/routes/responses/utils")
+} = await import("~/routes/messages/api-flows")
+const { responsesUtilsDependencies } = await import("~/routes/responses/utils")
 
 const defaultMessagesApiFlowDependencies = { ...messagesApiFlowDependencies }
 const defaultResponsesUtilsDependencies = { ...responsesUtilsDependencies }
@@ -80,12 +96,16 @@ const createContext = () =>
     json: (body: unknown) => Response.json(body),
   }) as Parameters<typeof handleWithChatCompletions>[0]
 
-beforeEach(() => {
+beforeEach(async () => {
+  process.env[DB_PATH_ENV] = ":memory:"
+  await closeUsageStore()
   capturedPayload = null
+  capturedMessagesPayload = null
   capturedResponsesPayload = null
   capturedResponsesOptions = null
   responsesApiWebSocketEnabled = true
   messagesApiFlowDependencies.createChatCompletions = createChatCompletions
+  messagesApiFlowDependencies.createMessages = createMessages
   messagesApiFlowDependencies.createResponses = createResponses
   responsesUtilsDependencies.getModelResponsesApiCompactThreshold = () =>
     undefined
@@ -95,12 +115,15 @@ beforeEach(() => {
   responsesUtilsDependencies.isResponsesApiWebSocketEnabled = () =>
     responsesApiWebSocketEnabled
   createChatCompletions.mockClear()
+  createMessages.mockClear()
   createResponses.mockClear()
 })
 
-afterEach(() => {
+afterEach(async () => {
   Object.assign(messagesApiFlowDependencies, defaultMessagesApiFlowDependencies)
   Object.assign(responsesUtilsDependencies, defaultResponsesUtilsDependencies)
+  await closeUsageStore()
+  Reflect.deleteProperty(process.env, DB_PATH_ENV)
 })
 
 test("messages Chat Completions flow adds Copilot cache control to system and latest non-system message", async () => {
@@ -258,6 +281,190 @@ test("messages Chat Completions flow omits reasoning effort without model suppor
   expect(capturedPayload).not.toHaveProperty("reasoning_effort")
 })
 
+test("messages Chat Completions flow emits an error event when the stream breaks during thinking output", async () => {
+  createChatCompletions.mockImplementationOnce(
+    (payload: ChatCompletionsPayload) => {
+      capturedPayload = payload
+      const stream = createChatCompletionsStream([
+        {
+          id: "chatcmpl-thinking-cut",
+          object: "chat.completion.chunk",
+          created: 0,
+          model: payload.model,
+          choices: [
+            {
+              index: 0,
+              delta: { reasoning_text: "partial thought" },
+              finish_reason: null,
+              logprobs: null,
+            },
+          ],
+        },
+        // The stream ends here: no [DONE], no finish_reason, no usage.
+      ])
+      return Promise.resolve(
+        stream,
+      ) as unknown as Promise<ChatCompletionResponse>
+    },
+  )
+
+  const payload: AnthropicMessagesPayload = {
+    max_tokens: 128,
+    messages: [{ role: "user", content: "hello" }],
+    model: "gpt-test",
+    stream: true,
+  }
+  const app = new Hono()
+  app.post("/", (c) =>
+    handleWithChatCompletions(c, payload, {
+      logger,
+      requestId: "request-1",
+    }),
+  )
+
+  const response = await app.request("/", { method: "POST" })
+  expect(response.status).toBe(200)
+  const events = parseSseEvents(await response.text())
+  const eventTypes = events.map((event) => event.event)
+
+  expect(eventTypes).toContain("message_start")
+  expect(eventTypes).toContain("content_block_delta")
+  expect(eventTypes).not.toContain("message_stop")
+  expect(events.at(-1)?.event).toBe("error")
+  expect(JSON.parse(events.at(-1)?.data ?? "{}")).toEqual({
+    type: "error",
+    error: {
+      message:
+        "An unexpected error occurred during streaming, retry your request.",
+      type: "api_error",
+    },
+  })
+})
+
+test("messages Chat Completions flow emits an error event when the upstream stream throws", async () => {
+  createChatCompletions.mockImplementationOnce(
+    (payload: ChatCompletionsPayload) => {
+      capturedPayload = payload
+      const stream = (async function* (): AsyncGenerator<{ data: string }> {
+        await Promise.resolve()
+        yield {
+          data: JSON.stringify({
+            id: "chatcmpl-throw",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: payload.model,
+            choices: [
+              {
+                index: 0,
+                delta: { content: "partial" },
+                finish_reason: null,
+                logprobs: null,
+              },
+            ],
+          }),
+        }
+        throw new Error("upstream connection reset")
+      })()
+      return Promise.resolve(
+        stream,
+      ) as unknown as Promise<ChatCompletionResponse>
+    },
+  )
+
+  const payload: AnthropicMessagesPayload = {
+    max_tokens: 128,
+    messages: [{ role: "user", content: "hello" }],
+    model: "gpt-test",
+    stream: true,
+  }
+  const app = new Hono()
+  app.post("/", (c) =>
+    handleWithChatCompletions(c, payload, {
+      logger,
+      requestId: "request-1",
+    }),
+  )
+
+  const response = await app.request("/", { method: "POST" })
+  expect(response.status).toBe(200)
+  const events = parseSseEvents(await response.text())
+  const eventTypes = events.map((event) => event.event)
+
+  expect(eventTypes).toContain("message_start")
+  expect(eventTypes).not.toContain("message_stop")
+  expect(events.at(-1)?.event).toBe("error")
+})
+
+test("messages Chat Completions flow ends without an error event on normal completion", async () => {
+  createChatCompletions.mockImplementationOnce(
+    (payload: ChatCompletionsPayload) => {
+      capturedPayload = payload
+      const stream = createChatCompletionsStream([
+        {
+          id: "chatcmpl-ok",
+          object: "chat.completion.chunk",
+          created: 0,
+          model: payload.model,
+          choices: [
+            {
+              index: 0,
+              delta: { content: "hello" },
+              finish_reason: null,
+              logprobs: null,
+            },
+          ],
+        },
+        {
+          id: "chatcmpl-ok",
+          object: "chat.completion.chunk",
+          created: 0,
+          model: payload.model,
+          choices: [
+            {
+              index: 0,
+              delta: {},
+              finish_reason: "stop",
+              logprobs: null,
+            },
+          ],
+          usage: {
+            prompt_tokens: 3,
+            completion_tokens: 1,
+            total_tokens: 4,
+          },
+        },
+        "[DONE]",
+      ])
+      return Promise.resolve(
+        stream,
+      ) as unknown as Promise<ChatCompletionResponse>
+    },
+  )
+
+  const payload: AnthropicMessagesPayload = {
+    max_tokens: 128,
+    messages: [{ role: "user", content: "hello" }],
+    model: "gpt-test",
+    stream: true,
+  }
+  const app = new Hono()
+  app.post("/", (c) =>
+    handleWithChatCompletions(c, payload, {
+      logger,
+      requestId: "request-1",
+    }),
+  )
+
+  const response = await app.request("/", { method: "POST" })
+  expect(response.status).toBe(200)
+  const events = parseSseEvents(await response.text())
+  const eventTypes = events.map((event) => event.event)
+
+  expect(eventTypes).toContain("message_delta")
+  expect(eventTypes).toContain("message_stop")
+  expect(eventTypes).not.toContain("error")
+})
+
 test("Copilot Chat Completions payload preparation marks two system and latest non-system message", () => {
   const payload: ChatCompletionsPayload = {
     model: "gpt-test",
@@ -313,6 +520,361 @@ test("Copilot Chat Completions payload preparation marks two system and latest n
       },
     },
   ])
+})
+
+test("messages Messages flow leaves streaming usage recording to the account-aware handler", async () => {
+  createMessages.mockImplementationOnce(
+    (payload: AnthropicMessagesPayload): Promise<CreateMessagesReturn> => {
+      capturedMessagesPayload = payload
+      return Promise.resolve(
+        createMessagesStream([
+          {
+            event: "message_start",
+            data: JSON.stringify({
+              message: {
+                content: [],
+                id: "msg-test",
+                model: payload.model,
+                role: "assistant",
+                stop_reason: null,
+                stop_sequence: null,
+                type: "message",
+                usage: {
+                  input_tokens: 3,
+                  output_tokens: 0,
+                },
+              },
+              type: "message_start",
+            }),
+          },
+          {
+            event: "message_delta",
+            data: JSON.stringify({
+              copilot_usage: {
+                total_nano_aiu: 4_119_900_000,
+              },
+              delta: {
+                stop_reason: "end_turn",
+                stop_sequence: null,
+              },
+              type: "message_delta",
+              usage: {
+                cache_creation_input_tokens: 10_612,
+                cache_read_input_tokens: 0,
+                input_tokens: 3,
+                output_tokens: 93,
+              },
+            }),
+          },
+          {
+            event: "message_stop",
+            data: JSON.stringify({ type: "message_stop" }),
+          },
+        ]) as unknown as CreateMessagesReturn,
+      )
+    },
+  )
+
+  const payload: AnthropicMessagesPayload = {
+    max_tokens: 128,
+    messages: [{ role: "user", content: "hello" }],
+    model: "claude-sonnet-4.6",
+    stream: true,
+  }
+  const app = new Hono()
+  app.post("/", (c) =>
+    handleWithMessagesApi(c, payload, {
+      logger,
+      requestId: "request-1",
+    }),
+  )
+
+  const response = await app.request("/", { method: "POST" })
+  expect(response.status).toBe(200)
+  await response.text()
+
+  const usageEvents = await getTokenUsageEventsPage({
+    page: 1,
+    pageSize: 10,
+    period: "today",
+  })
+
+  expect(capturedMessagesPayload?.model).toBe("claude-sonnet-4.6")
+  // The account-aware outer handler owns usage recording; this adapter must not double-count.
+  expect(usageEvents.items).toHaveLength(0)
+})
+
+test("messages Messages flow emits an error event when the stream ends without message_stop", async () => {
+  createMessages.mockImplementationOnce(
+    (payload: AnthropicMessagesPayload): Promise<CreateMessagesReturn> => {
+      capturedMessagesPayload = payload
+      return Promise.resolve(
+        createMessagesStream([
+          {
+            event: "message_start",
+            data: JSON.stringify({
+              message: {
+                content: [],
+                id: "msg-cut",
+                model: payload.model,
+                role: "assistant",
+                stop_reason: null,
+                stop_sequence: null,
+                type: "message",
+                usage: {
+                  input_tokens: 3,
+                  output_tokens: 0,
+                },
+              },
+              type: "message_start",
+            }),
+          },
+          {
+            event: "content_block_delta",
+            data: JSON.stringify({
+              delta: { text: "partial", type: "text_delta" },
+              index: 0,
+              type: "content_block_delta",
+            }),
+          },
+          // The stream ends here: no message_stop and no [DONE].
+        ]) as unknown as CreateMessagesReturn,
+      )
+    },
+  )
+
+  const payload: AnthropicMessagesPayload = {
+    max_tokens: 128,
+    messages: [{ role: "user", content: "hello" }],
+    model: "claude-sonnet-4.6",
+    stream: true,
+  }
+  const app = new Hono()
+  app.post("/", (c) =>
+    handleWithMessagesApi(c, payload, {
+      logger,
+      requestId: "request-1",
+    }),
+  )
+
+  const response = await app.request("/", { method: "POST" })
+  expect(response.status).toBe(200)
+  const events = parseSseEvents(await response.text())
+  const eventTypes = events.map((event) => event.event)
+
+  expect(eventTypes).toContain("message_start")
+  expect(eventTypes).not.toContain("message_stop")
+  expect(events.at(-1)?.event).toBe("error")
+  expect(JSON.parse(events.at(-1)?.data ?? "{}")).toEqual({
+    type: "error",
+    error: {
+      message:
+        "An unexpected error occurred during streaming, retry your request.",
+      type: "api_error",
+    },
+  })
+})
+
+test("messages Messages flow emits an error event when the upstream stream throws", async () => {
+  createMessages.mockImplementationOnce(
+    (payload: AnthropicMessagesPayload): Promise<CreateMessagesReturn> => {
+      capturedMessagesPayload = payload
+      const stream = (async function* (): AsyncGenerator<{
+        data: string
+        event: string
+      }> {
+        await Promise.resolve()
+        yield {
+          event: "message_start",
+          data: JSON.stringify({
+            message: {
+              content: [],
+              id: "msg-throw",
+              model: payload.model,
+              role: "assistant",
+              stop_reason: null,
+              stop_sequence: null,
+              type: "message",
+              usage: {
+                input_tokens: 3,
+                output_tokens: 0,
+              },
+            },
+            type: "message_start",
+          }),
+        }
+        throw new Error("upstream connection reset")
+      })()
+      return Promise.resolve(stream)
+    },
+  )
+
+  const payload: AnthropicMessagesPayload = {
+    max_tokens: 128,
+    messages: [{ role: "user", content: "hello" }],
+    model: "claude-sonnet-4.6",
+    stream: true,
+  }
+  const app = new Hono()
+  app.post("/", (c) =>
+    handleWithMessagesApi(c, payload, {
+      logger,
+      requestId: "request-1",
+    }),
+  )
+
+  const response = await app.request("/", { method: "POST" })
+  expect(response.status).toBe(200)
+  const events = parseSseEvents(await response.text())
+  const eventTypes = events.map((event) => event.event)
+
+  expect(eventTypes).toContain("message_start")
+  expect(eventTypes).not.toContain("message_stop")
+  expect(events.at(-1)?.event).toBe("error")
+})
+
+test("messages Messages flow forwards an upstream error event without appending another", async () => {
+  const upstreamError = JSON.stringify({
+    error: { message: "overloaded", type: "overloaded_error" },
+    type: "error",
+  })
+  createMessages.mockImplementationOnce(
+    (): Promise<CreateMessagesReturn> =>
+      Promise.resolve(
+        createMessagesStream([
+          {
+            event: "error",
+            data: upstreamError,
+          },
+          // The stream ends here without message_stop.
+        ]) as unknown as CreateMessagesReturn,
+      ),
+  )
+
+  const payload: AnthropicMessagesPayload = {
+    max_tokens: 128,
+    messages: [{ role: "user", content: "hello" }],
+    model: "claude-sonnet-4.6",
+    stream: true,
+  }
+  const app = new Hono()
+  app.post("/", (c) =>
+    handleWithMessagesApi(c, payload, {
+      logger,
+      requestId: "request-1",
+    }),
+  )
+
+  const response = await app.request("/", { method: "POST" })
+  expect(response.status).toBe(200)
+  const events = parseSseEvents(await response.text())
+
+  expect(events).toEqual([{ data: upstreamError, event: "error" }])
+})
+
+test("messages Messages flow ends without an error event on normal completion", async () => {
+  createMessages.mockImplementationOnce(
+    (payload: AnthropicMessagesPayload): Promise<CreateMessagesReturn> => {
+      capturedMessagesPayload = payload
+      return Promise.resolve(
+        createMessagesStream([
+          {
+            event: "message_start",
+            data: JSON.stringify({
+              message: {
+                content: [],
+                id: "msg-ok",
+                model: payload.model,
+                role: "assistant",
+                stop_reason: null,
+                stop_sequence: null,
+                type: "message",
+                usage: {
+                  input_tokens: 3,
+                  output_tokens: 0,
+                },
+              },
+              type: "message_start",
+            }),
+          },
+          {
+            event: "message_stop",
+            data: JSON.stringify({ type: "message_stop" }),
+          },
+          {
+            event: "message_stop",
+            data: "[DONE]",
+          },
+        ]) as unknown as CreateMessagesReturn,
+      )
+    },
+  )
+
+  const payload: AnthropicMessagesPayload = {
+    max_tokens: 128,
+    messages: [{ role: "user", content: "hello" }],
+    model: "claude-sonnet-4.6",
+    stream: true,
+  }
+  const app = new Hono()
+  app.post("/", (c) =>
+    handleWithMessagesApi(c, payload, {
+      logger,
+      requestId: "request-1",
+    }),
+  )
+
+  const response = await app.request("/", { method: "POST" })
+  expect(response.status).toBe(200)
+  const eventTypes = parseSseEvents(await response.text()).map(
+    (event) => event.event,
+  )
+
+  expect(eventTypes).toContain("message_stop")
+  expect(eventTypes).not.toContain("error")
+})
+
+test("messages Messages flow leaves non-streaming usage recording to the account-aware handler", async () => {
+  createMessages.mockImplementationOnce(
+    (payload: AnthropicMessagesPayload): Promise<CreateMessagesReturn> => {
+      capturedMessagesPayload = payload
+      return Promise.resolve({
+        ...createMessagesResult(payload.model),
+        copilot_usage: {
+          total_nano_aiu: 1_000_000_000,
+        },
+        usage: {
+          cache_creation_input_tokens: 200,
+          cache_read_input_tokens: 30,
+          input_tokens: 12,
+          output_tokens: 8,
+        },
+      })
+    },
+  )
+
+  const payload: AnthropicMessagesPayload = {
+    max_tokens: 128,
+    messages: [{ role: "user", content: "hello" }],
+    model: "claude-sonnet-4.6",
+  }
+
+  const response = await handleWithMessagesApi(createContext(), payload, {
+    logger,
+    requestId: "request-1",
+  })
+  expect(response.status).toBe(200)
+  await response.json()
+
+  const usageEvents = await getTokenUsageEventsPage({
+    page: 1,
+    pageSize: 10,
+    period: "today",
+  })
+
+  expect(capturedMessagesPayload?.model).toBe("claude-sonnet-4.6")
+  // The account-aware outer handler owns usage recording; this adapter must not double-count.
+  expect(usageEvents.items).toHaveLength(0)
 })
 
 test("messages Responses flow uses websocket transport by default for dual-endpoint models", async () => {
@@ -558,6 +1120,53 @@ const createModel = (
   vendor: "openai",
   version: "1",
 })
+
+const createMessagesResult = (model: string): AnthropicResponse => ({
+  content: [],
+  id: "msg-test",
+  model,
+  role: "assistant",
+  stop_reason: "end_turn",
+  stop_sequence: null,
+  type: "message",
+  usage: {
+    input_tokens: 0,
+    output_tokens: 0,
+  },
+})
+
+async function* createMessagesStream(
+  events: Array<{ data: string; event: string }>,
+): AsyncGenerator<{ data: string; event: string }> {
+  for (const event of events) {
+    await Promise.resolve()
+    yield event
+  }
+}
+
+async function* createChatCompletionsStream(
+  chunks: Array<ChatCompletionChunk | string>,
+): AsyncGenerator<{ data: string }> {
+  for (const chunk of chunks) {
+    await Promise.resolve()
+    yield { data: typeof chunk === "string" ? chunk : JSON.stringify(chunk) }
+  }
+}
+
+const parseSseEvents = (
+  text: string,
+): Array<{ data: string; event: string }> => {
+  const events: Array<{ data: string; event: string }> = []
+  let eventName = ""
+  for (const line of text.split("\n")) {
+    if (line.startsWith("event: ")) {
+      eventName = line.slice("event: ".length).trim()
+    } else if (line.startsWith("data: ")) {
+      events.push({ data: line.slice("data: ".length), event: eventName })
+    }
+  }
+  return events
+}
 
 const createResponsesResult = (model: string): ResponsesResult => ({
   created_at: 0,

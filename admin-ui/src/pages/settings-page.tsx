@@ -1,3 +1,4 @@
+import { validatePeakPricing, validateUpstreamTransport } from "../../../shared/config-validation"
 import {
   useCallback,
   useEffect,
@@ -96,6 +97,7 @@ const PROVIDER_AUTH_TYPES: Array<ProviderAuthType> = [
   "x-api-key",
   "authorization",
   "oauth2",
+  "azure-entra",
 ]
 
 const TOOL_CONTENT_SUPPORT_TYPES: Array<ToolContentSupportType> = [
@@ -129,6 +131,8 @@ const TOKEN_USAGE_PRICING_NUMBER_FIELDS = [
 const TOKEN_USAGE_PRICING_FIELDS = [
   ...TOKEN_USAGE_PRICING_NUMBER_FIELDS,
   "tiers",
+  "offPeak",
+  "peakWindows",
 ] as const
 
 const TOKEN_USAGE_PRICING_KEYS = new Set<string>(TOKEN_USAGE_PRICING_FIELDS)
@@ -229,6 +233,7 @@ type ModelMappingItem = {
 }
 
 type ProviderModelItem = {
+  reasoningField?: "inherit" | "reasoning" | "reasoning_content"
   id: string
   model: string
   temperature: string
@@ -255,6 +260,7 @@ type ProviderModelItem = {
 }
 
 type ProviderItem = {
+  accountId?: string
   id: string
   name: string
   type: string
@@ -392,9 +398,9 @@ function normalizeAuthApiKeys(value: unknown): Array<string> {
   )]
 }
 
-function getAuthApiKeysFromConfig(config: AdminConfig): Array<string> {
+export function getAuthApiKeysFromConfig(config: AdminConfig): Array<string> {
   const configuredApiKeys = normalizeAuthApiKeys(config.auth?.apiKeys)
-  if (configuredApiKeys.length > 0) {
+  if (configuredApiKeys.length > 0 || config.auth?.allowLegacyApiKeyFallback === false) {
     return configuredApiKeys
   }
 
@@ -746,6 +752,7 @@ export function providerItemsFromRecord(record: ProviderRecord | undefined): Arr
   return Object.entries(record).map(([name, provider]) => ({
     id: createItemId(),
     name,
+    accountId: provider.accountId,
     type: normalizeProviderType(provider.type),
     enabled: provider.enabled ?? true,
     baseUrl: provider.baseUrl ?? "",
@@ -756,6 +763,7 @@ export function providerItemsFromRecord(record: ProviderRecord | undefined): Arr
     models: Object.entries(provider.models ?? {}).map(([model, config]) => ({
       id: createItemId(),
       model,
+      reasoningField: config.reasoningField ?? "inherit",
       temperature: config.temperature === undefined ? "" : String(config.temperature),
       topP: config.topP === undefined ? "" : String(config.topP),
       topK: config.topK === undefined ? "" : String(config.topK),
@@ -901,7 +909,7 @@ function parsePricingTierObject(
     if (!TOKEN_USAGE_PRICING_KEYS.has(key)) {
       return { error: `${field}.${key} is not supported.` }
     }
-    if (key === "tiers" && !allowTiers) {
+    if (["tiers", "offPeak", "peakWindows"].includes(key) && !allowTiers) {
       return { error: `${field}.tiers is not supported.` }
     }
   }
@@ -933,6 +941,12 @@ function parseOptionalPricingJson(
     if ("error" in base) return base
 
     const pricing: TokenUsagePricingConfig = { ...base.record }
+    if (isPlainObject(parsed)) {
+      const error = validatePeakPricing(parsed, field)
+      if (error) return { error }
+      if (parsed.offPeak !== undefined) pricing.offPeak = parsed.offPeak as TokenUsagePricingTier
+      if (parsed.peakWindows !== undefined) pricing.peakWindows = parsed.peakWindows as NonNullable<TokenUsagePricingConfig["peakWindows"]>
+    }
     if (!isPlainObject(parsed) || !Object.hasOwn(parsed, "tiers")) {
       return {
         record: Object.keys(pricing).length > 0 ? pricing : undefined,
@@ -1109,6 +1123,7 @@ function parseSingleModelItem(
       modelItem.codexSupportsParallelToolCalls
   }
   if (Object.keys(codexConfig).length > 0) config.codex = codexConfig
+  if (modelItem.reasoningField && modelItem.reasoningField !== "inherit") config.reasoningField = modelItem.reasoningField
   if (pricing.record) config.pricing = pricing.record
   if (extraBody.record) config.extraBody = extraBody.record
 
@@ -1177,6 +1192,7 @@ function providerRecordFromItems(items: Array<ProviderItem>): ParseResult<Provid
       baseUrl: baseUrl || undefined,
       apiKey: apiKey || undefined,
       authType: item.authType,
+      ...(item.accountId ? { accountId: item.accountId } : {}),
       pricingCurrency: pricingCurrency || undefined,
       adjustInputTokens: item.adjustInputTokens,
     }
@@ -3923,6 +3939,17 @@ function ProviderModelRow({
         </Button>
       </div>
 
+      <div className="space-y-2">
+        <Label>{t("settingsPage.advanced.providersReasoningFieldLabel")}</Label>
+        <Select value={item.reasoningField ?? "inherit"} onValueChange={(value) => onUpdateModel(providerId, item.id, { reasoningField: value as ProviderModelItem["reasoningField"] })}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="inherit">{t("settingsPage.advanced.providersBooleanInherit")}</SelectItem>
+            <SelectItem value="reasoning_content">reasoning_content</SelectItem>
+            <SelectItem value="reasoning">reasoning</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
       <div className="grid gap-3 md:grid-cols-2">
         <div className="grid gap-2 rounded-md bg-muted/40 px-3 py-2">
           <Label className="text-sm font-medium">
@@ -4436,6 +4463,7 @@ function ProviderItemCard({
               <SelectItem value="oauth2">
                 {t("settingsPage.advanced.providersAuthTypeOauth2")}
               </SelectItem>
+              <SelectItem value="azure-entra">Azure Entra ID</SelectItem>
             </SelectContent>
           </Select>
           <div className="text-muted-foreground text-xs">
@@ -4686,6 +4714,9 @@ function applyNonNegativeNumberInputChange(params: {
 }
 
 type SettingsPageViewProps = {
+  transportJson: string
+  transportIssue: string | null
+  onTransportChange: (value: string) => void
   loading: boolean
   saving: boolean
   error: string | null
@@ -4832,6 +4863,17 @@ function useSettingsPageState(): SettingsPageViewProps {
     captureOther: false,
   })
   const [draft, setDraft] = useState<AdminConfig>({})
+  const [transportJson, setTransportJson] = useState("{}")
+  const [transportIssue, setTransportIssue] = useState<string | null>(null)
+  const onTransportChange = (text: string) => {
+    setTransportJson(text)
+    try {
+      const value: unknown = JSON.parse(text)
+      const issue = validateUpstreamTransport(value)
+      setTransportIssue(issue ?? null)
+      if (!issue) setDraft((previous) => ({ ...previous, upstreamTransport: value as AdminConfig["upstreamTransport"] }))
+    } catch { setTransportIssue(i18n.t("settingsPage.advanced.transportInvalidJson")) }
+  }
   const [initialDraftJson, setInitialDraftJson] = useState<string>("{}")
   const [modelRefreshIntervalInput, setModelRefreshIntervalInput] =
     useState<string>("")
@@ -4965,12 +5007,14 @@ function useSettingsPageState(): SettingsPageViewProps {
       setConfigPath(_configPath ?? null)
       const normalizedDraft = {
         ...configWithoutDeprecatedContextManagement,
-        auth: { apiKeys: normalizedAuthApiKeys },
+        auth: { ...configData.auth, apiKeys: normalizedAuthApiKeys },
         contextManagement,
         modelAliases: normalizedAliases,
         modelMappings: normalizedMappings,
       }
       setDraft(normalizedDraft)
+      setTransportJson(JSON.stringify(configData.upstreamTransport ?? {}, null, 2))
+      setTransportIssue(null)
       setInitialDraftJson(toComparableDraftJson(normalizedDraft))
       setExtraFromRecord(configData.extraPrompts)
       setReasoningFromRecord(configData.modelReasoningEfforts)
@@ -5302,7 +5346,7 @@ function useSettingsPageState(): SettingsPageViewProps {
 
   const hasModels = models.length > 0
   const smallModelValue = draft.smallModel ? draft.smallModel : "__default__"
-  const canSave =
+  const canSave = !transportIssue &&
     !saving
     && !loading
     && !(extraMode === "json" && extraJsonIssue)
@@ -5403,6 +5447,7 @@ function useSettingsPageState(): SettingsPageViewProps {
   const providerModelSuggestions = deriveProviderModelSuggestions(providersItems)
 
   return {
+    transportJson, transportIssue, onTransportChange,
     loading,
     saving,
     error,
@@ -5528,6 +5573,7 @@ function useSettingsPageState(): SettingsPageViewProps {
 }
 
 function SettingsPageView({
+  transportJson, transportIssue, onTransportChange,
   loading,
   saving,
   error,
@@ -5929,6 +5975,14 @@ function SettingsPageView({
             ref={(el) => registerSection("advanced", el)}
             style={{ animationDelay: "240ms" }}
           >
+            <Card className="mb-4">
+              <CardHeader><CardTitle>{t("settingsPage.advanced.transportTitle")}</CardTitle><CardDescription>{t("settingsPage.advanced.transportHint")}</CardDescription></CardHeader>
+              <CardContent className="space-y-2">
+                <Label htmlFor="upstream-transport">upstreamTransport</Label>
+                <Textarea id="upstream-transport" className="font-mono" rows={9} value={transportJson} onChange={(event) => onTransportChange(event.target.value)} />
+                {transportIssue ? <p role="alert" className="text-destructive text-sm">{transportIssue}</p> : null}
+              </CardContent>
+            </Card>
             <AdvancedSettingsCard
               accountAffinityEnabled={accountAffinityEnabled}
               modelRefreshIntervalInput={modelRefreshIntervalInput}

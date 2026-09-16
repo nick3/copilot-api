@@ -14,11 +14,16 @@ const SCOPE = "openid profile email offline_access"
 const JWT_CLAIM_PATH = "https://api.openai.com/auth"
 const REFRESH_BUFFER_MS = 60_000
 const CALLBACK_TIMEOUT_MS = 45_000
+const REFRESH_TIMEOUT_MS = 30_000
 
 interface TokenSuccessResult {
   accessToken: string
   refreshToken: string
   expiresAt: number
+}
+
+export interface RefreshCodexCredentialsOptions {
+  timeoutMs?: number
 }
 
 interface OAuthPageOptions {
@@ -241,9 +246,7 @@ async function exchangeAuthorizationCode(
     || typeof payload.refresh_token !== "string"
     || typeof payload.expires_in !== "number"
   ) {
-    throw new TypeError(
-      `Codex token exchange response missing fields: ${JSON.stringify(payload)}`,
-    )
+    throw new TypeError("Codex token exchange response missing required fields")
   }
 
   return {
@@ -255,18 +258,33 @@ async function exchangeAuthorizationCode(
 
 async function refreshAccessToken(
   refreshToken: string,
+  options: RefreshCodexCredentialsOptions = {},
 ): Promise<TokenSuccessResult> {
-  const response = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: CLIENT_ID,
-    }),
-  })
+  const timeoutMs = options.timeoutMs ?? REFRESH_TIMEOUT_MS
+  const signal = AbortSignal.timeout(timeoutMs)
+  let response: Response
+
+  try {
+    response = await fetch(TOKEN_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        client_id: CLIENT_ID,
+      }),
+      signal,
+    })
+  } catch (error) {
+    if (signal.aborted) {
+      throw new Error(`Codex token refresh timed out after ${timeoutMs}ms`, {
+        cause: error,
+      })
+    }
+    throw error
+  }
 
   if (!response.ok) {
     const details = await response.text().catch(() => "")
@@ -286,9 +304,7 @@ async function refreshAccessToken(
     || typeof payload.refresh_token !== "string"
     || typeof payload.expires_in !== "number"
   ) {
-    throw new TypeError(
-      `Codex token refresh response missing fields: ${JSON.stringify(payload)}`,
-    )
+    throw new TypeError("Codex token refresh response missing required fields")
   }
 
   return {
@@ -441,8 +457,12 @@ export async function loginCodex(
 
 export async function refreshCodexCredentials(
   credentials: CodexCredentials,
+  options: RefreshCodexCredentialsOptions = {},
 ): Promise<CodexCredentials> {
-  const tokenResult = await refreshAccessToken(credentials.refreshToken)
+  const tokenResult = await refreshAccessToken(
+    credentials.refreshToken,
+    options,
+  )
   const accountId = getAccountId(tokenResult.accessToken)
   if (!accountId) {
     throw new Error("Failed to extract Codex account id from access token")

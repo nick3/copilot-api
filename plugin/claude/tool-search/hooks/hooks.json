@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "matcher": "mcp__plugin_tool-search_tool_search__search",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/allow-tool-search.js\""
+          }
+        ]
+      }
+    ]
+  }
+}

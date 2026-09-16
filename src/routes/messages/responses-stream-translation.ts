@@ -18,7 +18,6 @@ import {
   type ResponsesResult,
   type ResponseStreamEvent,
   type ResponseTextDeltaEvent,
-  type ResponseTextDoneEvent,
 } from "~/services/copilot/create-responses"
 
 import { type AnthropicStreamEventData } from "./anthropic-types"
@@ -134,9 +133,6 @@ export const translateResponsesStreamEvent = (
       return handleReasoningSummaryTextDone(rawEvent, state)
     }
 
-    case "response.output_text.done": {
-      return handleOutputTextDone(rawEvent, state)
-    }
     case "response.output_item.done": {
       return handleOutputItemDone(rawEvent, state)
     }
@@ -510,35 +506,6 @@ const handleReasoningSummaryTextDone = (
       },
     })
     state.blockHasDelta.add(blockIndex)
-  }
-
-  return events
-}
-
-const handleOutputTextDone = (
-  rawEvent: ResponseTextDoneEvent,
-  state: ResponsesStreamState,
-): Array<AnthropicStreamEventData> => {
-  const events = new Array<AnthropicStreamEventData>()
-  const outputIndex = rawEvent.output_index
-  const contentIndex = rawEvent.content_index
-  const text = rawEvent.text
-
-  const blockIndex = openTextBlockIfNeeded(state, {
-    outputIndex,
-    contentIndex,
-    events,
-  })
-
-  if (text && !state.blockHasDelta.has(blockIndex)) {
-    events.push({
-      type: "content_block_delta",
-      index: blockIndex,
-      delta: {
-        type: "text_delta",
-        text,
-      },
-    })
   }
 
   return events

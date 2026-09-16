@@ -10,6 +10,7 @@ import {
   type ProviderType,
   type ResolvedProviderConfig,
 } from "~/lib/config"
+import { builtinProviderModelRegistry } from "~/lib/builtin-provider-models"
 import { forwardError } from "~/lib/error"
 import { createHandlerLogger } from "~/lib/logger"
 import { getAvailableModels, toClientModelId } from "~/lib/models"
@@ -65,6 +66,32 @@ function getStringField(
   return typeof value === "string" && value.trim() ? value : undefined
 }
 
+function getBuiltinProviderModelRecords(
+  provider: string,
+): Array<Record<string, unknown>> {
+  return builtinProviderModelRegistry.getModelIds(provider).map((id) => ({
+    id,
+    name: id,
+    object: "model",
+  }))
+}
+
+type ProviderModelsFallbackReason = "error" | "invalid_body" | "non_ok"
+
+function getFallbackProviderModelRecords(
+  provider: string,
+  reason: ProviderModelsFallbackReason,
+  details: Record<string, unknown> = {},
+): Array<Record<string, unknown>> {
+  const fallbackModels = getBuiltinProviderModelRecords(provider)
+  logger.warn(`models.provider.fallback_${reason}`, {
+    provider,
+    ...details,
+    fallbackModelCount: fallbackModels.length,
+  })
+  return fallbackModels
+}
+
 function normalizeProviderModel(
   provider: string,
   model: unknown,
@@ -100,6 +127,43 @@ function normalizeProviderModel(
   }
 }
 
+function normalizeProviderModels(
+  provider: string,
+  models: Array<unknown>,
+): Array<ClientModel> {
+  return models
+    .map((model) => normalizeProviderModel(provider, model))
+    .filter((model): model is ClientModel => model !== null)
+}
+
+async function getProviderModelRecords(
+  providerConfig: ResolvedProviderConfig,
+  requestHeaders: Headers,
+): Promise<Array<Record<string, unknown>>> {
+  try {
+    const response = await forwardProviderModels(providerConfig, requestHeaders)
+    if (!response.ok) {
+      return getFallbackProviderModelRecords(providerConfig.name, "non_ok", {
+        statusCode: response.status,
+      })
+    }
+
+    const body = await response.json()
+    if (!isRecord(body) || !Array.isArray(body.data)) {
+      return getFallbackProviderModelRecords(
+        providerConfig.name,
+        "invalid_body",
+      )
+    }
+
+    return body.data.filter(isRecord)
+  } catch (error) {
+    return getFallbackProviderModelRecords(providerConfig.name, "error", {
+      error,
+    })
+  }
+}
+
 async function getProviderModels(
   provider: string,
   requestHeaders: Headers,
@@ -111,36 +175,24 @@ async function getProviderModels(
     }
 
     if (providerConfig.name === "codex") {
-      const codexModels = getCodexModels().data
-      return codexModels
-        .map((model) => normalizeProviderModel(providerConfig.name, model))
-        .filter((model): model is ClientModel => model !== null)
+      return normalizeProviderModels(providerConfig.name, getCodexModels().data)
     }
 
-    const response = await forwardProviderModels(providerConfig, requestHeaders)
-    if (!response.ok) {
-      logger.warn("models.provider.skip_non_ok", {
+    const models = await getProviderModelRecords(providerConfig, requestHeaders)
+    return normalizeProviderModels(providerConfig.name, models)
+  } catch (error) {
+    if (provider === "codex") {
+      logger.warn("models.provider.skip_error", {
         provider,
-        statusCode: response.status,
+        error,
       })
       return []
     }
 
-    const body = await response.json()
-    if (!isRecord(body) || !Array.isArray(body.data)) {
-      logger.warn("models.provider.skip_invalid_body", { provider })
-      return []
-    }
-
-    return body.data
-      .map((model) => normalizeProviderModel(providerConfig.name, model))
-      .filter((model): model is ClientModel => model !== null)
-  } catch (error) {
-    logger.warn("models.provider.skip_error", {
-      provider,
+    const fallbackModels = getFallbackProviderModelRecords(provider, "error", {
       error,
     })
-    return []
+    return normalizeProviderModels(provider, fallbackModels)
   }
 }
 
@@ -248,7 +300,7 @@ function getCopilotCodexCandidates(): Array<SyntheticCodexModelCandidate> {
   const candidates: Array<SyntheticCodexModelCandidate> = []
   for (const model of getAvailableModels()) {
     try {
-      if (isCopilotMessagesFallbackModel(model)) {
+      if (isCopilotCodexCandidate(model)) {
         candidates.push(createCopilotCodexCandidate(model))
       }
     } catch (error) {
@@ -261,17 +313,37 @@ function getCopilotCodexCandidates(): Array<SyntheticCodexModelCandidate> {
   return candidates
 }
 
-function isCopilotMessagesFallbackModel(model: Model): boolean {
+function isCopilotCodexCandidate(model: Model): boolean {
   const endpoints = model.supported_endpoints ?? []
   return (
     endpoints.some(
       (endpoint) =>
         endpoint === MESSAGES_ENDPOINT
-        || endpoint === CHAT_COMPLETIONS_ENDPOINT,
-    )
-    && !endpoints.some((endpoint) => RESPONSES_ENDPOINTS.has(endpoint))
-    && model.capabilities.supports.tool_calls !== false
+        || endpoint === CHAT_COMPLETIONS_ENDPOINT
+        || RESPONSES_ENDPOINTS.has(endpoint),
+    ) && model.capabilities.supports.tool_calls !== false
   )
+}
+
+function describeCopilotAdapter(model: Model): string {
+  const supportsResponses = model.supported_endpoints?.some((endpoint) =>
+    RESPONSES_ENDPOINTS.has(endpoint),
+  )
+  // Codex clients only use the native Responses API for gpt-* models; other
+  // models fall back to the Messages route even when they advertise native
+  // /responses support (see shouldFallbackToMessages).
+  if (model.id.startsWith("gpt") && supportsResponses) {
+    return `${model.name} through the Copilot Responses API.`
+  }
+  // Mirrors the Messages route dispatch order: native Messages first, then
+  // the Messages-to-Responses translation, then Messages-to-Chat.
+  if (model.supported_endpoints?.includes(MESSAGES_ENDPOINT)) {
+    return `${model.name} through the Copilot Messages adapter.`
+  }
+  if (supportsResponses) {
+    return `${model.name} through the Copilot Messages-to-Responses adapter.`
+  }
+  return `${model.name} through the Copilot Messages-to-Chat adapter.`
 }
 
 function createCopilotCodexCandidate(
@@ -280,17 +352,13 @@ function createCopilotCodexCandidate(
   const reasoningEfforts = normalizeReasoningEfforts(
     model.capabilities.supports.reasoning_effort,
   )
-  const usesNativeMessages =
-    model.supported_endpoints?.includes(MESSAGES_ENDPOINT)
   return {
     slug: toClientModelId(model.id),
     displayName: model.name,
-    description:
-      usesNativeMessages ?
-        `${model.name} through the Copilot Messages adapter.`
-      : `${model.name} through the Copilot Messages-to-Chat adapter.`,
+    description: describeCopilotAdapter(model),
     contextWindow: positiveNumber(
-      model.capabilities.limits.max_context_window_tokens,
+      model.capabilities.limits.max_context_window_tokens
+        ?? model.capabilities.limits.max_prompt_tokens,
       256_000,
     ),
     maxOutputTokens: positiveNumber(
@@ -299,11 +367,11 @@ function createCopilotCodexCandidate(
     ),
     inputModalities:
       model.capabilities.supports.vision ? ["text", "image"] : ["text"],
-    reasoningEfforts,
-    defaultReasoningEffort: selectDefaultReasoningEffort(reasoningEfforts),
     supportsParallelToolCalls: Boolean(
       model.capabilities.supports.parallel_tool_calls,
     ),
+    reasoningEfforts,
+    defaultReasoningEffort: selectDefaultReasoningEffort(reasoningEfforts),
   }
 }
 
@@ -365,29 +433,10 @@ function isMessagesFallbackProviderType(type: ProviderType): boolean {
   return type === "anthropic" || type === "openai-compatible"
 }
 
-async function getProviderModelRecords(
-  providerConfig: ResolvedProviderConfig,
-  requestHeaders: Headers,
-): Promise<Array<Record<string, unknown>>> {
-  try {
-    const response = await forwardProviderModels(providerConfig, requestHeaders)
-    if (!response.ok) {
-      logger.warn("models.codex.provider_skip_non_ok", {
-        provider: providerConfig.name,
-        statusCode: response.status,
-      })
-      return []
-    }
-    const body = await response.json()
-    if (!isRecord(body) || !Array.isArray(body.data)) return []
-    return body.data.filter(isRecord)
-  } catch (error) {
-    logger.warn("models.codex.provider_models_error", {
-      provider: providerConfig.name,
-      error,
-    })
-    return []
-  }
+function describeProviderAdapter(type: ProviderType): string {
+  if (type === "anthropic") return "Messages"
+  if (type === "openai-responses") return "Messages-to-Responses"
+  return "Messages-to-Chat"
 }
 
 function createProviderCodexCandidate(
@@ -397,63 +446,82 @@ function createProviderCodexCandidate(
   modelConfig: ModelConfig | undefined,
   effectiveType: ProviderType,
 ): SyntheticCodexModelCandidate {
-  const codexConfig = modelConfig?.codex
+  const builtinModelConfig = builtinProviderModelRegistry.getModelConfig(
+    providerConfig.name,
+    modelId,
+  )
   const configuredReasoningEfforts = normalizeReasoningEfforts(
-    codexConfig?.reasoningEfforts,
+    modelConfig?.codex?.reasoningEfforts,
+  )
+  const remoteReasoningEfforts = normalizeRemoteReasoningEfforts(remoteModel)
+  const builtinReasoningEfforts = normalizeReasoningEfforts(
+    builtinModelConfig?.reasoningEfforts,
   )
   const reasoningEfforts =
-    configuredReasoningEfforts.length > 0 ?
-      configuredReasoningEfforts
-    : normalizeRemoteReasoningEfforts(remoteModel)
+    configuredReasoningEfforts.length > 0 ? configuredReasoningEfforts
+    : remoteReasoningEfforts.length > 0 ? remoteReasoningEfforts
+    : builtinReasoningEfforts
   const configuredModalities = normalizeInputModalities(
-    codexConfig?.inputModalities,
+    modelConfig?.codex?.inputModalities,
   )
   const remoteModalities = normalizeInputModalities(
     remoteModel?.input_modalities ?? remoteModel?.modalities,
+  )
+  const builtinModalities = normalizeInputModalities(
+    builtinModelConfig?.inputModalities,
   )
   const displayName =
     getStringField(remoteModel ?? {}, "display_name")
     ?? getStringField(remoteModel ?? {}, "name")
     ?? modelId
-  const adapterName =
-    effectiveType === "anthropic" ? "Messages" : "Messages-to-Chat"
+  const adapterName = describeProviderAdapter(effectiveType)
+  // Codex clients only drive gpt-* models through the native Responses API;
+  // other Responses-capable models fall back to the Messages adapter (see
+  // shouldFallbackToMessages), so only gpt-* models require upstream catalog
+  // metadata and the rest can be synthesized like Messages-fallback models.
+  const requiresCatalogMatch =
+    effectiveType === "openai-responses" && modelId.startsWith("gpt")
 
   return {
     slug: `${providerConfig.name}/${modelId}`,
     catalogSlug: modelId,
-    catalogMatchRequired: effectiveType === "openai-responses",
+    codexOverrides: modelConfig?.codex,
+    catalogMatchRequired: requiresCatalogMatch,
     providerName: providerConfig.name,
     displayName: `${displayName} (${providerConfig.name})`,
     description: `${displayName} through the ${providerConfig.name} ${adapterName} adapter.`,
     contextWindow: positiveNumber(
-      codexConfig?.contextWindow
+      modelConfig?.codex?.contextWindow
         ?? getFirstPositiveNumber(remoteModel, [
           "context_window",
           "context_length",
           "max_context_length",
           "max_model_len",
-        ]),
+        ])
+        ?? builtinModelConfig?.contextWindow,
       256_000,
     ),
     maxOutputTokens: positiveNumber(
-      codexConfig?.maxOutputTokens
-        ?? getFirstPositiveNumber(remoteModel, ["max_output_tokens"]),
+      modelConfig?.codex?.maxOutputTokens
+        ?? getFirstPositiveNumber(remoteModel, ["max_output_tokens"])
+        ?? builtinModelConfig?.maxOutputTokens,
       32_000,
     ),
     inputModalities: resolveInputModalities(
       providerConfig.name,
       configuredModalities,
       remoteModalities,
+      builtinModalities,
     ),
+    supportsParallelToolCalls:
+      modelConfig?.codex?.supportsParallelToolCalls
+      ?? getBooleanField(remoteModel, "supports_parallel_tool_calls"),
     reasoningEfforts,
     defaultReasoningEffort: selectDefaultReasoningEffort(
       reasoningEfforts,
-      codexConfig?.defaultReasoningEffort,
+      modelConfig?.codex?.defaultReasoningEffort
+        ?? builtinModelConfig?.defaultReasoningEffort,
     ),
-    supportsParallelToolCalls:
-      codexConfig?.supportsParallelToolCalls
-      ?? getBooleanField(remoteModel, "supports_parallel_tool_calls")
-      ?? false,
   }
 }
 
@@ -499,18 +567,26 @@ function normalizeInputModalities(value: unknown): Array<"text" | "image"> {
   ]
 }
 
+function fallbackModalities(
+  remoteModalities: Array<"text" | "image">,
+  builtinModalities: Array<"text" | "image">,
+): Array<"text" | "image"> {
+  if (remoteModalities.length > 0) return remoteModalities
+  return builtinModalities.length > 0 ? builtinModalities : ["text"]
+}
+
 function resolveInputModalities(
   providerName: string,
   configuredModalities: Array<"text" | "image">,
   remoteModalities: Array<"text" | "image">,
+  builtinModalities: Array<"text" | "image">,
 ): Array<"text" | "image"> {
   if (configuredModalities.length > 0) return configuredModalities
+  const modalities = fallbackModalities(remoteModalities, builtinModalities)
   if (providerName === "kimi") {
-    const modalities: Array<"text" | "image"> =
-      remoteModalities.length > 0 ? remoteModalities : ["text"]
     return [...new Set<"text" | "image">([...modalities, "image"])]
   }
-  return remoteModalities.length > 0 ? remoteModalities : ["text"]
+  return modalities
 }
 
 function selectDefaultReasoningEffort(

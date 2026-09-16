@@ -18,6 +18,7 @@ import {
   isSupportedProviderType,
   normalizeProviderBaseUrl,
   setProviderConfig,
+  setConfiguredApiKeys,
   SUPPORTED_PROVIDER_TYPES,
   type ProviderAuthType,
   type ProviderConfig,
@@ -25,12 +26,21 @@ import {
 } from "./lib/config"
 import { loginCodex } from "./lib/oauth/codex"
 import { PATHS, ensurePaths } from "./lib/paths"
+import { getConfiguredApiKeys } from "./lib/request-auth"
 import {
   QUICK_PROVIDER_CONFIGS,
   type QuickProviderName,
 } from "./lib/quick-providers"
+import { prompt } from "./lib/interactive-prompt"
 import { state } from "./lib/state"
-import { persistCodexCredentials, setupGitHubToken } from "./lib/token"
+import {
+  getCodexAccounts,
+  persistCodexCredentials,
+  removeCodexAccount,
+  selectCodexAccount,
+  setupGitHubToken,
+  type CodexAccountSummary,
+} from "./lib/token"
 import {
   parseAccountType,
   type AccountMeta,
@@ -291,6 +301,7 @@ const authRm = defineCommand({
 })
 
 interface RunAuthOptions {
+  alias?: string
   provider?: string
   verbose: boolean
   showToken: boolean
@@ -301,6 +312,10 @@ const authLoginArgs = {
     type: "string",
     description:
       "Provider to log in with or configure (copilot, codex, opencode-go, kimi, deepseek, dashscope, openrouter, custom)",
+  },
+  alias: {
+    type: "string",
+    description: "Optional alias for a Codex account",
   },
   verbose: {
     alias: "v",
@@ -383,7 +398,7 @@ async function resolveProviderSelection(
     return availableProviders[0]
   }
 
-  const provider = await consola.prompt("Select a provider to log in with", {
+  const provider = await prompt("Select a provider to log in with", {
     type: "select",
     options: availableProviders.map((providerName) => ({
       label: `${AUTH_PROVIDER_LABELS[providerName]} (${providerName})`,
@@ -420,7 +435,7 @@ async function promptRequiredText(
   message: string,
   fieldName: string,
 ): Promise<string> {
-  const value = await consola.prompt(message, { type: "text" })
+  const value = await prompt(message, { type: "text" })
   const normalizedValue = typeof value === "string" ? value.trim() : ""
   if (!normalizedValue) {
     throw new Error(`${fieldName} must be a non-empty string`)
@@ -438,7 +453,7 @@ function canUseMaskedPrompt(): boolean {
 
 async function promptMaskedText(message: string): Promise<string> {
   if (!canUseMaskedPrompt()) {
-    const value = await consola.prompt(message, { type: "text" })
+    const value = await prompt(message, { type: "text" })
     return typeof value === "string" ? value : ""
   }
 
@@ -526,7 +541,7 @@ async function promptCustomProviderName(): Promise<string> {
 }
 
 async function promptCustomProviderType(): Promise<ProviderType> {
-  const providerType = await consola.prompt("Select provider type", {
+  const providerType = await prompt("Select provider type", {
     type: "select",
     options: SUPPORTED_PROVIDER_TYPES.map((type) => ({
       label: type,
@@ -547,7 +562,7 @@ async function promptCustomProviderType(): Promise<ProviderType> {
 async function promptQuickProviderType(
   defaultType: ProviderType,
 ): Promise<ProviderType> {
-  const providerType = await consola.prompt(
+  const providerType = await prompt(
     `Select provider type (default: ${defaultType})`,
     {
       type: "select",
@@ -588,7 +603,7 @@ async function promptCustomProviderAuthType(
   providerType: ProviderType,
 ): Promise<ProviderAuthType | undefined> {
   const defaultAuthType = getDefaultProviderAuthType(providerType)
-  const authType = await consola.prompt("Select provider auth type", {
+  const authType = await prompt("Select provider auth type", {
     type: "select",
     options: [
       {
@@ -616,7 +631,7 @@ async function promptCustomProviderAuthType(
 async function promptQuickProviderBaseUrl(
   defaultBaseUrl: string,
 ): Promise<string> {
-  const value = await consola.prompt(
+  const value = await prompt(
     `Enter provider baseUrl (default: ${defaultBaseUrl})`,
     {
       type: "text",
@@ -719,7 +734,7 @@ async function configureQuickProvider(
   )
 }
 
-async function loginWithCodex(): Promise<void> {
+async function loginWithCodex(alias?: string): Promise<void> {
   const credentials = await loginCodex({
     onAuth(info) {
       consola.info("Open the following URL to authenticate with Codex:")
@@ -729,22 +744,31 @@ async function loginWithCodex(): Promise<void> {
       }
     },
     onPrompt(message) {
-      return consola.prompt(message, {
-        type: "text",
-      })
+      return prompt(message, { type: "text" }).then((value) => value ?? "")
     },
     onProgress(message) {
       consola.debug(message)
     },
   })
 
-  await persistCodexCredentials(credentials, { enableProvider: true })
+  await persistCodexCredentials(credentials, {
+    activateAccount: true,
+    alias,
+    enableProvider: true,
+  })
   consola.success(
     `Codex provider config written to ${PATHS.CONFIG_PATH} and credentials written to ${PATHS.CODEX_CREDENTIAL_PATH}`,
   )
 }
 
-async function loginWithProvider(provider: AuthProviderName): Promise<void> {
+async function loginWithProvider(
+  provider: AuthProviderName,
+  alias?: string,
+): Promise<void> {
+  if (alias !== undefined && provider !== "codex") {
+    throw new Error("--alias is only supported with the codex provider")
+  }
+
   if (provider === "copilot") {
     await setupGitHubToken({ force: true })
     consola.success("GitHub token written to", PATHS.GITHUB_TOKEN_PATH)
@@ -752,7 +776,7 @@ async function loginWithProvider(provider: AuthProviderName): Promise<void> {
   }
 
   if (provider === "codex") {
-    await loginWithCodex()
+    await loginWithCodex(alias)
     return
   }
 
@@ -779,7 +803,198 @@ export async function runAuthLogin(options: RunAuthOptions): Promise<void> {
   const provider = await resolveProviderSelection(options.provider)
 
   consola.info(`Logging in with ${AUTH_PROVIDER_LABELS[provider]}`)
-  await loginWithProvider(provider)
+  await loginWithProvider(provider, options.alias)
+}
+
+const authCodexArgs = {
+  list: {
+    alias: "l",
+    type: "boolean",
+    default: false,
+    description: "List stored Codex accounts",
+  },
+  remove: {
+    alias: "r",
+    type: "string",
+    description:
+      "Remove a Codex account by alias or account id; the account in use cannot be removed",
+  },
+  use: {
+    alias: "u",
+    type: "string",
+    description: "Select a Codex account by alias or account id",
+  },
+} as const
+
+interface RunAuthCodexOptions {
+  list?: boolean
+  remove?: string
+  use?: string
+}
+
+function formatCodexAccountName(
+  account: Pick<CodexAccountSummary, "accountId" | "alias">,
+): string {
+  return account.alias ?
+      `${account.alias} (${account.accountId})`
+    : account.accountId
+}
+
+function formatCodexAccount(account: CodexAccountSummary): string {
+  return `${account.active ? "*" : "-"} ${formatCodexAccountName(account)}`
+}
+
+export async function runAuthCodex(
+  options: RunAuthCodexOptions,
+): Promise<void> {
+  await ensurePaths()
+
+  const operationCount = [
+    options.list === true,
+    options.use !== undefined,
+    options.remove !== undefined,
+  ].filter(Boolean).length
+  if (operationCount > 1) {
+    throw new Error("Use only one of --list, --use, or --remove per invocation")
+  }
+
+  if (options.use !== undefined) {
+    const account = await selectCodexAccount(options.use)
+    consola.success(`Selected Codex account ${formatCodexAccountName(account)}`)
+    consola.info("Restart the server to use the selected Codex account.")
+    return
+  }
+
+  if (options.remove !== undefined) {
+    const account = await removeCodexAccount(options.remove)
+    consola.success(`Removed Codex account ${formatCodexAccountName(account)}`)
+    return
+  }
+
+  const accounts = await getCodexAccounts()
+  if (accounts.length === 0) {
+    consola.info(
+      "No Codex accounts configured. Run `copilot-api auth login --provider codex` to add one.",
+    )
+    return
+  }
+
+  consola.info("Configured Codex accounts:")
+  for (const account of accounts) {
+    consola.info(formatCodexAccount(account))
+  }
+}
+
+const authKeysArgs = {
+  add: {
+    alias: "a",
+    type: "string",
+    description: "Add an API key for gateway authentication",
+  },
+  remove: {
+    alias: "r",
+    type: "string",
+    description: "Remove an API key",
+  },
+  list: {
+    alias: "l",
+    type: "boolean",
+    default: false,
+    description: "List configured API keys",
+  },
+  clear: {
+    type: "boolean",
+    default: false,
+    description: "Remove all configured API keys",
+  },
+} as const
+
+interface RunAuthKeysOptions {
+  add?: string
+  remove?: string
+  list?: boolean
+  clear?: boolean
+}
+
+function normalizeAuthKeyValue(value: string): string {
+  const normalizedKey = value.trim()
+  if (!normalizedKey) {
+    throw new Error("API key must be a non-empty string")
+  }
+  return normalizedKey
+}
+
+export async function runAuthKeys(options: RunAuthKeysOptions): Promise<void> {
+  const tlsModule = await import("./lib/tls")
+  tlsModule.enableSystemCACompat()
+
+  await ensurePaths()
+
+  const operations = [
+    ...(options.add !== undefined ? ["add"] : []),
+    ...(options.remove !== undefined ? ["remove"] : []),
+    ...(options.list ? ["list"] : []),
+    ...(options.clear ? ["clear"] : []),
+  ]
+  if (operations.length > 1) {
+    throw new Error(
+      "Use only one of --add, --remove, --list, or --clear per invocation",
+    )
+  }
+
+  const operation = operations[0] ?? "list"
+
+  if (operation === "add") {
+    const apiKey = normalizeAuthKeyValue(options.add ?? "")
+    const currentKeys = getConfiguredApiKeys()
+    if (currentKeys.includes(apiKey)) {
+      consola.info(
+        `API key already configured. ${currentKeys.length} API key(s) configured.`,
+      )
+      return
+    }
+    const storedKeys = setConfiguredApiKeys([...currentKeys, apiKey])
+    consola.success(
+      `API key added to ${PATHS.CONFIG_PATH}. ${storedKeys.length} API key(s) configured.`,
+    )
+    return
+  }
+
+  if (operation === "remove") {
+    const apiKey = normalizeAuthKeyValue(options.remove ?? "")
+    const currentKeys = getConfiguredApiKeys()
+    if (!currentKeys.includes(apiKey)) {
+      consola.info(
+        `API key not found. ${currentKeys.length} API key(s) configured.`,
+      )
+      return
+    }
+    const storedKeys = setConfiguredApiKeys(
+      currentKeys.filter((key) => key !== apiKey),
+    )
+    consola.success(
+      `API key removed from ${PATHS.CONFIG_PATH}. ${storedKeys.length} API key(s) configured.`,
+    )
+    return
+  }
+
+  if (operation === "clear") {
+    setConfiguredApiKeys([])
+    consola.success(`Removed all API keys from ${PATHS.CONFIG_PATH}.`)
+    return
+  }
+
+  const currentKeys = getConfiguredApiKeys()
+  if (currentKeys.length === 0) {
+    consola.info(
+      "No API keys configured. Run `npx @nick3/copilot-api@latest auth keys --add <key>` to add one.",
+    )
+    return
+  }
+  consola.info("Configured API keys:")
+  for (const key of currentKeys) {
+    consola.info(`- ${key}`)
+  }
 }
 
 const authLogin = defineCommand({
@@ -790,6 +1005,7 @@ const authLogin = defineCommand({
   args: authLoginArgs,
   run({ args }) {
     return runAuthLogin({
+      alias: args.alias,
       provider: args.provider,
       verbose: args.verbose,
       showToken: args["show-token"],
@@ -797,9 +1013,37 @@ const authLogin = defineCommand({
   },
 })
 
-/**
- * Main auth command with subcommands
- */
+const authKeys = defineCommand({
+  meta: {
+    name: "keys",
+    description: "Manage gateway API keys (auth.apiKeys) in the config",
+  },
+  args: authKeysArgs,
+  run({ args }) {
+    return runAuthKeys({
+      add: args.add,
+      remove: args.remove,
+      list: args.list,
+      clear: args.clear,
+    })
+  },
+})
+
+const authCodex = defineCommand({
+  meta: {
+    name: "codex",
+    description: "List, select, or remove stored Codex accounts",
+  },
+  args: authCodexArgs,
+  run({ args }) {
+    return runAuthCodex({
+      list: args.list,
+      remove: args.remove,
+      use: args.use,
+    })
+  },
+})
+
 export const auth = defineCommand({
   meta: {
     name: "auth",
@@ -809,7 +1053,9 @@ export const auth = defineCommand({
     add: authAdd,
     ls: authLs,
     rm: authRm,
+    codex: authCodex,
     login: authLogin,
+    keys: authKeys,
   },
   args: {
     // Legacy args for backward compatibility (when no subcommand)
@@ -841,6 +1087,8 @@ export const auth = defineCommand({
       || firstArg === "ls"
       || firstArg === "rm"
       || firstArg === "login"
+      || firstArg === "keys"
+      || firstArg === "codex"
 
     // Backward compatibility: if no subcommand, run 'add'
     if (!hasSubCommand && authAdd.run) {

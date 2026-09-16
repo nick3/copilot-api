@@ -46,7 +46,7 @@ import { fmtLocalDateTime, fmtNum } from "@/lib/format"
 import { i18n } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
-const TOKEN_USAGE_PERIODS: Array<TokenUsagePeriod> = ["day", "week", "month"]
+const TOKEN_USAGE_PERIODS: Array<TokenUsagePeriod> = ["today", "this_week", "last_7_days", "this_month", "last_30_days", "lifetime"]
 const EVENTS_PAGE_SIZE = 20
 
 function formatNumber(value: number | null | undefined): string {
@@ -334,7 +334,7 @@ function EventsTable({
 
 export function TokenUsagePage(): React.JSX.Element {
   const { t } = useTranslation()
-  const [period, setPeriod] = useState<TokenUsagePeriod>("day")
+  const [period, setPeriod] = useState<TokenUsagePeriod>("today")
   const [eventPage, setEventPage] = useState(1)
   const [summary, setSummary] = useState<TokenUsageSummary | null>(null)
   const [daily, setDaily] = useState<TokenUsageDailySummary | null>(null)

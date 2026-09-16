@@ -1,4 +1,6 @@
 import consola from "consola"
+import { getUpstreamTransportConfig } from "~/lib/config"
+import { fetchUpstreamWithLifecycle } from "~/services/upstream-http"
 
 import {
   isCapture4xxEnabled,
@@ -13,6 +15,7 @@ export type CopilotFetchCtx = {
   capturable?: boolean
   callSite: string
   fetchImpl?: typeof fetch
+  clientSignal?: AbortSignal
 }
 
 const pendingCaptures = new Map<string, PersistInput>()
@@ -127,7 +130,13 @@ export async function copilotFetch(
 
   const fetchImpl =
     ctx.fetchImpl ?? requestContext.getStore()?.fetchImpl ?? fetch
-  const response = await fetchImpl(input, init)
+  const transport = getUpstreamTransportConfig()
+  const response = await fetchUpstreamWithLifecycle(input, init, {
+    fetchImpl,
+    clientSignal: ctx.clientSignal,
+    headersTimeoutMs: transport.headersTimeoutMs,
+    streamInactivityTimeoutMs: transport.streamInactivityTimeoutMs,
+  })
 
   const shouldCapture =
     ctx.requestId !== undefined

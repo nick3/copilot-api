@@ -1316,7 +1316,7 @@ test("POST /api/admin/config rejects invalid provider authType", async () => {
 
     const body = (await res.json()) as { error?: { message?: string } }
     expect(body.error?.message).toBe(
-      'providers.custom.authType must be one of: "authorization", "oauth2", "x-api-key"',
+      'providers.custom.authType must be one of: "authorization", "oauth2", "x-api-key", "azure-entra"',
     )
   })
 })
@@ -1680,5 +1680,91 @@ test("POST /api/admin/config rejects invalid quotaRefresh fields", async () => {
 
     const body = (await res.json()) as { error?: { message?: string } }
     expect(body.error?.message).toBe("quotaRefresh.enabled must be a boolean")
+  })
+})
+
+test("Admin configuration round-trips transport, Entra, reasoning, Codex selection and peak pricing", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+    const patch = {
+      upstreamTransport: {
+        headersTimeoutMs: 2000,
+        websocketMaxBufferedMessages: 12,
+      },
+      providers: {
+        azure: {
+          type: "openai-responses",
+          authType: "azure-entra",
+          baseUrl: "https://azure.example",
+          models: {
+            test: {
+              reasoningField: "reasoning",
+              codex: { enabled: false, contextWindow: 128000 },
+              pricing: {
+                input: 1,
+                offPeak: { input: 0.5 },
+                peakWindows: [
+                  { startMinuteUtc: 60, endMinuteUtc: 240, weekdays: [1, 5] },
+                ],
+              },
+            },
+          },
+        },
+        codex: {
+          type: "openai-responses",
+          authType: "oauth2",
+          accountId: "saved-codex-account",
+        },
+      },
+    }
+    const response = await server.request("/api/admin/config", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    })
+    expect(response.status).toBe(200)
+    const saved = await server.request("/api/admin/config")
+    expect(await saved.json()).toMatchObject(patch)
+    const disk = JSON.parse(
+      await fs.readFile(PATHS.CONFIG_PATH, "utf8"),
+    ) as TestConfig
+    expect(disk).toMatchObject(patch)
+  })
+})
+
+test("Admin rejects invalid new configuration without changing the stored file", async () => {
+  await withConfig({}, async () => {
+    const { server } = await import("../src/server")
+    const original = await fs.readFile(PATHS.CONFIG_PATH, "utf8")
+    for (const patch of [
+      { upstreamTransport: { headersTimeoutMs: 0 } },
+      { upstreamTransport: { secret: 1 } },
+      {
+        providers: {
+          custom: { models: { model: { reasoningField: "unknown" } } },
+        },
+      },
+      {
+        providers: {
+          custom: {
+            models: {
+              model: {
+                pricing: {
+                  peakWindows: [{ startMinuteUtc: 1441, endMinuteUtc: 1 }],
+                },
+              },
+            },
+          },
+        },
+      },
+    ]) {
+      const response = await server.request("/api/admin/config", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      })
+      expect(response.status).toBe(400)
+      expect(await fs.readFile(PATHS.CONFIG_PATH, "utf8")).toBe(original)
+    }
   })
 })

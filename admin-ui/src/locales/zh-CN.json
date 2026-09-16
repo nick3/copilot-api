@@ -229,7 +229,13 @@
     "period": {
       "day": "日",
       "week": "周",
-      "month": "月"
+      "month": "月",
+      "today": "今日",
+      "this_week": "本周",
+      "last_7_days": "近 7 天",
+      "this_month": "本月",
+      "last_30_days": "近 30 天",
+      "lifetime": "全部记录"
     },
     "metrics": {
       "requests": "请求数",
@@ -607,8 +613,8 @@
       "smallModelHint": "控制路由时接收轻量/免费请求的模型。",
       "apiKeysLabel": "API 密钥列表",
       "apiKeysPlaceholder": "每行一个密钥",
-      "apiKeysHint": "支持每行一个或逗号分隔；留空表示关闭请求鉴权。",
-      "legacyAuthNote": "当 auth.apiKeys 为空时，仍会回退使用环境变量 {{env}} 或 config.apiKey（兼容旧配置）。",
+      "apiKeysHint": "支持每行一个或逗号分隔。清空后仅回环监听允许无密钥请求；对外监听的受保护端点仍会拒绝访问。",
+      "legacyAuthNote": "显式清空密钥后会关闭旧配置回退。未迁移的配置仍兼容环境变量 {{env}} 或 config.apiKey。",
       "anthropicApiKeyLabel": "Anthropic API Key",
       "anthropicApiKeyPlaceholder": "sk-ant-...",
       "anthropicApiKeyHint": "可选。用于 Claude `/v1/messages/count_tokens` 的精确计数；未配置时，服务端会回退到本地 token 估算。",
@@ -820,9 +826,13 @@
       "providersCodexDefaultEffortLabel": "默认 reasoning effort",
       "providersCodexParallelToolsLabel": "并行工具调用",
       "providersPricingLabel": "Pricing JSON",
-      "providersPricingPlaceholder": "{\n  \"input\": 1,\n  \"output\": 2\n}",
+      "providersPricingPlaceholder": "{\n  \"input\": 1,\n  \"output\": 2\n}\n可配置 offPeak 和 peakWindows；窗口使用 UTC 分钟及 ISO 星期（1–7）。",
       "providersExtraBodyLabel": "extraBody JSON",
-      "providersExtraBodyPlaceholder": "{\n  \"thinking_budget\": 2048\n}"
+      "providersExtraBodyPlaceholder": "{\n  \"thinking_budget\": 2048\n}",
+      "transportTitle": "上游传输",
+      "transportHint": "超时单位为毫秒；缓冲限制分别为字节和消息数。留空对象使用默认值。修改适用于后续请求。",
+      "transportInvalidJson": "请输入有效的 JSON 对象。",
+      "providersReasoningFieldLabel": "历史消息中的推理字段"
     }
   },
   "accountManagement": {

@@ -121,6 +121,8 @@ export const alphaSearchResponsesDependencies = {
   findEndpointModel,
   now: (): number => Date.now(),
   resolveMappedModel,
+  resolveEffectiveProviderType,
+  resolveProviderConfig,
 }
 
 export function resetAlphaSearchState(): void {
@@ -597,7 +599,8 @@ async function resolveRemoteModel(
       request.model
     : alphaSearchResponsesDependencies.resolveMappedModel(request.model)
   if (provider) {
-    const providerConfig = await resolveProviderConfig(provider)
+    const providerConfig =
+      await alphaSearchResponsesDependencies.resolveProviderConfig(provider)
     if (!providerConfig) {
       return c.json(
         {
@@ -611,7 +614,10 @@ async function resolveRemoteModel(
     }
 
     if (
-      resolveEffectiveProviderType(providerConfig, model) !== "openai-responses"
+      alphaSearchResponsesDependencies.resolveEffectiveProviderType(
+        providerConfig,
+        model,
+      ) !== "openai-responses"
     ) {
       return invalidRequest(
         c,

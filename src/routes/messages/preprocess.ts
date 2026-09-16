@@ -104,14 +104,18 @@ const normalizeSystemContentForMerge = (
     return normalizeSystemStringForMerge(content)
   }
 
-  return content.map((block) =>
-    block.text.startsWith(SYSTEM_REMINDER_START) ?
-      block
-    : {
-        ...block,
-        text: ensureSystemReminderText(block.text),
-      },
-  )
+  return content.flatMap((block) => {
+    const normalized = normalizeSystemStringForMerge(block.text)
+    if (typeof normalized === "string") {
+      return [{ ...block, text: normalized }]
+    }
+
+    return normalized.map((normalizedBlock, index) =>
+      index === normalized.length - 1 ?
+        { ...block, text: normalizedBlock.text }
+      : normalizedBlock,
+    )
+  })
 }
 
 const toSystemTextBlocks = (
@@ -202,6 +206,10 @@ export const normalizeSystemMessages = (
   payload: AnthropicMessagesPayload,
 ): void => {
   normalizeClaudeCodeBillingHeaderInSystem(payload)
+
+  if (payload.model.startsWith("gpt") || payload.model.startsWith("codex")) {
+    return
+  }
 
   if (
     !Array.isArray(payload.messages)

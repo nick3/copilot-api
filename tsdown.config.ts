@@ -6,10 +6,12 @@ export default defineConfig({
   format: ["esm"],
   target: "es2022",
   platform: "node",
+  external: ["bun:sqlite"],
 
   sourcemap: true,
   clean: true,
-  removeNodeProtocol: false,
+  fixedExtension: false,
+  nodeProtocol: false,
 
   env: {
     NODE_ENV: "production",

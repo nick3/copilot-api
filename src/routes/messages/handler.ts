@@ -2,6 +2,7 @@
 import type { Context } from "hono"
 
 import { streamSSE } from "hono/streaming"
+import { writeSSEIfConnected } from "~/lib/sse"
 import { randomUUID } from "node:crypto"
 
 import type { SubagentMarker } from "~/lib/subagent"
@@ -411,6 +412,9 @@ export interface CompletionPayloadOptions {
   skipModelMapping?: boolean
   skipWebSearch?: boolean
   usageEndpoint?: TokenUsageEndpoint
+  subagentMarker?: SubagentMarker | null
+  sessionId?: string
+  requestId?: string
 }
 
 // eslint-disable-next-line max-lines-per-function, complexity
@@ -855,6 +859,7 @@ const handleWithChatCompletions = async (params: {
 
   try {
     response = await createChatCompletions(openAIPayload, ctx, {
+      clientSignal: c.req.raw.signal,
       upstreamRequestId: instr.upstreamRequestId,
       initiator: effectiveInitiator,
       subagentMarker,
@@ -971,6 +976,7 @@ const handleWithWebSearchResponsesApi = async (params: {
     response = await createResponses(
       responsesPayload,
       {
+        clientSignal: c.req.raw.signal,
         vision,
         initiator: effectiveInitiator,
         upstreamRequestId: instr.upstreamRequestId,
@@ -1096,6 +1102,7 @@ const handleWithResponsesApi = async (params: {
     response = await createResponses(
       responsesPayload,
       {
+        clientSignal: c.req.raw.signal,
         vision,
         initiator: effectiveInitiator,
         upstreamRequestId: instr.upstreamRequestId,
@@ -1411,6 +1418,7 @@ async function streamChatCompletionsAndLog(params: {
 
   const streamState: AnthropicStreamState = {
     messageStartSent: false,
+    messageCompleted: false,
     contentBlockIndex: 0,
     contentBlockOpen: false,
     toolCalls: {},
@@ -1457,7 +1465,7 @@ async function streamChatCompletionsAndLog(params: {
       for (const event of events) {
         logger.debug("Translated Anthropic event:", JSON.stringify(event))
 
-        await stream.writeSSE({
+        await writeSSEIfConnected(stream, {
           event: event.type,
           data: JSON.stringify(event),
         })
@@ -1861,7 +1869,7 @@ async function ensureResponsesStreamCompleted(params: {
 
   setStreamError("StreamIncomplete", msg)
 
-  await stream.writeSSE({
+  await writeSSEIfConnected(stream, {
     event: errorEvent.type,
     data: JSON.stringify(errorEvent),
   })
@@ -1873,7 +1881,7 @@ async function writeAnthropicStreamError(
 ): Promise<void> {
   try {
     const errorEvent = buildErrorEvent(message)
-    await stream.writeSSE({
+    await writeSSEIfConnected(stream, {
       event: errorEvent.type,
       data: JSON.stringify(errorEvent),
     })
@@ -1988,7 +1996,7 @@ async function writeTranslatedAnthropicStreamEvents(
   for (const event of events) {
     const eventData = JSON.stringify(event)
     logger.debug("Translated Anthropic event:", eventData)
-    await stream.writeSSE({
+    await writeSSEIfConnected(stream, {
       event: event.type,
       data: eventData,
     })
@@ -2026,7 +2034,10 @@ async function streamResponsesAndLog(params: {
 
       const eventName = (chunk as { event?: string }).event
       if (eventName === "ping") {
-        await stream.writeSSE({ event: "ping", data: '{"type":"ping"}' })
+        await writeSSEIfConnected(stream, {
+          event: "ping",
+          data: '{"type":"ping"}',
+        })
         continue
       }
 
@@ -2309,7 +2320,7 @@ async function streamMessagesAndLog(params: {
         tokenUsage = mergeAnthropicUsage(tokenUsage, usage.tokenUsage)
       }
 
-      await stream.writeSSE({
+      await writeSSEIfConnected(stream, {
         event: eventName,
         data,
       })
@@ -2407,6 +2418,7 @@ const handleWithMessagesApi = async (params: {
 
   try {
     response = await createMessages(anthropicPayload, ctx, {
+      clientSignal: c.req.raw.signal,
       anthropicBetaHeader,
       upstreamRequestId: instr.upstreamRequestId,
       initiator: effectiveInitiator,

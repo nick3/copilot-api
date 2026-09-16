@@ -1,7 +1,6 @@
 import consola from "consola"
-import { events } from "fetch-event-stream"
+import type { events } from "fetch-event-stream"
 import { createHash } from "node:crypto"
-import { WebSocket } from "undici"
 
 import type { ReasoningEffort } from "~/lib/reasoning-effort"
 import type { SubagentMarker } from "~/lib/subagent"
@@ -21,7 +20,9 @@ import {
   type CopilotQuotaSnapshot,
 } from "~/lib/copilot-rate-limit"
 import { HTTPError } from "~/lib/error"
-import { getProxyEnvDispatcher, getWebSocketProxyUrl } from "~/lib/proxy"
+import { getUpstreamTransportConfig } from "~/lib/config"
+import { createPooledWebSocketStream } from "~/services/responses-websocket"
+import { createResponsesHttpEventStream } from "~/services/responses-http"
 import { captureOutboundHeadersSnapshot } from "~/lib/request-context"
 import { resolveEffectiveInitiator } from "~/lib/request-initiator"
 import { accountFromState } from "~/lib/state"
@@ -266,7 +267,7 @@ export interface ResponseInputImage {
   type: "input_image"
   image_url?: string | null
   file_id?: string | null
-  detail: "low" | "high" | "auto"
+  detail?: "low" | "high" | "auto"
 }
 
 export interface ResponseInputFile {
@@ -659,7 +660,8 @@ export type ResponsesStream = ReturnType<typeof events>
 export type CreateResponsesReturn = ResponsesResult | ResponsesStream
 export type ResponsesTransport = "http" | "websocket"
 
-interface ResponsesRequestOptions {
+export interface ResponsesRequestOptions {
+  clientSignal?: AbortSignal
   vision: boolean
   initiator: "agent" | "user"
   upstreamRequestId?: string
@@ -672,12 +674,10 @@ interface ResponsesRequestOptions {
   bridgeId?: string
 }
 
-const RESPONSES_WEBSOCKET_IDLE_TIMEOUT_MS = 60_000
-const RESPONSES_WEBSOCKET_TEXT_DECODER = new TextDecoder()
-
 export const createResponses = async (
   payload: ResponsesPayload,
   {
+    clientSignal,
     vision,
     initiator,
     upstreamRequestId,
@@ -691,6 +691,7 @@ export const createResponses = async (
   }: ResponsesRequestOptions,
   account?: AccountContext,
 ): Promise<CreateResponsesReturn> => {
+  clientSignal?.throwIfAborted()
   const ctx = account ?? accountFromState()
   if (!ctx.copilotToken) throw new Error("Copilot token not found")
 
@@ -730,6 +731,7 @@ export const createResponses = async (
     const stream = createPooledResponsesWebSocketStream(
       websocketRequest,
       copilotBaseUrl(ctx),
+      clientSignal,
     )
 
     if (payload.stream) {
@@ -740,6 +742,7 @@ export const createResponses = async (
   }
 
   return await createHttpResponses(payload, headers, ctx, {
+    clientSignal,
     fetchImpl,
     requestId,
   })
@@ -751,6 +754,7 @@ const createHttpResponses = async (
   account: AccountContext,
   options: {
     fetchImpl?: typeof fetch
+    clientSignal?: AbortSignal
     requestId?: string
   },
 ): Promise<CreateResponsesReturn> => {
@@ -765,6 +769,7 @@ const createHttpResponses = async (
       requestId: options.requestId,
       callSite: "responses",
       fetchImpl: options.fetchImpl,
+      clientSignal: options.clientSignal,
     },
   )
 
@@ -776,7 +781,7 @@ const createHttpResponses = async (
   }
 
   if (payload.stream) {
-    return events(response)
+    return createResponsesHttpEventStream(response)
   }
 
   return (await response.json()) as ResponsesResult
@@ -793,10 +798,6 @@ interface ResponsesWebSocketRequest {
   payload: ResponsesWebSocketPayload
   bridgeId?: string
 }
-
-type ResponsesWebSocketErrorEvent = Parameters<
-  NonNullable<InstanceType<typeof WebSocket>["onerror"]>
->[0]
 
 export const prepareResponsesWebSocketRequest = (
   payload: ResponsesPayload,
@@ -869,7 +870,9 @@ export const getResponsesWebSocketInitiator = (
 const createPooledResponsesWebSocketStream = (
   request: ResponsesWebSocketRequest,
   baseUrl: string,
-): ResponsesStream => runResponsesWebSocketRequest(request, baseUrl)
+  clientSignal?: AbortSignal,
+): ResponsesStream =>
+  runResponsesWebSocketRequest(request, baseUrl, clientSignal)
 
 export const buildResponsesWebSocketPayload = (
   payload: ResponsesPayload,
@@ -898,454 +901,6 @@ export const buildResponsesWebSocketUrl = (baseUrl: string): string => {
   }
 
   return url.toString()
-}
-
-const responsesWebSocketPool = new Map<string, ResponsesWebSocketEntry>()
-const responsesWebSocketActiveRequests = new Map<string, number>()
-
-interface ResponsesWebSocketEntry {
-  closed: boolean
-  idleTimer: ReturnType<typeof setTimeout> | null
-  requestCount: number
-  websocketPromise: Promise<InstanceType<typeof WebSocket>>
-  // Bridge socket (WS #1) that originated this upstream connection, if any. When
-  // this entry is dropped while no turn is in flight, we close that bridge socket
-  // so Codex rebuilds a fresh full-context session instead of stalling on a stale
-  // `previous_response_id`.
-  bridgeId?: string
-}
-
-interface ResponsesWebSocketRequestTarget {
-  entry: ResponsesWebSocketEntry
-  pooled: boolean
-}
-
-const runResponsesWebSocketRequest = async function* (
-  request: ResponsesWebSocketRequest,
-  baseUrl: string,
-): ResponsesStream {
-  const { entry, pooled } = getResponsesWebSocketRequestTarget(request, baseUrl)
-  const release = acquireResponsesWebSocketEntry(request.poolKey, entry, pooled)
-
-  try {
-    const websocket = await getReadyResponsesWebSocket(
-      request.poolKey,
-      entry,
-      pooled,
-    )
-    websocket.send(JSON.stringify(request.payload))
-
-    for await (const data of createWebSocketMessageStream(websocket)) {
-      const chunk = createResponsesWebSocketStreamChunk(data)
-      yield chunk
-
-      if (isTerminalResponsesStreamChunk(chunk)) {
-        return
-      }
-    }
-
-    removeResponsesWebSocketPoolEntry(request.poolKey, entry)
-    throw new Error("Responses websocket ended without a terminal response")
-  } catch (error) {
-    removeResponsesWebSocketPoolEntry(request.poolKey, entry)
-    throw toError(error)
-  } finally {
-    release()
-  }
-}
-
-const getResponsesWebSocketRequestTarget = (
-  request: ResponsesWebSocketRequest,
-  baseUrl: string,
-): ResponsesWebSocketRequestTarget => {
-  if (getResponsesWebSocketActiveRequestCount(request.poolKey) > 0) {
-    return {
-      entry: createResponsesWebSocketEntry(request, baseUrl),
-      pooled: false,
-    }
-  }
-
-  const existing = responsesWebSocketPool.get(request.poolKey)
-  if (existing && !existing.closed) {
-    clearResponsesWebSocketIdleTimer(existing)
-    // A Codex client can reconnect for the same session (minting a fresh bridge,
-    // hence a fresh bridgeId) before this pooled upstream entry is reaped. Rebind
-    // the entry to the currently connected bridge so a later idle reap closes the
-    // live WS #1, not the original now-unregistered one — otherwise the multi-turn
-    // recovery would target a dead bridge and the next turn could still stall on a
-    // stale `previous_response_id`.
-    existing.bridgeId = request.bridgeId
-    return {
-      entry: existing,
-      pooled: true,
-    }
-  }
-
-  const entry = createResponsesWebSocketEntry(request, baseUrl)
-  responsesWebSocketPool.set(request.poolKey, entry)
-  return {
-    entry,
-    pooled: true,
-  }
-}
-
-const createResponsesWebSocketEntry = (
-  request: ResponsesWebSocketRequest,
-  baseUrl: string,
-): ResponsesWebSocketEntry => {
-  const entry: ResponsesWebSocketEntry = {
-    closed: false,
-    idleTimer: null,
-    requestCount: 0,
-    websocketPromise: openResponsesWebSocket({
-      headers: request.headers,
-      url: buildResponsesWebSocketUrl(baseUrl),
-    }),
-    bridgeId: request.bridgeId,
-  }
-
-  entry.websocketPromise
-    .then((websocket) => {
-      websocket.addEventListener("close", () => {
-        maybeCloseResponsesBridgeForReapedEntry(request.poolKey, entry)
-        removeResponsesWebSocketPoolEntry(request.poolKey, entry)
-      })
-      websocket.addEventListener("error", () => {
-        maybeCloseResponsesBridgeForReapedEntry(request.poolKey, entry)
-        removeResponsesWebSocketPoolEntry(request.poolKey, entry)
-      })
-    })
-    .catch(() => {
-      removeResponsesWebSocketPoolEntry(request.poolKey, entry)
-    })
-
-  return entry
-}
-
-// Close the originating bridge socket (WS #1) when the upstream connection it was
-// keyed to is dropped while the session is idle, so Codex rebuilds a fresh
-// full-context request on its next turn instead of stalling ~5 minutes on a stale
-// `previous_response_id`.
-//
-// Gated to fire only for the live pooled entry (`responsesWebSocketPool` still
-// points at it) with no in-flight turn (`requestCount === 0`). This excludes:
-//   - throwaway non-pooled entries (never in the pool map), whose normal teardown
-//     would otherwise close the bridge after a concurrent turn, and
-//   - mid-turn upstream drops (`requestCount > 0`), which the active request's
-//     existing error path already surfaces to Codex.
-const maybeCloseResponsesBridgeForReapedEntry = (
-  poolKey: string,
-  entry: ResponsesWebSocketEntry,
-): void => {
-  if (
-    entry.bridgeId === undefined
-    || entry.requestCount > 0
-    || responsesWebSocketPool.get(poolKey) !== entry
-  ) {
-    return
-  }
-
-  closeResponsesBridge(entry.bridgeId)
-}
-
-const acquireResponsesWebSocketEntry = (
-  poolKey: string,
-  entry: ResponsesWebSocketEntry,
-  pooled: boolean,
-): (() => void) => {
-  clearResponsesWebSocketIdleTimer(entry)
-  incrementResponsesWebSocketActiveRequestCount(poolKey)
-  entry.requestCount += 1
-
-  let released = false
-  return () => {
-    if (released) {
-      return
-    }
-
-    released = true
-    entry.requestCount -= 1
-
-    decrementResponsesWebSocketActiveRequestCount(poolKey)
-    if (entry.closed || entry.requestCount > 0) {
-      return
-    }
-
-    if (pooled && responsesWebSocketPool.get(poolKey) === entry) {
-      scheduleResponsesWebSocketIdleClose(poolKey, entry)
-      return
-    }
-
-    removeResponsesWebSocketPoolEntry(poolKey, entry)
-  }
-}
-
-const getReadyResponsesWebSocket = async (
-  poolKey: string,
-  entry: ResponsesWebSocketEntry,
-  pooled: boolean,
-): Promise<InstanceType<typeof WebSocket>> => {
-  if (entry.closed) {
-    throw new Error(
-      "Responses websocket became unavailable before the request started",
-    )
-  }
-
-  const websocket = await entry.websocketPromise
-  if (
-    entry.closed
-    || (pooled && responsesWebSocketPool.get(poolKey) !== entry)
-  ) {
-    throw new Error(
-      "Responses websocket became unavailable before the request started",
-    )
-  }
-
-  if (websocket.readyState !== WebSocket.OPEN) {
-    removeResponsesWebSocketPoolEntry(poolKey, entry)
-    throw new Error(
-      "Responses websocket became unavailable before the request started",
-    )
-  }
-
-  return websocket
-}
-
-const scheduleResponsesWebSocketIdleClose = (
-  poolKey: string,
-  entry: ResponsesWebSocketEntry,
-): void => {
-  clearResponsesWebSocketIdleTimer(entry)
-  entry.idleTimer = setTimeout(() => {
-    maybeCloseResponsesBridgeForReapedEntry(poolKey, entry)
-    removeResponsesWebSocketPoolEntry(poolKey, entry)
-  }, RESPONSES_WEBSOCKET_IDLE_TIMEOUT_MS)
-  unrefTimer(entry.idleTimer)
-}
-
-const clearResponsesWebSocketIdleTimer = (
-  entry: ResponsesWebSocketEntry,
-): void => {
-  if (entry.idleTimer) {
-    clearTimeout(entry.idleTimer)
-    entry.idleTimer = null
-  }
-}
-
-const getResponsesWebSocketActiveRequestCount = (poolKey: string): number =>
-  responsesWebSocketActiveRequests.get(poolKey) ?? 0
-
-const incrementResponsesWebSocketActiveRequestCount = (
-  poolKey: string,
-): void => {
-  responsesWebSocketActiveRequests.set(
-    poolKey,
-    getResponsesWebSocketActiveRequestCount(poolKey) + 1,
-  )
-}
-
-const decrementResponsesWebSocketActiveRequestCount = (
-  poolKey: string,
-): void => {
-  const nextCount = getResponsesWebSocketActiveRequestCount(poolKey) - 1
-  if (nextCount <= 0) {
-    responsesWebSocketActiveRequests.delete(poolKey)
-    return
-  }
-
-  responsesWebSocketActiveRequests.set(poolKey, nextCount)
-}
-
-const removeResponsesWebSocketPoolEntry = (
-  poolKey: string,
-  entry: ResponsesWebSocketEntry,
-): void => {
-  if (responsesWebSocketPool.get(poolKey) === entry) {
-    responsesWebSocketPool.delete(poolKey)
-  }
-
-  if (entry.closed) {
-    return
-  }
-
-  entry.closed = true
-  clearResponsesWebSocketIdleTimer(entry)
-  entry.websocketPromise.then(closeResponsesWebSocket).catch(() => {})
-}
-
-const unrefTimer = (timer: ReturnType<typeof setTimeout>): void => {
-  if (
-    typeof timer === "object"
-    && "unref" in timer
-    && typeof timer.unref === "function"
-  ) {
-    timer.unref()
-  }
-}
-
-const createResponsesWebSocketError = (
-  message: string,
-  event?: Pick<ResponsesWebSocketErrorEvent, "error" | "message">,
-): Error => {
-  const reason = event?.error ?? event?.message
-  if (reason === undefined || reason === "") {
-    return new Error(message)
-  }
-
-  const cause = toError(reason)
-  return new Error(`${message}: ${cause.message}`, { cause })
-}
-
-const openResponsesWebSocket = async ({
-  headers,
-  url,
-}: {
-  headers: Record<string, string>
-  url: string
-}): Promise<InstanceType<typeof WebSocket>> =>
-  await new Promise((resolve, reject) => {
-    const proxy =
-      typeof Bun === "undefined" ? undefined : getWebSocketProxyUrl(url)
-    const dispatcher =
-      typeof Bun === "undefined" ? getProxyEnvDispatcher() : undefined
-    const init = {
-      headers,
-      ...(proxy ? { proxy } : {}),
-      ...(dispatcher ? { dispatcher } : {}),
-    }
-    const websocket = new WebSocket(url, init)
-
-    const cleanup = () => {
-      websocket.removeEventListener("open", onOpen)
-      websocket.removeEventListener("error", onError)
-    }
-
-    const onOpen = () => {
-      cleanup()
-      resolve(websocket)
-    }
-
-    const onError = (event: ResponsesWebSocketErrorEvent) => {
-      cleanup()
-      reject(
-        createResponsesWebSocketError(
-          "Failed to create responses websocket",
-          event,
-        ),
-      )
-    }
-
-    websocket.addEventListener("open", onOpen)
-    websocket.addEventListener("error", onError)
-  })
-
-const createWebSocketMessageStream = async function* (
-  websocket: InstanceType<typeof WebSocket>,
-): AsyncIterable<string> {
-  const queue: Array<Promise<string>> = []
-  let closed = false
-  let error: Error | null = null
-  let notify: (() => void) | null = null
-
-  const wake = () => {
-    notify?.()
-    notify = null
-  }
-
-  const onMessage = (event: { data: unknown }) => {
-    queue.push(normalizeWebSocketMessageData(event.data))
-    wake()
-  }
-
-  const onClose = () => {
-    closed = true
-    wake()
-  }
-
-  const onError = (event: ResponsesWebSocketErrorEvent) => {
-    error = createResponsesWebSocketError(
-      "Responses websocket stream error",
-      event,
-    )
-    wake()
-  }
-
-  websocket.addEventListener("message", onMessage)
-  websocket.addEventListener("close", onClose)
-  websocket.addEventListener("error", onError)
-
-  try {
-    while (true) {
-      const item = queue.shift()
-      if (item) {
-        yield await item
-        continue
-      }
-
-      if (error) {
-        throw toError(error)
-      }
-
-      if (closed) {
-        break
-      }
-
-      await new Promise<void>((resolve) => {
-        notify = resolve
-      })
-    }
-  } finally {
-    websocket.removeEventListener("message", onMessage)
-    websocket.removeEventListener("close", onClose)
-    websocket.removeEventListener("error", onError)
-  }
-}
-
-const normalizeWebSocketMessageData = async (
-  data: unknown,
-): Promise<string> => {
-  if (typeof data === "string") {
-    return data
-  }
-
-  if (data instanceof ArrayBuffer) {
-    return RESPONSES_WEBSOCKET_TEXT_DECODER.decode(data)
-  }
-
-  if (ArrayBuffer.isView(data)) {
-    const view = data
-    return RESPONSES_WEBSOCKET_TEXT_DECODER.decode(
-      new Uint8Array(
-        view.buffer as ArrayBuffer,
-        view.byteOffset,
-        view.byteLength,
-      ),
-    )
-  }
-
-  if (isTextReadable(data)) {
-    return await data.text()
-  }
-
-  return String(data)
-}
-
-const isTextReadable = (
-  value: unknown,
-): value is { text: () => Promise<string> } => {
-  if (!value || typeof value !== "object" || !("text" in value)) {
-    return false
-  }
-
-  return typeof (value as { text?: unknown }).text === "function"
-}
-
-const toError = (value: unknown): Error => {
-  if (value instanceof Error) {
-    return value
-  }
-
-  return new Error(String(value))
 }
 
 const getHeaderValue = (
@@ -1469,13 +1024,38 @@ const getResponsesWebSocketErrorStatus = (
   return Number.isFinite(status) && status >= 100 && status < 600 ? status : 500
 }
 
-const closeResponsesWebSocket = (
-  websocket: InstanceType<typeof WebSocket>,
-): void => {
-  if (
-    websocket.readyState === WebSocket.CONNECTING
-    || websocket.readyState === WebSocket.OPEN
-  ) {
-    websocket.close()
-  }
+const runResponsesWebSocketRequest = async function* (
+  request: ResponsesWebSocketRequest,
+  baseUrl: string,
+  clientSignal?: AbortSignal,
+): ResponsesStream {
+  if (clientSignal?.aborted) return
+  const config = getUpstreamTransportConfig()
+  yield* createPooledWebSocketStream(
+    {
+      ...request,
+      clientSignal,
+      // Namespace the transport pool; the public affinity key remains unchanged.
+      poolKey: `copilot|${request.poolKey}`,
+      url: buildResponsesWebSocketUrl(baseUrl),
+      onIdleClose:
+        request.bridgeId ?
+          () => closeResponsesBridge(request.bridgeId!)
+        : undefined,
+    },
+    {
+      createChunk: createResponsesWebSocketStreamChunk,
+      isTerminalChunk: isTerminalResponsesStreamChunk,
+      maxBufferedBytes: config.websocketMaxBufferedBytes,
+      maxBufferedMessages: config.websocketMaxBufferedMessages,
+      openTimeoutMs: config.websocketOpenTimeoutMs,
+      poolIdleTimeoutMs: config.websocketPoolIdleTimeoutMs,
+      streamInactivityTimeoutMs: config.streamInactivityTimeoutMs,
+      openErrorMessage: "Failed to create responses websocket",
+      streamErrorMessage:
+        "Upstream connection lost, responses websocket stream error",
+      terminalChunkMissingMessage:
+        "Responses websocket ended without a terminal response, retry your request.",
+    },
+  )
 }

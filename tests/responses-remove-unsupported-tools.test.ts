@@ -2,7 +2,10 @@ import { describe, expect, it } from "bun:test"
 
 import type { ResponsesPayload } from "~/services/copilot/create-responses"
 
-import { removeUnsupportedTools } from "~/routes/responses/handler"
+import {
+  fillEmptyNamespaceToolDescriptions,
+  removeUnsupportedTools,
+} from "~/routes/responses/handler"
 
 const makePayload = (tools: ResponsesPayload["tools"]): ResponsesPayload => ({
   model: "gpt-5",
@@ -62,5 +65,80 @@ describe("removeUnsupportedTools", () => {
     } as unknown as ResponsesPayload
     removeUnsupportedTools(missing)
     expect(missing.tools).toBeUndefined()
+  })
+})
+
+describe("fillEmptyNamespaceToolDescriptions", () => {
+  it("uses the namespace name for empty descriptions in request and input tools", () => {
+    const payload = makePayload([
+      {
+        type: "namespace",
+        name: "workspace",
+        description: "",
+        tools: [],
+      },
+      {
+        type: "namespace",
+        name: "browser",
+        description: "Browser tools",
+        tools: [],
+      },
+      { type: "function", name: "empty_function", description: "" },
+    ] as ResponsesPayload["tools"])
+    payload.input = [
+      {
+        type: "tool_search_output",
+        call_id: "call_search",
+        tools: [
+          {
+            type: "namespace",
+            name: "mcp__fetch",
+            description: "",
+            tools: [],
+          },
+        ],
+      },
+    ]
+
+    fillEmptyNamespaceToolDescriptions(payload)
+
+    expect(payload.tools?.[0]).toMatchObject({
+      description: "workspace",
+      name: "workspace",
+      type: "namespace",
+    })
+    expect(payload.tools?.[1]).toMatchObject({
+      description: "Browser tools",
+      name: "browser",
+      type: "namespace",
+    })
+    expect(payload.tools?.[2]).toMatchObject({
+      description: "",
+      name: "empty_function",
+      type: "function",
+    })
+    expect(
+      (
+        payload.input[0] as {
+          tools: Array<{ description: string }>
+        }
+      ).tools[0].description,
+    ).toBe("mcp__fetch")
+  })
+
+  it("is a no-op when input and tools do not contain tool definitions", () => {
+    const payload = {
+      input: "hello",
+      model: "gpt-5",
+      tools: null,
+    } satisfies ResponsesPayload
+
+    fillEmptyNamespaceToolDescriptions(payload)
+
+    expect(payload).toEqual({
+      input: "hello",
+      model: "gpt-5",
+      tools: null,
+    })
   })
 })

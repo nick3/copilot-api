@@ -59,7 +59,7 @@ export function normalizeReasoningEffortForSupport(
   intent: unknown,
   rawSupport: ReadonlyArray<string> | undefined,
 ): ReasoningEffort | undefined {
-  const requested = parseReasoningEffort(intent)
+  const requested = parseReasoningEffort(intent === "ultra" ? "max" : intent)
   if (!requested) return undefined
 
   const support = parseReasoningEffortSupport(rawSupport)
@@ -97,7 +97,9 @@ export function resolveReasoningEffortForTarget(params: {
 }): ReasoningEffort | undefined {
   if (params.explicitEffort === null) return undefined
 
-  const explicit = parseReasoningEffort(params.explicitEffort)
+  const explicit = parseReasoningEffort(
+    params.explicitEffort === "ultra" ? "max" : params.explicitEffort,
+  )
   const defaultEffortResolver =
     params.defaultEffortResolver ?? getConfiguredReasoningEffortForModel
   const requestDefault = defaultEffortResolver(params.requestModel)
@@ -110,5 +112,20 @@ export function resolveReasoningEffortForTarget(params: {
   return normalizeReasoningEffortForSupport(
     intent,
     params.targetModel?.capabilities?.supports?.reasoning_effort,
+  )
+}
+
+export type ResponsesReasoningEffort = ReasoningEffort
+
+export function resolveSupportedReasoningEffort(
+  requested: string,
+  supported: Array<string> | undefined,
+): ReasoningEffort | undefined {
+  const canonical = requested === "ultra" ? "max" : requested
+  return (
+    normalizeReasoningEffortForSupport(canonical, supported)
+    ?? (parseReasoningEffortSupport(supported) ? undefined : (
+      parseReasoningEffort(canonical)
+    ))
   )
 }

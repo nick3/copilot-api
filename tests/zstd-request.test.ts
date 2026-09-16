@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
-import { zstdDecompressionMiddleware } from "../src/lib/zstd-request"
+import { zstdDecompressionMiddleware } from "~/lib/zstd-request"
+import { server } from "~/server"
 
 const createApp = () => {
   const app = new Hono()
@@ -19,6 +20,14 @@ const createApp = () => {
 }
 
 describe("zstd request middleware", () => {
+  test("retains compression support across all existing API routes", () => {
+    const registeredPaths = server.routes
+      .filter((route) => route.handler === zstdDecompressionMiddleware)
+      .map((route) => route.path)
+
+    expect(registeredPaths).toEqual(["/*"])
+  })
+
   test("decompresses zstd encoded json request bodies", async () => {
     const app = createApp()
     const payload = { model: "gpt-5", messages: [{ role: "user" }] }

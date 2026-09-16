@@ -54,12 +54,16 @@ export const applyCopilotTokenIfCurrent = (
   account: AccountRuntime,
   snapshot: AuthSnapshot,
   copilotToken: string,
+  tokenApiUrl?: string,
 ): boolean => {
   if (!isAuthSnapshotCurrent(account, snapshot)) {
     return false
   }
 
   account.copilotToken = copilotToken
+  account.copilotTokenApiUrl = tokenApiUrl?.trim() || undefined
+  account.copilotApiUrl =
+    account.copilotTokenApiUrl ?? account.copilotUsageApiUrl
   return true
 }
 
@@ -80,12 +84,13 @@ export const applyTokenRefreshSuccessIfCurrent = (
   account: AccountRuntime,
   snapshot: AuthSnapshot,
   token: string,
+  tokenApiUrl?: string,
 ): boolean => {
   if (!isAuthSnapshotCurrent(account, snapshot)) {
     return false
   }
 
-  account.copilotToken = token
+  applyCopilotTokenIfCurrent(account, snapshot, token, tokenApiUrl)
   account.failed = false
   account.failureReason = undefined
   return true
@@ -130,7 +135,8 @@ export const applyQuotaRefreshSuccessIfCurrent = (
     account.tokenBasedBilling = tokenBasedBilling
   }
   if (copilotApiUrl) {
-    account.copilotApiUrl = copilotApiUrl
+    account.copilotUsageApiUrl = copilotApiUrl
+    account.copilotApiUrl = account.copilotTokenApiUrl ?? copilotApiUrl
   }
   account.lastQuotaFetch = Date.now()
   account.failed = false

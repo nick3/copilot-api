@@ -193,7 +193,7 @@ const makeResponsesResult = (
 const makePlainResponsesResult = (): ResponsesResult =>
   makeResponsesResult({
     id: "resp_provider_message",
-    model: "gpt-5.4",
+    model: "gpt-5.5",
     output: [
       {
         id: "msg-provider-message",
@@ -490,7 +490,7 @@ const configureCodexProvider = (): void => {
       apiKey: "unused",
       authType: "authorization",
       models: {
-        "gpt-5.4": {
+        "gpt-5.5": {
           toolContentSupportType: [],
         },
       },
@@ -503,11 +503,12 @@ const createCodexMessagesPayload = (
 ): AnthropicMessagesPayload => ({
   max_tokens: 128,
   messages: [{ role: "user", content: "hello" }],
-  model: "gpt-5.4",
+  model: "gpt-5.5",
   ...overrides,
 })
 
-beforeEach(() => {
+beforeEach(async () => {
+  await Bun.sleep(0)
   writeProviderConfig()
   nextResponsesAsJson = false
   nextResponsesBody = undefined
@@ -656,6 +657,7 @@ describe("provider messages web_search", () => {
     expect(upstreamBody.tools).toEqual([
       {
         type: "web_search",
+        search_context_size: "low",
         filters: {
           allowed_domains: ["nodejs.org"],
         },
@@ -711,6 +713,7 @@ describe("provider messages web_search", () => {
     expect(upstreamBody.tools).toEqual([
       {
         type: "web_search",
+        search_context_size: "low",
         filters: {
           allowed_domains: ["nodejs.org"],
         },
@@ -778,6 +781,7 @@ describe("provider messages web_search", () => {
     expect(upstreamBody.tools).toEqual([
       {
         type: "web_search",
+        search_context_size: "low",
         filters: {
           allowed_domains: ["nodejs.org"],
         },
@@ -883,7 +887,7 @@ describe("provider messages web_search", () => {
         apiKey: "unused",
         authType: "authorization",
         models: {
-          "gpt-5.4": {
+          "gpt-5.5": {
             toolContentSupportType: [],
           },
         },
@@ -899,7 +903,7 @@ describe("provider messages web_search", () => {
       body: JSON.stringify({
         max_tokens: 128,
         messages: [{ role: "user", content: "What is the Node.js LTS?" }],
-        model: "gpt-5.4",
+        model: "gpt-5.5",
         output_config: {
           effort: "max",
         },
@@ -941,7 +945,7 @@ describe("provider messages web_search", () => {
         apiKey: "unused",
         authType: "authorization",
         models: {
-          "gpt-5.4": {
+          "gpt-5.5": {
             toolContentSupportType: [],
           },
         },
@@ -957,7 +961,7 @@ describe("provider messages web_search", () => {
       body: JSON.stringify({
         max_tokens: 128,
         messages: [{ role: "user", content: "hello" }],
-        model: "gpt-5.4",
+        model: "gpt-5.5",
         output_config: {
           effort: "max",
         },
@@ -1227,6 +1231,7 @@ describe("provider messages web_search", () => {
     expect(upstreamBody.tools).toEqual([
       {
         type: "web_search",
+        search_context_size: "low",
         filters: {
           allowed_domains: ["nodejs.org"],
         },
@@ -1270,6 +1275,7 @@ describe("provider messages web_search", () => {
     expect(upstreamBody.tools).toEqual([
       {
         type: "web_search",
+        search_context_size: "low",
         filters: {
           allowed_domains: ["nodejs.org"],
         },
@@ -1337,7 +1343,7 @@ describe("provider messages web_search", () => {
     configureCodexProvider()
     nextResponsesBody = makeResponsesResult({
       id: "resp_provider_tool_call",
-      model: "gpt-5.4",
+      model: "gpt-5.5",
       output: [
         {
           id: "fc-provider-weather",

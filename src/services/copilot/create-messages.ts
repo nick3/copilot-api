@@ -1,5 +1,6 @@
 import consola from "consola"
-import { events } from "fetch-event-stream"
+import type { events } from "fetch-event-stream"
+import { createResponsesHttpEventStream } from "~/services/responses-http"
 
 import type { CompactType } from "~/lib/compact"
 import type { SubagentMarker } from "~/lib/subagent"
@@ -237,6 +238,7 @@ export const createMessages = async (
     compactType?: CompactType
     requestId?: string
     fetchImpl?: typeof fetch
+    clientSignal?: AbortSignal
   },
 ): Promise<CreateMessagesReturn> => {
   const ctx = account ?? accountFromState()
@@ -265,6 +267,7 @@ export const createMessages = async (
       requestId: options?.requestId,
       callSite: "messages",
       fetchImpl: options?.fetchImpl,
+      clientSignal: options?.clientSignal,
     },
   )
 
@@ -276,7 +279,7 @@ export const createMessages = async (
   }
 
   if (payload.stream) {
-    return events(response)
+    return createResponsesHttpEventStream(response)
   }
 
   return (await response.json()) as AnthropicResponse

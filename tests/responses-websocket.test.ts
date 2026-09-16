@@ -448,3 +448,37 @@ test("a failed turn does not poison the queue for subsequent turns", async () =>
     '{"type":"response.completed","response":{"id":"resp-2"}}',
   )
 })
+
+test("network-exposed websocket upgrades fail closed after all gateway keys are cleared", async () => {
+  const { getConfig } = await import("~/lib/config")
+  const { handleResponsesWebSocketUpgrade } =
+    await import("~/routes/responses/websocket")
+  const config = getConfig()
+  const originalAuth = config.auth
+  config.auth = { apiKeys: [], allowLegacyApiKeyFallback: false }
+  let upgrades = 0
+  const server = {
+    upgrade: () => {
+      upgrades++
+      return true
+    },
+  } as unknown as Bun.Server<ResponsesWebSocketData>
+  const request = new Request("http://gateway.example/v1/responses", {
+    headers: { upgrade: "websocket" },
+  })
+  try {
+    const denied = handleResponsesWebSocketUpgrade(request, server, {
+      allowWhenNoApiKeys: false,
+    })
+    expect(denied?.status).toBe(401)
+    expect(upgrades).toBe(0)
+    expect(
+      handleResponsesWebSocketUpgrade(request, server, {
+        allowWhenNoApiKeys: true,
+      }),
+    ).toBeUndefined()
+    expect(upgrades).toBe(1)
+  } finally {
+    config.auth = originalAuth
+  }
+})

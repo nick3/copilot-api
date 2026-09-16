@@ -25,12 +25,13 @@ import { providerMessageRoutes } from "./routes/provider/messages/route"
 import { providerModelRoutes } from "./routes/provider/models/route"
 import { providerResponsesRoutes } from "./routes/provider/responses/route"
 import { responsesRoutes } from "./routes/responses/route"
-import { tokenRoute } from "./routes/token/route"
 import { tokenUsageRoute } from "./routes/token-usage/route"
 import { usageRoute } from "./routes/usage/route"
 
 export interface CreateServerOptions {
   enableMcpHttp?: boolean
+  networkExposed?: boolean
+  getApiKeys?: () => Array<string>
 }
 
 export function createServer(options: CreateServerOptions = {}): Hono {
@@ -61,10 +62,21 @@ export function createServer(options: CreateServerOptions = {}): Hono {
     )
   }
 
-  app.use(cors())
+  app.use(
+    cors(
+      options.networkExposed ?
+        {
+          origin: (origin, c) =>
+            origin === new URL(c.req.url).origin ? origin : undefined,
+        }
+      : {},
+    ),
+  )
   app.use(
     "*",
     createAuthMiddleware({
+      getApiKeys: options.getApiKeys,
+      allowWhenNoApiKeys: !options.networkExposed,
       allowUnauthenticatedPaths: ["/", DEFAULT_MCP_HTTP_PATH],
       allowUnauthenticatedPathPrefixes: ["/admin", "/api/admin"],
     }),
@@ -77,7 +89,6 @@ export function createServer(options: CreateServerOptions = {}): Hono {
   app.route("/embeddings", embeddingRoutes)
   app.route("/usage", usageRoute)
   app.route("/token-usage", tokenUsageRoute)
-  app.route("/token", tokenRoute)
   app.route("/responses", responsesRoutes)
   app.route("/alpha/search", alphaSearchRoutes)
   app.route("/images", imageRoutes)

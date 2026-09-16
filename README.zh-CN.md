@@ -175,91 +175,18 @@ bunx --bun @nick3/copilot-api@latest auth
 
 ## 配合 Docker 使用
 
-构建镜像：
+使用当前 all 分支的 [Compose 模板](docker-compose.yaml)。该镜像保留 Admin UI，以非 root 用户运行，数据统一挂载到 `/data`。
 
 ```sh
-docker build -t copilot-api .
+mkdir -p copilot-data
+docker compose build
+docker compose run --rm data-init
+docker compose run --rm --no-deps copilot-api auth keys --add '<gateway-key>'
+docker compose run --rm --no-deps copilot-api auth add
+docker compose up -d
 ```
 
-运行容器：
-
-```sh
-# 在宿主机创建目录，用于持久化 GitHub token 及相关数据
-mkdir -p ./copilot-data
-
-# 通过 bind mount 持久化 token
-# 这样容器重启后认证信息仍会保留
-
-docker run -p 4141:4141 -v $(pwd)/copilot-data:/root/.local/share/copilot-api copilot-api
-```
-
-> **注意：**
-> GitHub token 及相关数据会保存在宿主机的 `copilot-data` 目录中。该目录会映射到容器内的 `/root/.local/share/copilot-api`，从而在容器重启后继续保留数据。这个目录还会保存 `/admin` 使用的管理端请求历史数据库（`admin.sqlite`）。
-
-### 在 Docker 中添加多个账号
-
-如果你在 Docker 中运行并希望添加多个账号：
-
-> **注意：** Docker 镜像默认使用的 entrypoint 会直接执行 `start` 命令。因此如果你想在容器内运行 `auth` 子命令，需要加上 `--auth` 前缀（例如 `--auth add`）。
-
-```sh
-# 交互式添加账号（一次一个）
-docker run -it -v $(pwd)/copilot-data:/root/.local/share/copilot-api copilot-api --auth add
-docker run -it -v $(pwd)/copilot-data:/root/.local/share/copilot-api copilot-api --auth add
-
-# 列出已注册账号
-docker run -it -v $(pwd)/copilot-data:/root/.local/share/copilot-api copilot-api --auth ls -q
-```
-
-> **注意：** 使用多账号时，所有账号数据（token 与注册表）都会保存在挂载的 `copilot-data` 目录中。
-> Premium 模型请求会按账号顺序尝试，并在 premium 配额耗尽时自动切换；免费模型请求默认会在多个账号间轮转分发（可在 `config.json` 中配置）。
-
-### 在 Docker 中使用环境变量
-
-你也可以直接通过环境变量把 GitHub token 传给容器：
-
-```sh
-# 构建时注入 GitHub token
-docker build --build-arg GH_TOKEN=your_github_token_here -t copilot-api .
-
-# 运行时注入 GitHub token
-docker run -p 4141:4141 -e GH_TOKEN=your_github_token_here copilot-api
-
-# （可选）启用远程 Admin UI/API 访问
-# 这需要设置 ADMIN_TOKEN，并通过请求头发送（x-admin-token / Authorization: Bearer）
-docker run -p 4141:4141 -e GH_TOKEN=your_github_token_here -e ADMIN_TOKEN=your_admin_token_here copilot-api
-
-# （可选）启用请求鉴权
-# 推荐方式：在 config.json 中配置 auth.apiKeys。
-# 兼容迁移场景时，仍支持旧的 COPILOT_API_KEY。
-docker run -p 4141:4141 -e GH_TOKEN=your_github_token_here -e COPILOT_API_KEY=your_api_key_here copilot-api
-
-# 搭配附加选项运行
-docker run -p 4141:4141 -e GH_TOKEN=your_token copilot-api --verbose --port 4141
-```
-
-### Docker Compose 示例
-
-```yaml
-version: "3.8"
-services:
-  copilot-api:
-    build: .
-    ports:
-      - "4141:4141"
-    environment:
-      - GH_TOKEN=your_github_token_here
-      - ADMIN_TOKEN=your_admin_token_here
-      - COPILOT_API_KEY=your_api_key_here
-    restart: unless-stopped
-```
-
-Docker 镜像包含：
-
-- 多阶段构建，以优化镜像体积
-- 非 root 用户，以增强安全性
-- 用于容器监控的健康检查
-- 固定基础镜像版本，以保证可复现构建
+远程管理需独立设置 `ADMIN_TOKEN`；默认宿主发布地址为 `127.0.0.1`。旧挂载目录、监听地址及新配置的迁移步骤见 [升级说明](docs/merge-v2.6.1-upgrade.md)。不要在镜像构建参数中写入 GitHub token；运行时可设置 `COPILOT_API_GITHUB_TOKEN`。
 
 ## 命令结构
 
@@ -288,6 +215,8 @@ Copilot API 现在使用子命令结构，主要命令包括：
 | `--enterprise-url` | GitHub Enterprise URL（设置 `COPILOT_API_ENTERPRISE_URL`） | 无 | 无 |
 
 ### Start 命令选项
+
+默认监听 `127.0.0.1`。可使用 `--host` 或 `HOST` 修改；非回环监听必须配置网关 API key。
 
 以下是 `start` 命令可用的命令行选项：
 
@@ -636,7 +565,7 @@ curl "http://localhost:4141/usage/0"
 - `COPILOT_API_KEY`（环境变量）
 - `config.json` 中的 `apiKey`
 
-只有在 `auth.apiKeys` 为空时，才会启用这些兼容项。新部署应直接使用 `auth.apiKeys`。
+只有在 `auth.apiKeys` 为空且未通过 `auth.allowLegacyApiKeyFallback=false` 关闭回退时，才会启用这些兼容项。新部署应直接使用 `auth.apiKeys`。
 
 ### Admin UI 与 Admin API
 
