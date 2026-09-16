@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 
+. "$(dirname "$0")/docker-data-home.sh"
+
 export HOST="${HOST:-0.0.0.0}"
 export COPILOT_API_GITHUB_TOKEN="${COPILOT_API_GITHUB_TOKEN:-${GH_TOKEN:-}}"
 
@@ -20,15 +22,11 @@ for argument in "$@"; do
   esac
 done
 
-if [ "$check_home" = true ] && [ -n "$data_home" ]; then
-  if ! mkdir -p "$data_home" || [ ! -w "$data_home" ] || [ ! -x "$data_home" ]; then
-    printf 'Cannot write API home: %s. Prepare the mounted directory for UID:GID %s:%s. Do not use chmod 777.\n' "$data_home" "$(id -u)" "$(id -g)" >&2
-    exit 1
-  fi
-  if [ -e "$data_home/config.json" ] && [ ! -r "$data_home/config.json" ]; then
-    printf 'Cannot read %s/config.json. Back up existing data and correct ownership; refusing to replace it.\n' "$data_home" >&2
-    exit 1
-  fi
+if [ "$check_home" = true ]; then
+  data_home="$(resolve_container_data_home /data /root/.local/share/copilot-api "$data_home")"
+  validate_container_data_home "$data_home"
+  export COPILOT_API_HOME="$data_home"
+  printf 'Using API home: %s\n' "$data_home" >&2
 fi
 
 if [ "$#" -gt 0 ] && [ "$1" = "--auth" ]; then

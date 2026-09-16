@@ -16,23 +16,47 @@ bun run src/main.ts start --host 0.0.0.0
 
 `ADMIN_TOKEN` 仍是独立的管理面凭据，与网关 API key、GitHub token、Codex 凭据分开。返回上游 token 的 `/token` 端点已删除。`COPILOT_API_GITHUB_TOKEN` 可作为临时高优先级 Copilot 账号传入；`--github-token` 优先，已有注册账号不受覆盖。
 
+没有 Copilot 账号时，服务仍启动 Admin UI，可在页面中添加第一个账号。Docker 等非交互环境不会自动等待 CLI 设备登录；交互终端可在 HTTP 监听启动后运行后台授权，授权等待或失败不影响 Admin。`--skip-auth` 继续用于关闭交互终端的自动授权。
+
 ## 容器
 
-镜像运行于 `bun` 非 root 用户，API 数据目录为 `/data`。使用仓库附带的 Compose 文件构建当前 all 分支：
+镜像运行于 `bun` 非 root 用户，新部署的 API 数据目录为 `/data`。显式的 `COPILOT_API_HOME` / `--api-home` 优先；未显式指定时，入口脚本会识别旧的 `/root/.local/share/copilot-api` 挂载或已有数据，可访问时继续沿用。两个位置均有数据或挂载时要求显式选择；旧数据不可访问时明确提示修复权限，不会另建空配置继续启动。使用仓库附带的 Compose 文件构建当前 all 分支：
 
 ```sh
 mkdir -p copilot-data
 docker compose build
 docker compose run --rm data-init
 docker compose run --rm --no-deps copilot-api auth keys --add '<gateway-key>'
-docker compose run --rm --no-deps copilot-api auth add
 # 远程访问 Admin 前，在环境或 .env 中配置 ADMIN_TOKEN。
 docker compose up -d
+# 现在可通过 Admin 添加账号，也可执行 auth add。
 ```
 
 Compose 默认只发布宿主机 `127.0.0.1:4141`，容器内部显式监听 `0.0.0.0`。需要网络访问时设置 `COPILOT_API_BIND`，例如 `0.0.0.0`，并配置独立的 `ADMIN_TOKEN`。镜像默认名称为 `copilot-api:local`，可用 `COPILOT_API_IMAGE` 指定自己构建的标签。
 
 迁移旧容器时，将原持久化数据目录挂载到 `/data`，保留整个目录并先备份。初始化只修复列出的网关状态路径权限，包括 `tokens/`、账号注册表、配置、Codex 凭据、模型、日志、缓存、用量数据库和 `admin.sqlite`。不会递归修改任意挂载目录的全部文件。
+
+### 从合并前版本升级或恢复“配置和账号为空”
+
+旧版文档将数据挂载在 `/root/.local/share/copilot-api`；初次合并的镜像却固定读取 `/data`。仅更换镜像、保留旧挂载目标，会使旧文件不可见。日志中的 `Loaded 0 account(s)` 与 `/data/accounts-registry.json` 不存在并不证明旧数据已被删除。
+
+1. 先查看原容器的挂载来源，找到**原来已经存有数据的宿主机目录或命名卷**。只检查文件是否存在，无需打印 token 或配置内容。停止服务后备份整个原目录，包括 SQLite 的 WAL/SHM 文件。
+2. 保持挂载来源不变，只把容器内目标改为 `/data`，并设 `COPILOT_API_HOME=/data`。不要用新的空 `./copilot-data` 替换原来源，也不要混合覆盖两个目录中的数据库或账号文件。
+3. 使用本仓库 Compose 时，把 `COPILOT_API_DATA_DIR` 指向该原目录，再执行 `docker compose run --rm data-init`。这用于适配非 root 用户的读写权限。自定义 Compose 需要等效的权限初始化，旧 root 所有、权限为 600 的文件不能直接由 `bun` 用户读取。
+4. 启动后检查 `Using API home` 和加载账号数量，确认 Admin 中配置与账号恢复。恢复已有账号不需要重新登录。
+
+自定义 Compose 的关键差异如下，宿主机来源仍为原来的数据目录：
+
+```yaml
+volumes:
+  - /原来的宿主机数据目录:/data
+environment:
+  COPILOT_API_HOME: /data
+```
+
+若暂时仍使用初次合并的镜像，可在原有启动参数后增加 `--skip-auth`，绕过零账号时阻塞 HTTP 启动的问题；这只恢复管理入口，不能代替旧数据卷的路径和权限修复。修复后的版本无需这一临时参数。
+
+当前修复的自动化验证覆盖旧目录选择、配置/账号读取、权限拒绝和零账号 HTTP 启动。Docker 镜像构建、实际卷权限及生产数据恢复仍需在部署主机核实。
 
 `COPILOT_API_SQLITE_DB_PATH` 仅控制用量数据库，不改变 Admin 数据库的位置。若指向自定义目录，需另行保证该目录可写和持久化。`/tmp` 默认 512 MiB，可用 `COPILOT_API_TMP_SIZE` 调整；图片单请求总限额为 128 MiB，并发上传仍共享临时磁盘预算。
 

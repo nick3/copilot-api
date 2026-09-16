@@ -7,7 +7,6 @@ import consola from "consola"
 import {
   registerQuotaRefreshSchedulerShutdownCleanup,
   startQuotaRefreshSchedulerFromConfig,
-  stopQuotaRefreshScheduler,
 } from "~/lib/quota-refresh-scheduler-runtime"
 import { isMcpHttpEnabledFromEnv } from "~/mcp-http-config"
 import {
@@ -65,7 +64,7 @@ interface RunServerOptions {
 
 /**
  * Run the interactive authentication flow to add a new account.
- * Called automatically when no accounts are found.
+ * Offered in interactive terminals after the HTTP server is listening.
  */
 async function runAuthFlow(accountType: AccountType): Promise<void> {
   consola.warn("No accounts found. Starting authentication flow...")
@@ -241,26 +240,15 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     consola.info("Using provided GitHub token as temporary account")
   }
 
-  // Check if we have any accounts, if not, start the auth flow
-  if (!accountsManager.hasAccounts()) {
-    if (options.skipAuth) {
-      consola.warn(
-        "No accounts found. Skipping auth flow (--skip-auth). Add accounts via the Admin UI.",
-      )
-    } else {
-      try {
-        await runAuthFlow(options.accountType)
-
-        // Re-initialize accounts manager with the new account
-        accountsManager.shutdown()
-        stopQuotaRefreshScheduler()
-        await accountsManager.initialize(state.vsCodeVersion)
-        accountsManager.setModelsRefreshIntervalMs(getModelRefreshIntervalMs())
-      } catch (error) {
-        consola.error("Failed to add account:", error)
-        process.exit(1)
-      }
-    }
+  const hasAccounts = accountsManager.hasAccounts()
+  const startInteractiveAuth =
+    !hasAccounts
+    && !options.skipAuth
+    && Boolean(process.stdin.isTTY && process.stdout.isTTY)
+  if (!hasAccounts) {
+    consola.warn(
+      "No accounts found. Starting the server so you can add accounts via the Admin UI or `auth add`.",
+    )
   }
 
   startQuotaRefreshSchedulerFromConfig()
@@ -278,12 +266,12 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   if (options.claudeCode) {
     logClaudeCodeTip()
     if (!models?.data.length) {
-      consola.error(
-        "Claude Code requires available models. Add an account via the Admin UI or remove --claude-code.",
+      consola.warn(
+        "Claude Code setup requires available models. Admin UI will remain available to add an account.",
       )
-      process.exit(1)
+    } else {
+      setupClaudeCode(models, serverUrl)
     }
-    setupClaudeCode(models, serverUrl)
   }
 
   consola.box(`🌐 Admin UI: ${serverUrl}/admin`)
@@ -315,6 +303,25 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     },
     websocket: responsesWebSocketHandler,
   })
+
+  // Login may wait indefinitely for a user or fail offline. It must not gate
+  // Admin availability, and reloading must not reset other accounts added via UI.
+  if (startInteractiveAuth) {
+    void runAuthFlow(options.accountType)
+      .then(async () => {
+        await accountsManager.reloadRegistryNow()
+        const authenticatedModels = accountsManager.getFirstAccountModels()
+        if (options.claudeCode && authenticatedModels?.data.length) {
+          setupClaudeCode(authenticatedModels, serverUrl)
+        }
+      })
+      .catch((error: unknown) => {
+        consola.error(
+          "Failed to add account; Admin UI is still available:",
+          error,
+        )
+      })
+  }
 }
 
 export const start = defineCommand({
@@ -389,7 +396,7 @@ export const start = defineCommand({
       type: "boolean",
       default: false,
       description:
-        "Skip the initial CLI auth flow when no accounts are found. Use this to add accounts via the Admin UI instead.",
+        "Skip background device login in an interactive terminal. Headless startup always uses Admin UI or auth add.",
     },
     "enable-mcp-http": {
       type: "boolean",

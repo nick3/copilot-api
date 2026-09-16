@@ -175,17 +175,19 @@ mkdir -p copilot-data
 docker compose build
 docker compose run --rm data-init
 docker compose run --rm --no-deps copilot-api auth keys --add '<gateway-key>'
-docker compose run --rm --no-deps copilot-api auth add
 docker compose up -d
+# Open Admin to add the first account, or run the auth add command.
 ```
 
 Configure a separate `ADMIN_TOKEN` for remote administration. The published host address defaults to `127.0.0.1`. See the [upgrade notes](docs/merge-v2.6.1-upgrade.md) for existing data mounts, listener changes, Codex accounts, transport settings and usage periods. Supply `COPILOT_API_GITHUB_TOKEN` at runtime; do not embed credentials in build arguments.
+
+When upgrading, reuse the existing host data directory or named volume, including its config, registry and tokens, and mount it at `/data`. The old mount target was `/root/.local/share/copilot-api`. The entrypoint detects that legacy location when no home is explicitly configured; unreadable legacy data or ambiguous locations cause an actionable error instead of an empty replacement. Initialize ownership for the non-root container user before startup. Admin remains available with zero Copilot accounts.
 
 ## Command Structure
 
 Copilot API now uses a subcommand structure with these main commands:
 
-- `start`: Start the Copilot API server. This command will also handle authentication if needed.
+- `start`: Start the Copilot API server, including Admin when no accounts exist. Interactive terminals may start device login in the background after the listener is ready; headless deployments use Admin or `auth add`.
 - `auth`: Manage GitHub Copilot accounts. Supports subcommands:
   - `auth add`: Add a new account via GitHub OAuth flow
   - `auth ls`: List all registered accounts (use `-q` to show quota)

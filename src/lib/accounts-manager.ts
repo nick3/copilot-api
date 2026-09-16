@@ -1,6 +1,7 @@
 /* eslint-disable max-lines */
 import consola from "consola"
 import fs from "node:fs"
+import path from "node:path"
 
 import type {
   AccountContext,
@@ -1882,19 +1883,19 @@ export class AccountsManager {
   }
 
   /**
-   * Start watching the registry file for changes.
-   * Enables hot reload of accounts when the file is modified.
+   * Watch the containing directory so first creation and atomic replacement of
+   * the registry both reload accounts, including an initially empty install.
    */
   private startRegistryWatcher(): void {
     // Stop existing watcher if any
     this.stopRegistryWatcher()
 
     try {
+      const registryName = path.basename(PATHS.ACCOUNTS_REGISTRY_PATH)
       this.registryWatcher = fs.watch(
-        PATHS.ACCOUNTS_REGISTRY_PATH,
-        (eventType) => {
-          // Only react to 'change' events (file content modified)
-          if (eventType === "change") {
+        path.dirname(PATHS.ACCOUNTS_REGISTRY_PATH),
+        (_eventType, filename) => {
+          if (filename === null || filename === registryName) {
             this.scheduleReload()
           }
         },

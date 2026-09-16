@@ -182,17 +182,19 @@ mkdir -p copilot-data
 docker compose build
 docker compose run --rm data-init
 docker compose run --rm --no-deps copilot-api auth keys --add '<gateway-key>'
-docker compose run --rm --no-deps copilot-api auth add
 docker compose up -d
+# 通过 Admin 添加第一个账号，也可使用 auth add 命令。
 ```
 
 远程管理需独立设置 `ADMIN_TOKEN`；默认宿主发布地址为 `127.0.0.1`。旧挂载目录、监听地址及新配置的迁移步骤见 [升级说明](docs/merge-v2.6.1-upgrade.md)。不要在镜像构建参数中写入 GitHub token；运行时可设置 `COPILOT_API_GITHUB_TOKEN`。
+
+升级时必须复用原来的宿主机数据目录或命名卷（包括配置、注册表和 tokens），将挂载目标从旧的 `/root/.local/share/copilot-api` 改为 `/data`，并为非 root 用户初始化权限。未显式配置数据目录时，入口脚本会识别旧目录；旧数据不可访问或位置有歧义时会明确报错，避免启动成空配置。没有 Copilot 账号也可访问 Admin。
 
 ## 命令结构
 
 Copilot API 现在使用子命令结构，主要命令包括：
 
-- `start`：启动 Copilot API 服务。如有需要，也会自动处理认证。
+- `start`：启动 Copilot API 服务，零账号时也启动 Admin。交互终端可在监听就绪后后台运行设备授权；容器等非交互环境通过 Admin 或 `auth add` 添加账号。
 - `auth`：管理 GitHub Copilot 账号。支持以下子命令：
   - `auth add`：通过 GitHub OAuth 流程添加新账号
   - `auth ls`：列出所有已注册账号（使用 `-q` 显示配额）

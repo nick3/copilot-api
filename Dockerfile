@@ -11,11 +11,11 @@ RUN bun run build
 
 FROM bun-runtime AS runner
 WORKDIR /app
-ENV COPILOT_API_HOME=/data
 COPY ./package.json ./bun.lock ./
 RUN bun install --frozen-lockfile --production --ignore-scripts --no-cache
 COPY --from=builder /app/dist ./dist
 COPY entrypoint.sh /entrypoint.sh
+COPY docker-data-home.sh /docker-data-home.sh
 RUN chmod +x /entrypoint.sh && mkdir -p /data/cache && chown bun:bun /data /data/cache
 USER bun
 EXPOSE 4141
