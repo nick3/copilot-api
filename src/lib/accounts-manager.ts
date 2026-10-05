@@ -1,3 +1,5 @@
+import { findModelById } from "./model-id"
+import { assertGitHubCopilotEnabled } from "./github-copilot-provider"
 /* eslint-disable max-lines */
 import consola from "consola"
 import fs from "node:fs"
@@ -33,7 +35,6 @@ import {
   getCurrentIdentityEnvironment,
 } from "./account-client-identity"
 import {
-  applyCopilotTokenIfCurrent,
   applyModelsIfCurrent,
   applyQuotaRefreshSuccessIfCurrent,
   applyTokenRefreshFailureIfCurrent,
@@ -230,6 +231,10 @@ export class AccountsManager {
   private sessionOwnership = new SessionOwnershipCache()
   private sessionOwnershipGeneration = 0
   private loadBalanceCursor = 0
+  private copilotEnabled = true
+  private lifecycleGeneration = 0
+  private isStopped = false
+  private runtimeNeedsInitialization = false
 
   constructor(options: AccountsManagerOptions = {}) {
     const { persistentAffinityStore } = options
@@ -263,13 +268,14 @@ export class AccountsManager {
 
   /** Initialize accounts manager (load registry, migrate legacy token). */
   async initialize(vsCodeVersion?: string): Promise<void> {
+    this.isStopped = false
     this.vsCodeVersion = vsCodeVersion
 
     // Check if we need to migrate legacy token
     const hasReg = await hasRegistry()
     const hasLegacy = await hasLegacyToken()
 
-    if (!hasReg && hasLegacy) {
+    if (this.copilotEnabled && !hasReg && hasLegacy) {
       await this.migrateLegacyToken()
     }
 
@@ -323,6 +329,49 @@ export class AccountsManager {
 
     // Start watching the registry file for hot reload
     this.startRegistryWatcher()
+  }
+
+  async setCopilotEnabled(enabled: boolean): Promise<void> {
+    if (enabled === this.copilotEnabled && !this.runtimeNeedsInitialization)
+      return
+    this.copilotEnabled = enabled
+    this.lifecycleGeneration++
+    this.stopAllTokenRefresh()
+    this.stopAllSessionRefresh()
+    this.stopModelsRefresh()
+    for (const account of [
+      ...this.accounts.values(),
+      ...(this.temporaryAccount ? [this.temporaryAccount] : []),
+    ]) {
+      this.modelsRefreshSnapshotByAccount.delete(account)
+      this.quotaRefreshSnapshotByAccount.delete(account)
+    }
+    this.runtimeNeedsInitialization = false
+    if (!enabled || this.isStopped) return
+
+    const accounts = [
+      ...this.accounts.values(),
+      ...(this.temporaryAccount ? [this.temporaryAccount] : []),
+    ]
+    const results = await Promise.allSettled(
+      accounts.map((account) => this.initializeAccount(account)),
+    )
+    this.scheduleModelsRefresh()
+    const failures = results.filter((result) => result.status === "rejected")
+    this.runtimeNeedsInitialization = failures.length > 0
+    if (failures.length > 0) {
+      throw new Error(
+        `Failed to initialize ${failures.length} Copilot account(s); retry reloading the configuration`,
+      )
+    }
+  }
+
+  private isCurrentRuntime(generation: number): boolean {
+    return (
+      this.copilotEnabled
+      && !this.isStopped
+      && generation === this.lifecycleGeneration
+    )
   }
 
   setAccountAffinityEnabled(enabled: boolean): void {
@@ -427,7 +476,9 @@ export class AccountsManager {
     snapshot: AuthSnapshot,
   ): boolean {
     return (
-      this.tokenRefreshEnabledAccounts.has(account)
+      this.copilotEnabled
+      && !this.isStopped
+      && this.tokenRefreshEnabledAccounts.has(account)
       && isAuthSnapshotCurrent(account, snapshot)
     )
   }
@@ -437,7 +488,11 @@ export class AccountsManager {
     snapshot: AuthSnapshot,
     refreshInSeconds: number,
   ): Promise<void> {
-    if (!this.shouldContinueTokenRefresh(account, snapshot)) {
+    const generation = this.lifecycleGeneration
+    if (
+      !this.isCurrentRuntime(generation)
+      || !this.shouldContinueTokenRefresh(account, snapshot)
+    ) {
       return
     }
 
@@ -445,7 +500,10 @@ export class AccountsManager {
       const ctx = toAccountContextFromSnapshot(account, snapshot)
       const { token, refresh_in, endpoints } = await getCopilotToken(ctx)
 
-      if (!this.shouldContinueTokenRefresh(account, snapshot)) {
+      if (
+        !this.isCurrentRuntime(generation)
+        || !this.shouldContinueTokenRefresh(account, snapshot)
+      ) {
         return
       }
 
@@ -462,21 +520,30 @@ export class AccountsManager {
       consola.debug(`Refreshed token for account ${account.id}`)
 
       // Schedule next refresh using the new refresh interval.
-      if (!this.shouldContinueTokenRefresh(account, snapshot)) {
+      if (
+        !this.isCurrentRuntime(generation)
+        || !this.shouldContinueTokenRefresh(account, snapshot)
+      ) {
         return
       }
       this.startTokenRefresh(account, refresh_in)
     } catch (error) {
       consola.error(`Failed to refresh token for ${account.id}:`, error)
 
-      if (!this.shouldContinueTokenRefresh(account, snapshot)) {
+      if (
+        !this.isCurrentRuntime(generation)
+        || !this.shouldContinueTokenRefresh(account, snapshot)
+      ) {
         return
       }
 
       applyTokenRefreshFailureIfCurrent(account, snapshot, error)
 
       // Retry using the previous refresh interval (best effort).
-      if (!this.shouldContinueTokenRefresh(account, snapshot)) {
+      if (
+        !this.isCurrentRuntime(generation)
+        || !this.shouldContinueTokenRefresh(account, snapshot)
+      ) {
         return
       }
       this.startTokenRefresh(account, refreshInSeconds)
@@ -498,22 +565,32 @@ export class AccountsManager {
 
   /** Initialize a single account. */
   private async initializeAccount(account: AccountRuntime): Promise<void> {
+    const generation = this.lifecycleGeneration
+    if (!this.isCurrentRuntime(generation)) return
     await this.applyAccountIdentity(account)
+    if (!this.isCurrentRuntime(generation)) return
     const snapshot = takeAuthSnapshot(account)
 
     try {
       // Get Copilot token
       const tokenCtx = toAccountContextFromSnapshot(account, snapshot)
       const { token, refresh_in, endpoints } = await getCopilotToken(tokenCtx)
+      if (!this.isCurrentRuntime(generation)) return
 
       if (
-        !applyCopilotTokenIfCurrent(account, snapshot, token, endpoints?.api)
+        !applyTokenRefreshSuccessIfCurrent(
+          account,
+          snapshot,
+          token,
+          endpoints?.api,
+        )
       ) {
         return
       }
 
       // Resolve the account-specific Copilot endpoint before the first models fetch.
       await this.refreshQuota(account)
+      if (!this.isCurrentRuntime(generation)) return
 
       // Start token refresh timer
       this.startTokenRefresh(account, refresh_in)
@@ -521,6 +598,7 @@ export class AccountsManager {
       // Get models
       const modelsCtx = toAccountContextFromSnapshot(account, snapshot, token)
       const models = await getModels(modelsCtx)
+      if (!this.isCurrentRuntime(generation)) return
 
       if (!applyModelsIfCurrent(account, snapshot, models)) {
         return
@@ -530,7 +608,10 @@ export class AccountsManager {
       consola.debug(`Account ${account.id} initialized`)
     } catch (error) {
       // Ignore stale results if registry hot reload changed auth.
-      if (!isAuthSnapshotCurrent(account, snapshot)) {
+      if (
+        !this.isCurrentRuntime(generation)
+        || !isAuthSnapshotCurrent(account, snapshot)
+      ) {
         return
       }
 
@@ -572,6 +653,7 @@ export class AccountsManager {
     account: AccountRuntime,
     refreshInSeconds: number,
   ): void {
+    if (!this.copilotEnabled || this.isStopped) return
     // Stop existing timer if any
     this.stopTokenRefresh(account)
 
@@ -606,6 +688,7 @@ export class AccountsManager {
   }
 
   private startSessionRefresh(account: AccountRuntime): void {
+    if (!this.copilotEnabled || this.isStopped) return
     this.stopSessionRefresh(account)
 
     const delayMs = this.computeSessionRefreshDelayMs()
@@ -652,7 +735,12 @@ export class AccountsManager {
   private scheduleModelsRefresh(): void {
     this.stopModelsRefresh()
 
-    if (!this.modelsRefreshIntervalMs || this.modelsRefreshIntervalMs <= 0) {
+    if (
+      !this.copilotEnabled
+      || this.isStopped
+      || !this.modelsRefreshIntervalMs
+      || this.modelsRefreshIntervalMs <= 0
+    ) {
       return
     }
 
@@ -669,12 +757,14 @@ export class AccountsManager {
   }
 
   private async runModelsRefreshTick(): Promise<void> {
+    const generation = this.lifecycleGeneration
+    if (!this.isCurrentRuntime(generation)) return
     try {
       await this.refreshAllModels()
     } catch (error) {
       consola.error("Failed to refresh models:", error)
     } finally {
-      this.scheduleModelsRefresh()
+      if (this.isCurrentRuntime(generation)) this.scheduleModelsRefresh()
     }
   }
 
@@ -692,6 +782,8 @@ export class AccountsManager {
   }
 
   private async refreshModels(account: AccountRuntime): Promise<void> {
+    const generation = this.lifecycleGeneration
+    if (!this.isCurrentRuntime(generation)) return
     if (!account.copilotToken) {
       consola.debug(
         `Skip model refresh for ${account.id}: missing Copilot token`,
@@ -720,11 +812,13 @@ export class AccountsManager {
     const promise = (async () => {
       try {
         const models = await getModels(ctx)
+        if (!this.isCurrentRuntime(generation)) return
         const applied = applyModelsIfCurrent(account, snapshot, models)
         if (applied) {
           account.lastModelsFetch = Date.now()
         }
       } catch (error) {
+        if (!this.isCurrentRuntime(generation)) return
         if (error instanceof HTTPError && error.response.status === 401) {
           applyUnauthorizedIfCurrent(account, snapshot, "Unauthorized (401)")
           return
@@ -770,6 +864,8 @@ export class AccountsManager {
 
   /** Refresh quota information for an account. */
   async refreshQuota(account: AccountRuntime): Promise<void> {
+    const generation = this.lifecycleGeneration
+    if (!this.isCurrentRuntime(generation)) return
     const snapshot = takeAuthSnapshot(account)
 
     if (account.quotaRefreshPromise) {
@@ -786,6 +882,7 @@ export class AccountsManager {
     const promise = (async () => {
       try {
         const usage = await getCopilotUsage(ctx)
+        if (!this.isCurrentRuntime(generation)) return
         const premium = usage.quota_snapshots.premium_interactions
         const applied = applyQuotaRefreshSuccessIfCurrent(account, snapshot, {
           premium,
@@ -808,6 +905,7 @@ export class AccountsManager {
           }
         }
       } catch (error) {
+        if (!this.isCurrentRuntime(generation)) return
         if (error instanceof HTTPError && error.response.status === 401) {
           applyUnauthorizedIfCurrent(account, snapshot, "Unauthorized (401)")
           return
@@ -888,7 +986,7 @@ export class AccountsManager {
         ) ?
           { ...candidate, modelId: candidate.tokenBasedBillingModelId }
         : candidate
-      const model = models.find((m) => m.id === resolvedCandidate.modelId)
+      const model = findModelById(models, resolvedCandidate.modelId)
       if (!model) {
         continue
       }
@@ -1047,11 +1145,17 @@ export class AccountsManager {
   ): { candidate: AccountRequestCandidate; model: Model } | null {
     const aliasCandidates = candidates.map((candidate) => {
       const modelId = resolveModelAlias(candidate.modelId)
-      if (modelId === candidate.modelId) return candidate
-      return { ...candidate, modelId }
+      const tokenBasedBillingModelId =
+        candidate.tokenBasedBillingModelId === undefined ?
+          undefined
+        : resolveModelAlias(candidate.tokenBasedBillingModelId)
+      return { ...candidate, modelId, tokenBasedBillingModelId }
     })
     const aliasChanged = aliasCandidates.some(
-      (candidate, index) => candidate.modelId !== candidates[index].modelId,
+      (candidate, index) =>
+        candidate.modelId !== candidates[index].modelId
+        || candidate.tokenBasedBillingModelId
+          !== candidates[index].tokenBasedBillingModelId,
     )
     if (!aliasChanged) return null
 
@@ -1126,6 +1230,7 @@ export class AccountsManager {
     candidates: Array<AccountRequestCandidate>,
     context?: AccountSelectionContext,
   ): Promise<SelectAccountForRequestResult> {
+    assertGitHubCopilotEnabled()
     if (candidates.length === 0) {
       throw new Error("selectAccountForRequest requires at least one candidate")
     }
@@ -1209,6 +1314,7 @@ export class AccountsManager {
   }
 
   private getOrderedEnabledAccounts(): Array<AccountRuntime> {
+    if (!this.copilotEnabled) return []
     return [
       ...(this.temporaryAccount ? [this.temporaryAccount] : []),
       ...this.accountOrder
@@ -1664,11 +1770,17 @@ export class AccountsManager {
 
     const aliasCandidates = candidates.map((candidate) => {
       const modelId = resolveModelAlias(candidate.modelId)
-      if (modelId === candidate.modelId) return candidate
-      return { ...candidate, modelId }
+      const tokenBasedBillingModelId =
+        candidate.tokenBasedBillingModelId === undefined ?
+          undefined
+        : resolveModelAlias(candidate.tokenBasedBillingModelId)
+      return { ...candidate, modelId, tokenBasedBillingModelId }
     })
     const aliasChanged = aliasCandidates.some(
-      (candidate, index) => candidate.modelId !== candidates[index].modelId,
+      (candidate, index) =>
+        candidate.modelId !== candidates[index].modelId
+        || candidate.tokenBasedBillingModelId
+          !== candidates[index].tokenBasedBillingModelId,
     )
     if (!aliasChanged) {
       return primary
@@ -1797,6 +1909,13 @@ export class AccountsManager {
    * Get the first available account's models.
    * Used for caching models in legacy compatibility mode.
    */
+  getModelsForRouting(): Array<Model> {
+    return this.getOrderedEnabledAccounts()
+      .filter((account) => !this.isAccountFailed(account))
+      .flatMap((account) => account.models?.data ?? [])
+      .filter((model) => isCopilotModelAvailable(model))
+  }
+
   getFirstAccountModels(): AccountRuntime["models"] {
     if (this.temporaryAccount?.models) {
       return this.temporaryAccount.models
@@ -2186,6 +2305,8 @@ export class AccountsManager {
    * Shutdown the manager and clean up resources.
    */
   shutdown(): void {
+    this.isStopped = true
+    this.lifecycleGeneration++
     this.sessionOwnershipGeneration++
     this.stopRegistryWatcher()
     this.stopAllTokenRefresh()

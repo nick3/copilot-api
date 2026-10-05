@@ -1,3 +1,6 @@
+import { isGitHubCopilotEnabled } from "~/lib/github-copilot-provider"
+import { stripInternalRequestHeaders } from "~/lib/internal-headers"
+import { getOpencodeGoModelRecords } from "~/lib/models-dev-cache"
 import { Hono } from "hono"
 
 import {
@@ -140,6 +143,10 @@ async function getProviderModelRecords(
   providerConfig: ResolvedProviderConfig,
   requestHeaders: Headers,
 ): Promise<Array<Record<string, unknown>>> {
+  if (providerConfig.name === "opencode-go") {
+    return getOpencodeGoModelRecords()
+  }
+
   try {
     const response = await forwardProviderModels(providerConfig, requestHeaders)
     if (!response.ok) {
@@ -220,6 +227,7 @@ async function getAggregatedModels(
 }
 
 function getCopilotAndAliasModels(): Array<ClientModel> {
+  if (!isGitHubCopilotEnabled()) return []
   const blockedTargets = getAliasTargetSet()
   const models = getAvailableModels()
     .filter((model) => !blockedTargets.has(model.id.toLowerCase()))
@@ -298,6 +306,7 @@ async function getSyntheticCodexModels(
 
 function getCopilotCodexCandidates(): Array<SyntheticCodexModelCandidate> {
   const candidates: Array<SyntheticCodexModelCandidate> = []
+  if (!isGitHubCopilotEnabled()) return candidates
   for (const model of getAvailableModels()) {
     try {
       if (isCopilotCodexCandidate(model)) {
@@ -354,6 +363,7 @@ function createCopilotCodexCandidate(
   )
   return {
     slug: toClientModelId(model.id),
+    catalogSlug: model.id,
     displayName: model.name,
     description: describeCopilotAdapter(model),
     contextWindow: positiveNumber(
@@ -465,7 +475,9 @@ function createProviderCodexCandidate(
     modelConfig?.codex?.inputModalities,
   )
   const remoteModalities = normalizeInputModalities(
-    remoteModel?.input_modalities ?? remoteModel?.modalities,
+    remoteModel?.input_modalities
+      ?? remoteModel?.modalities
+      ?? getRecordField(remoteModel, "architecture")?.input_modalities,
   )
   const builtinModalities = normalizeInputModalities(
     builtinModelConfig?.inputModalities,
@@ -604,6 +616,14 @@ function positiveNumber(value: unknown, fallback: number): number {
     : fallback
 }
 
+function getRecordField(
+  model: Record<string, unknown> | undefined,
+  field: string,
+): Record<string, unknown> | undefined {
+  const value = model?.[field]
+  return isRecord(value) ? value : undefined
+}
+
 function getFirstPositiveNumber(
   model: Record<string, unknown> | undefined,
   fields: Array<string>,
@@ -643,7 +663,10 @@ modelRoutes.get("/", async (c) => {
       )
       return await handleMergedCodexModels(
         c,
-        getSyntheticCodexModels(c.req.raw.headers, enabledProviders),
+        getSyntheticCodexModels(
+          stripInternalRequestHeaders(c.req.raw.headers),
+          enabledProviders,
+        ),
         {
           includeCodexProviderAliases: codexProviderName !== undefined,
           codexProviderName,

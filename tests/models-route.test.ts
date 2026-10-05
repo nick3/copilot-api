@@ -248,7 +248,7 @@ describe("model routes", () => {
 
     expect(response.status).toBe(200)
     const body = (await response.json()) as { data: Array<{ id: string }> }
-    expect(body.data.map((model) => model.id)).toContain("codex/gpt-5.5")
+    expect(body.data.map((model) => model.id)).toContain("codex/gpt-6.1-sol")
     expect(body.data.map((model) => model.id)).toContain("codex/gpt-5.6-sol")
     expect(fetchMock).not.toHaveBeenCalled()
   })
@@ -471,7 +471,7 @@ describe("model routes", () => {
     const modelIds = body.data.map((model) => model.id)
     expect(modelIds).toContain("gpt-5-mini")
     expect(modelIds).toContain("dash/qwen-plus")
-    expect(modelIds).toContain("codex/gpt-5.5")
+    expect(modelIds).toContain("codex/gpt-6.1-sol")
   })
 
   test("forwards Codex clients on the provider-scoped models route", async () => {
@@ -487,6 +487,16 @@ describe("model routes", () => {
     state.codexAccessToken = "codex-access-token"
     state.codexAccountId = "account-123"
 
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        models: [
+          {
+            slug: "gpt-test",
+            model_messages: { instructions_template: "test" },
+          },
+        ],
+      }),
+    )
     const response = await createApp().request(
       "/codex/v1/models?client=codex",
       {
@@ -522,7 +532,7 @@ describe("model routes", () => {
 
     expect(response.status).toBe(200)
     const body = (await response.json()) as { data: Array<{ id: string }> }
-    expect(body.data.map((model) => model.id)).toContain("gpt-5.5")
+    expect(body.data.map((model) => model.id)).toContain("gpt-6.1-sol")
     expect(body.data.map((model) => model.id)).toContain("gpt-5.6-sol")
     expect(fetchMock).not.toHaveBeenCalled()
   })

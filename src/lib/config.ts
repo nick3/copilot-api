@@ -1,3 +1,10 @@
+import {
+  getModelsDevModelApi,
+  getModelsDevModelPricing,
+  getModelsDevModelProviderType,
+  getModelsDevProviderApi,
+  getOpencodeGoModelProviderType,
+} from "./models-dev-cache"
 import consola from "consola"
 import fs from "node:fs"
 
@@ -47,6 +54,7 @@ export interface AppConfig {
   providers?: Record<string, ProviderConfig>
   extraPrompts?: Record<string, string>
   smallModel?: string
+  smallModels?: SmallModelsConfig
   accountAffinity?: boolean
   /** @deprecated */
   apiKey?: string
@@ -92,6 +100,10 @@ export interface AppConfig {
   devMode?: DevModeConfig
   quotaRefresh?: QuotaRefreshConfig
   copilotUseLocalModels?: boolean
+}
+
+export interface SmallModelsConfig {
+  [providerName: string]: string | undefined
 }
 
 export interface ContextManagementConfig {
@@ -176,6 +188,8 @@ export interface ProviderConfig {
   type?: string
   enabled?: boolean
   baseUrl?: string
+  modelsDevProviderId?: string
+  codexModels?: Array<string>
   apiKey?: string
   authType?: ProviderAuthType
   accountId?: string
@@ -188,6 +202,9 @@ export interface ResolvedProviderConfig {
   name: string
   type: ProviderType
   baseUrl: string
+  modelsDevProviderId?: string
+  codexModels?: Array<string>
+  authTypeExplicit?: boolean
   apiKey: string
   authType: ProviderAuthType
   pricingCurrency?: string
@@ -196,8 +213,6 @@ export interface ResolvedProviderConfig {
 }
 
 const GPT_MODEL_PATTERN = /^gpt-(\d+)(?:\.(\d+))?/
-const OPENCODE_ANTHROPIC_MODEL_PATTERN = /^(?:qwen|minimax)/iu
-const OPENCODE_RESPONSES_MODEL_PATTERN = /^(?:gpt|grok|muse-spark)(?:[-_.]|$)/iu
 
 function isGpt53OrAbove(model: string): boolean {
   const match = GPT_MODEL_PATTERN.exec(model)
@@ -230,13 +245,6 @@ export function isGpt56OrAbove(model: string): boolean {
   const minorVersion = match[2] ? Number.parseInt(match[2], 10) : 0
   return minorVersion >= 6
 }
-
-const gpt5ExplorationPrompt = `## Exploration and reading files
-- **Think first.** Before any tool call, decide ALL files/resources you will need.
-- **Batch everything.** If you need multiple files (even from different places), read them together.
-- **multi_tool_use.parallel** Use multi_tool_use.parallel to parallelize tool calls and only this.
-- **Only make sequential calls if you truly cannot know the next file without seeing a result first.**
-- **Workflow:** (a) plan all needed reads → (b) issue one parallel batch → (c) analyze results → (d) repeat if new, unpredictable reads arise.`
 
 const DEFAULT_QUOTA_REFRESH_CONFIG: ResolvedQuotaRefreshConfig = {
   enabled: true,
@@ -278,23 +286,21 @@ const defaultContextManagement = {
   responses: false,
 } satisfies Required<ContextManagementConfig>
 
-const defaultConfig: AppConfig = {
+export const defaultConfig: AppConfig = {
   auth: {
     apiKeys: [],
   },
   providers: {},
-  extraPrompts: {
-    "gpt-5-mini": gpt5ExplorationPrompt,
-  },
-  smallModel: "gpt-5-mini",
+  smallModels: { copilot: "gpt-6-luna", codex: "gpt-6-luna" },
   accountAffinity: true,
   contextManagement: defaultContextManagement,
   modelResponsesApiCompactThresholds,
-  modelReasoningEfforts: {
-    "gpt-5-mini": "low",
-  },
+  modelReasoningEfforts: {},
   allowOriginalModelNamesForAliases: false,
-  modelMappings: {},
+  modelMappings: {
+    "codex-auto-review": "codex/codex-auto-review",
+    "gpt-reserve": "codex/gpt-reserve",
+  },
   forceAgent: false,
   compactUseSmallModel: true,
   messageStartInputTokensFallback: false,
@@ -305,8 +311,8 @@ const defaultConfig: AppConfig = {
   upstreamTransport: defaultUpstreamTransportConfig,
   useResponsesApiWebSearch: true,
   alphaSearchCodexPriority: true,
-  alphaSearchModel: "gpt-5-mini",
-  messageApiWebSearchModel: "gpt-5-mini",
+  alphaSearchModel: "gpt-6-luna",
+  messageApiWebSearchModel: "gpt-6-luna",
   logLevel: "info",
   devMode: {
     enabled: false,
@@ -476,6 +482,8 @@ function mergeDefaultConfig(config: AppConfig): {
   mergedConfig: AppConfig
   changed: boolean
 } {
+  const defaultModelMappings = defaultConfig.modelMappings ?? {}
+  const hasModelMappingChanges = config.modelMappings === undefined
   const extraPrompts = config.extraPrompts ?? {}
   const defaultExtraPrompts = defaultConfig.extraPrompts ?? {}
   const responsesApiCompactThresholds =
@@ -511,7 +519,8 @@ function mergeDefaultConfig(config: AppConfig): {
   const hasContextManagementChanges = missingContextManagementKeys.length > 0
 
   if (
-    !hasExtraPromptChanges
+    !hasModelMappingChanges
+    && !hasExtraPromptChanges
     && !hasReasoningEffortChanges
     && !hasForceAgentChanges
     && !hasResponsesApiCompactThresholdChanges
@@ -523,6 +532,7 @@ function mergeDefaultConfig(config: AppConfig): {
   return {
     mergedConfig: {
       ...config,
+      modelMappings: config.modelMappings ?? { ...defaultModelMappings },
       contextManagement: {
         ...defaultContextManagementConfig,
         ...contextManagement,
@@ -583,7 +593,12 @@ function mergeDefaultAuth(config: AppConfig): {
   const rawApiKeys =
     Array.isArray(authConfig?.apiKeys) ? authConfig.apiKeys : undefined
   const normalizedApiKeys = normalizeAuthApiKeys(rawApiKeys)
-  const nextAuth = { apiKeys: normalizedApiKeys }
+  const nextAuth = {
+    apiKeys: normalizedApiKeys,
+    ...(typeof authConfig?.allowLegacyApiKeyFallback === "boolean" ?
+      { allowLegacyApiKeyFallback: authConfig.allowLegacyApiKeyFallback }
+    : {}),
+  }
 
   if (authConfig && JSON.stringify(authConfig) === JSON.stringify(nextAuth)) {
     return { mergedConfig: config, changed: false }
@@ -791,9 +806,19 @@ export function getConfig(): AppConfig {
   return cachedConfig
 }
 
-export function reloadConfig(): AppConfig {
+export function invalidateConfigCache(): void {
   cachedConfig = null
-  return getConfig()
+}
+
+export function reloadConfig(): AppConfig {
+  const previous = cachedConfig
+  cachedConfig = null
+  try {
+    return mergeConfigWithDefaults()
+  } catch (error) {
+    cachedConfig = previous
+    throw error
+  }
 }
 
 type ModelAliasSpec = {
@@ -1060,9 +1085,23 @@ export function resolveMappedModel(model: string): string {
   return getModelMappings()[model] ?? model
 }
 
-export function getSmallModel(): string {
+export function getSmallModelForProvider(provider: string): string | undefined {
+  const name = provider.trim()
   const config = getConfig()
-  const model = config.smallModel ?? "gpt-5-mini"
+  const configured = config.smallModels
+  const model =
+    configured && Object.hasOwn(configured, name) ? configured[name]
+    : name === "copilot" && config.smallModel !== undefined ? config.smallModel
+    : defaultConfig.smallModels?.[name]
+  if (typeof model !== "string" || !model.trim()) return undefined
+  const value = model.trim()
+  if (name !== "copilot" || isOriginalModelNameAllowedForTarget(value))
+    return value
+  return getPreferredAliasForTarget(value) ?? value
+}
+
+export function getSmallModel(): string {
+  const model = getSmallModelForProvider("copilot") ?? "gpt-6-luna"
   if (isOriginalModelNameAllowedForTarget(model)) {
     return model
   }
@@ -1357,8 +1396,11 @@ export function getProviderConfig(name: string): ResolvedProviderConfig | null {
     name: providerName,
     type,
     baseUrl,
+    modelsDevProviderId: provider.modelsDevProviderId,
+    codexModels: provider.codexModels,
     apiKey,
     authType,
+    authTypeExplicit: provider.authType !== undefined,
     pricingCurrency: normalizePricingCurrency(provider.pricingCurrency),
     models: provider.models,
     adjustInputTokens: provider.adjustInputTokens,
@@ -1369,16 +1411,25 @@ export function resolveEffectiveProviderType(
   providerConfig: ResolvedProviderConfig,
   model: string,
 ): ProviderType {
-  const modelType = providerConfig.models?.[model]?.type
-  if (typeof modelType === "string" && isSupportedProviderType(modelType)) {
-    return modelType
+  const modelConfig = providerConfig.models?.[model]
+  if (modelConfig?.type && isSupportedProviderType(modelConfig.type)) {
+    return modelConfig.type
   }
 
   if (providerConfig.name === "opencode-go") {
-    if (OPENCODE_ANTHROPIC_MODEL_PATTERN.test(model)) {
-      return "anthropic"
-    }
-    if (OPENCODE_RESPONSES_MODEL_PATTERN.test(model)) {
+    return getOpencodeGoModelProviderType(model)
+  }
+
+  if (providerConfig.modelsDevProviderId) {
+    const catalogType = getModelsDevModelProviderType(
+      providerConfig.modelsDevProviderId,
+      model,
+    )
+    if (catalogType) return catalogType
+  }
+
+  if (providerConfig.name === "openrouter") {
+    if (model.includes("gpt-")) {
       return "openai-responses"
     }
   }
@@ -1386,36 +1437,66 @@ export function resolveEffectiveProviderType(
   return providerConfig.type
 }
 
-export function resolveEffectiveProviderConfig(
+export function resolveProviderConfigForModel(
   providerConfig: ResolvedProviderConfig,
   model: string,
 ): ResolvedProviderConfig {
   const type = resolveEffectiveProviderType(providerConfig, model)
-  if (type === providerConfig.type) {
+  const modelApi =
+    (
+      providerConfig.modelsDevProviderId
+      && providerConfig.baseUrl
+        === getModelsDevProviderApi(providerConfig.modelsDevProviderId)
+    ) ?
+      getModelsDevModelApi(providerConfig.modelsDevProviderId, model)
+    : undefined
+  const configuredModel = providerConfig.models?.[model]
+  const catalogPricing =
+    providerConfig.modelsDevProviderId ?
+      getModelsDevModelPricing(providerConfig.modelsDevProviderId, model)
+    : undefined
+  const useCatalogPricing =
+    catalogPricing !== undefined && configuredModel?.pricing === undefined
+  if (type === providerConfig.type && !modelApi && !useCatalogPricing) {
     return providerConfig
   }
 
   return {
     ...providerConfig,
+    type,
+    baseUrl: modelApi ?? providerConfig.baseUrl,
+    models:
+      useCatalogPricing ?
+        {
+          ...providerConfig.models,
+          [model]: { ...configuredModel, pricing: catalogPricing },
+        }
+      : providerConfig.models,
+    pricingCurrency: useCatalogPricing ? "USD" : providerConfig.pricingCurrency,
     authType:
       (
-        providerConfig.authType === "azure-entra"
-        || providerConfig.authType === "oauth2"
+        type !== providerConfig.type
+        && !providerConfig.authTypeExplicit
+        && providerConfig.authType !== "azure-entra"
+        && providerConfig.authType !== "oauth2"
       ) ?
-        providerConfig.authType
-      : resolveProviderAuthType(providerConfig.name, undefined, type),
-    type,
+        resolveProviderAuthType(providerConfig.name, undefined, type)
+      : providerConfig.authType,
   }
 }
+
+export const resolveEffectiveProviderConfig = resolveProviderConfigForModel
 
 export function listEnabledProviders(): Array<string> {
   const config = getConfig()
   const providerNames = Object.keys(config.providers ?? {})
-  return providerNames.filter((name) => getProviderConfig(name) !== null)
+  return providerNames.filter(
+    (name) => !isReservedProviderName(name) && getProviderConfig(name) !== null,
+  )
 }
 
 export function isReservedProviderName(name: string): boolean {
-  return name.trim() === "copilot"
+  return name.trim() === "copilot" || name.trim() === "github-copilot"
 }
 
 export function isMessagesApiEnabled(): boolean {
@@ -1444,7 +1525,7 @@ export function isAlphaSearchCodexPriorityEnabled(): boolean {
 }
 
 export function getAlphaSearchModel(): string | undefined {
-  const model = getConfig().alphaSearchModel ?? "gpt-5-mini"
+  const model = getConfig().alphaSearchModel ?? "gpt-6-luna"
   return model.trim() || undefined
 }
 

@@ -567,7 +567,7 @@ describe("chat completions handler", () => {
 
   test("uses selected target model configured fallback when request model has none", async () => {
     await writeConfig({
-      modelReasoningEfforts: {},
+      modelReasoningEfforts: { "gpt-5-mini": "low" },
       modelMappings: {},
     })
 

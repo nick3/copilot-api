@@ -295,6 +295,8 @@ export type ProviderModelConfig = {
 }
 
 export type ProviderConfig = {
+  modelsDevProviderId?: string
+  codexModels?: Array<string>
   accountId?: string
   type?: ProviderType
   enabled?: boolean
@@ -411,6 +413,7 @@ export type AdminConfig = {
   providers?: Record<string, ProviderConfig>
   extraPrompts?: Record<string, string>
   smallModel?: string
+  smallModels?: Record<string, string>
   accountAffinity?: boolean
   /** @deprecated */
   apiKey?: string
@@ -445,6 +448,8 @@ export type AdminConfig = {
 
 export type AdminConfigResponse = AdminConfig & {
   _configPath?: string
+  _runtimeApplied?: boolean
+  _runtimeError?: string
 }
 
 export type AdminModelsResponse = {
@@ -801,6 +806,7 @@ const ADMIN_CONFIG_KEYS = new Set<keyof AdminConfig>([
   "providers",
   "extraPrompts",
   "smallModel",
+  "smallModels",
   "accountAffinity",
   "apiKey",
   "anthropicApiKey",
@@ -1071,4 +1077,8 @@ export async function patchAccount(
     `/api/admin/accounts/${encodeURIComponent(accountId)}`,
     { method: "PATCH", body: JSON.stringify(patch) },
   )
+}
+
+export async function reloadAdminConfig(): Promise<AdminConfigResponse> {
+  return fetchAdminJson<AdminConfigResponse>("/api/admin/config/reload", { method: "POST" })
 }

@@ -5,6 +5,8 @@ import { WebSocket } from "undici"
 export interface PooledWebSocketRequest<TPayload> {
   headers: Record<string, string>
   payload: TPayload
+  // Refresh request metadata after the socket is ready, immediately before send.
+  preparePayload?: (payload: TPayload) => TPayload
   poolKey: string
   // Optional cancellation for a single pooled request. The Responses and Codex
   // request paths deliberately leave it unset: a client disconnect now drains
@@ -18,9 +20,16 @@ export interface PooledWebSocketRequest<TPayload> {
   url: string
 }
 
+// "continue": not a terminal chunk. "reuse": terminal, the socket may return to
+// the pool. "discard": terminal, the socket must be closed instead of pooled.
+export type PooledWebSocketTerminalDisposition =
+  | "continue"
+  | "discard"
+  | "reuse"
+
 export interface PooledWebSocketStreamOptions<TChunk> {
   createChunk: (data: string) => TChunk
-  isTerminalChunk: (chunk: TChunk) => boolean
+  getTerminalDisposition: (chunk: TChunk) => PooledWebSocketTerminalDisposition
   maxBufferedBytes: number
   maxBufferedMessages: number
   openErrorMessage: string
@@ -189,14 +198,19 @@ const runPooledWebSocketRequest = async function* <TPayload, TChunk>(
       options,
     )
     messageStream.start()
-    websocket.send(JSON.stringify(request.payload))
+    const payload = request.preparePayload?.(request.payload) ?? request.payload
+    websocket.send(JSON.stringify(payload))
 
     for await (const data of messageStream.iterable) {
       const chunk = options.createChunk(data)
-      const isTerminal = options.isTerminalChunk(chunk)
+      const disposition = options.getTerminalDisposition(chunk)
+      const isTerminal = disposition !== "continue"
       if (isTerminal) {
         messageStream.complete()
-        reusable = true
+        reusable = disposition === "reuse"
+        // Drop the socket from the pool before yielding so no later request
+        // can pick it up while the consumer is still handling this chunk.
+        if (!reusable) removePooledWebSocketEntry(request.poolKey, entry)
       }
 
       yield chunk

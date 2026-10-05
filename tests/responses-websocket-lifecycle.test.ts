@@ -46,7 +46,8 @@ const { createPooledWebSocketStream, WebSocketMessageBuffer } =
 let sequence = 0
 const options = {
   createChunk: (text: string) => text,
-  isTerminalChunk: (text: string) => text === "done",
+  getTerminalDisposition: (text: string) =>
+    text === "done" ? ("reuse" as const) : ("continue" as const),
   maxBufferedBytes: 1024,
   maxBufferedMessages: 4,
   openErrorMessage: "open failed",

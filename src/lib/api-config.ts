@@ -1,3 +1,4 @@
+import { assertGitHubCopilotEnabled } from "./github-copilot-provider"
 import { randomUUID } from "node:crypto"
 
 import { COMPACT_REQUEST, type CompactType } from "./compact"
@@ -53,6 +54,8 @@ const getOpencodeLLMHeaders = (): Record<string, string> => {
 
 const normalizeOpencodeUserAgent = (userAgent: string): string => {
   const candidate = userAgent.trim()
+  if (candidate.startsWith("opencode/latest")) return candidate
+
   const opencodeProduct = candidate.match(/^opencode\/[^\s,]+/u)?.[0]
 
   if (!opencodeProduct || candidate.includes(`, ${opencodeProduct}`)) {
@@ -145,15 +148,15 @@ const OPENCODE_VERSION = "opencode/1.14.29"
 const OPENCODE_LLM_USER_AGENT =
   "opencode/1.14.29 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.13, opencode/1.14.29"
 
-const COPILOT_VERSION = "0.58.0"
+const COPILOT_VERSION = "0.67.0"
 const EDITOR_PLUGIN_VERSION = `copilot-chat/${COPILOT_VERSION}`
 const USER_AGENT = `GitHubCopilotChat/${COPILOT_VERSION}`
 const CLAUDE_AGENT_USER_AGENT =
-  "vscode_claude_code/2.1.112 (external, sdk-ts, agent-sdk/0.2.112)"
+  "vscode_claude_code/2.1.258 (external, sdk-ts, agent-sdk/0.3.258)"
 const COPILOT_WEBSOCKET_VERSION = COPILOT_VERSION
 const EDITOR_WEBSOCKET_PLUGIN_VERSION = `copilot-chat/${COPILOT_WEBSOCKET_VERSION}`
 
-const API_VERSION = "2026-06-01"
+const API_VERSION = "2026-08-01"
 const WEBSOCKET_API_VERSION = API_VERSION
 
 export const copilotBaseUrl = (account: AccountContext): string => {
@@ -216,6 +219,7 @@ export const githubUserHeaders = (
 export const copilotModelsHeaders = (
   account: AccountContext,
 ): Record<string, string> => {
+  assertGitHubCopilotEnabled()
   if (isOpencodeOauthApp()) {
     const token = account.copilotToken ?? account.githubToken
     return {
@@ -236,6 +240,7 @@ export const copilotHeaders = (
   vision: boolean = false,
   requestId?: string,
 ): Record<string, string> => {
+  assertGitHubCopilotEnabled()
   if (isOpencodeOauthApp()) {
     const token = account.copilotToken ?? account.githubToken
     const headers: Record<string, string> = {
@@ -271,6 +276,7 @@ export const copilotHeaders = (
 export const copilotWebSocketHeaders = (
   preparedHeaders: Record<string, string>,
 ) => {
+  assertGitHubCopilotEnabled()
   if (isOpencodeOauthApp()) {
     return omitHeader(preparedHeaders, "x-initiator")
   }

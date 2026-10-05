@@ -13,6 +13,7 @@ import {
   getUniqueProviderName,
   parseProviderModelItems,
   providerItemsFromRecord,
+  providerRecordFromItems,
   parseCompactThresholdsJson,
   parseModelMappingsJson,
   parseReasoningJson,
@@ -604,4 +605,23 @@ test("cleared gateway keys stay empty in the editor despite legacy config values
   expect(getAuthApiKeysFromConfig({ auth: { apiKeys: [], allowLegacyApiKeyFallback: false }, apiKey: "legacy-test" })).toEqual([])
   expect(getAuthApiKeysFromConfig({ apiKey: "legacy-test" })).toEqual(["legacy-test"])
   expect(getAuthApiKeysFromConfig({ auth: { apiKeys: ["current-test"] }, apiKey: "legacy-test" })).toEqual(["current-test"])
+})
+
+
+test("provider visibility, catalog IDs and saved credentials survive form edits", () => {
+  const items = providerItemsFromRecord({
+    "github-copilot": {enabled:false,codexModels:[]},
+    custom:{type:"openai-compatible",apiKey:"retained-test-key",modelsDevProviderId:"openai",codexModels:["gpt-one"],accountId:"retained-account",models:{"gpt-one":{codex:{enabled:false}}}},
+    automatic:{type:"anthropic"},
+  })
+  const result = providerRecordFromItems(items)
+  expect("error" in result).toBe(false)
+  if ("error" in result) throw new Error(result.error)
+  expect(result.record["github-copilot"]).toEqual({enabled:false,codexModels:[]})
+  expect(result.record.custom).toMatchObject({apiKey:"retained-test-key",modelsDevProviderId:"openai",codexModels:["gpt-one"],accountId:"retained-account",models:{"gpt-one":{codex:{enabled:false}}}})
+  expect(result.record.automatic.codexModels).toBeUndefined()
+  items[0].codexModelsConfigured = false
+  const unselected = providerRecordFromItems(items)
+  if ("error" in unselected) throw new Error(unselected.error)
+  expect(unselected.record["github-copilot"].codexModels).toBeUndefined()
 })

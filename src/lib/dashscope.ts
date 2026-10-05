@@ -34,11 +34,31 @@ export const applyDashScopePreserveThinkingDefault = (
   }
 }
 
+export const normalizeDashScopeAssistantTextContent = (
+  messages: Array<Message>,
+): void => {
+  for (const message of messages) {
+    if (message.role !== "assistant" || !Array.isArray(message.content)) {
+      continue
+    }
+
+    const textParts = message.content.filter((part) => part.type === "text")
+    if (textParts.length === 0 || textParts.length !== message.content.length) {
+      continue
+    }
+
+    message.content = textParts.map((part) => part.text).join("")
+  }
+}
+
 export const applyOpenAICompatibleContextCache = (payload: {
   messages: Array<Message>
   model: string
 }): void => {
   if (payload.model.includes("/")) {
+    return
+  }
+  if (!payload.model.toLowerCase().includes("qwen")) {
     return
   }
   const messageIndexes = selectContextCacheMessageIndexes(payload.messages)

@@ -4,6 +4,8 @@ import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { modelsDevCatalogFixture } from "./fixtures/models-dev-catalog"
+
 interface ConfigFileShape {
   providers?: Record<
     string,
@@ -12,8 +14,10 @@ interface ConfigFileShape {
       apiKey?: string
       authType?: string
       baseUrl?: string
+      codexModels?: Array<string>
       enabled?: boolean
       models?: Record<string, unknown>
+      modelsDevProviderId?: string
       pricingCurrency?: string
       type?: string
     }
@@ -412,13 +416,14 @@ describe("auth login validation", () => {
     })
   })
 
-  test("preserves quick provider model settings when reconfiguring credentials", () => {
+  test("preserves quick provider model settings and hidden Codex selection when reconfiguring credentials", () => {
     const tempDir = createTempDir()
     writeConfigFile(tempDir, {
       providers: {
         dashscope: {
           apiKey: "old-key",
           baseUrl: "https://old.example",
+          codexModels: [],
           enabled: true,
           models: {
             "qwen-plus": {
@@ -447,6 +452,7 @@ describe("auth login validation", () => {
     expect(readConfigFile(tempDir).providers?.dashscope).toEqual({
       apiKey: "new-key",
       baseUrl: "https://dashscope.aliyuncs.com/compatible-mode",
+      codexModels: [],
       enabled: true,
       models: {
         "qwen-plus": {
@@ -467,7 +473,7 @@ describe("auth login validation", () => {
       `
       const consolaModule = await import("consola");
       const consola = consolaModule.default ?? consolaModule;
-      const answers = ["dash", "openai-compatible", "https://dashscope.example///", "provider-key", "__default__"];
+      const answers = ["manual", "dash", "openai-compatible", "https://dashscope.example///", "provider-key", "__default__"];
       consola.prompt = async () => answers.shift();
       consola.info = () => {};
       consola.success = () => {};
@@ -484,6 +490,46 @@ describe("auth login validation", () => {
     })
   })
 
+  test("configures a models.dev provider using the cached API URL and protocol", () => {
+    const tempDir = createTempDir()
+    writeConfigFile(tempDir, {})
+    fs.writeFileSync(
+      path.join(tempDir, "models-dev-api.json"),
+      JSON.stringify({
+        ...modelsDevCatalogFixture,
+        example: {
+          id: "example",
+          name: "Example Provider",
+          npm: "@ai-sdk/openai",
+          api: "https://api.example.com/openai/v1",
+          models: { answer: { id: "answer" } },
+        },
+      }),
+    )
+
+    runScript(
+      tempDir,
+      `
+      const consolaModule = await import("consola");
+      const consola = consolaModule.default ?? consolaModule;
+      const answers = ["models-dev", "exam", "example", "", "openai-responses", "", "provider-key", "__default__"];
+      consola.prompt = async () => answers.shift();
+      consola.info = () => {};
+      consola.success = () => {};
+      const { runAuthLogin } = await import("./src/auth");
+      await runAuthLogin({ provider: "custom", verbose: false, showToken: false });
+      `,
+    )
+
+    expect(readConfigFile(tempDir).providers?.example).toEqual({
+      apiKey: "provider-key",
+      baseUrl: "https://api.example.com/openai/v1",
+      enabled: true,
+      modelsDevProviderId: "example",
+      type: "openai-responses",
+    })
+  })
+
   test("configures a custom provider selected from the provider prompt", () => {
     const tempDir = createTempDir()
     writeConfigFile(tempDir, {})
@@ -493,7 +539,7 @@ describe("auth login validation", () => {
       `
       const consolaModule = await import("consola");
       const consola = consolaModule.default ?? consolaModule;
-      const answers = ["custom", "claude", "anthropic", "https://api.anthropic.example", "provider-key", "x-api-key"];
+      const answers = ["custom", "manual", "claude", "anthropic", "https://api.anthropic.example", "provider-key", "x-api-key"];
       consola.prompt = async () => answers.shift();
       consola.info = () => {};
       consola.success = () => {};
@@ -520,7 +566,7 @@ describe("auth login validation", () => {
       `
       const consolaModule = await import("consola");
       const consola = consolaModule.default ?? consolaModule;
-      const answers = ["responses", "openai-responses", "https://responses.example", "provider-key", "authorization"];
+      const answers = ["manual", "responses", "openai-responses", "https://responses.example", "provider-key", "authorization"];
       consola.prompt = async () => answers.shift();
       consola.info = () => {};
       consola.success = () => {};
@@ -538,7 +584,7 @@ describe("auth login validation", () => {
     })
   })
 
-  test("preserves custom provider model settings when reconfiguring credentials", () => {
+  test("preserves custom provider model settings and Codex selection when reconfiguring credentials", () => {
     const tempDir = createTempDir()
     writeConfigFile(tempDir, {
       providers: {
@@ -546,6 +592,7 @@ describe("auth login validation", () => {
           apiKey: "old-key",
           authType: "x-api-key",
           baseUrl: "https://old.example",
+          codexModels: ["qwen-plus"],
           enabled: true,
           models: {
             "qwen-plus": {
@@ -562,7 +609,7 @@ describe("auth login validation", () => {
       `
       const consolaModule = await import("consola");
       const consola = consolaModule.default ?? consolaModule;
-      const answers = ["dash", "openai-compatible", "https://new.example", "new-key", "__default__"];
+      const answers = ["manual", "dash", "openai-compatible", "https://new.example", "new-key", "__default__"];
       consola.prompt = async () => answers.shift();
       consola.info = () => {};
       consola.success = () => {};
@@ -574,6 +621,7 @@ describe("auth login validation", () => {
     expect(readConfigFile(tempDir).providers?.dash).toEqual({
       apiKey: "new-key",
       baseUrl: "https://new.example",
+      codexModels: ["qwen-plus"],
       enabled: true,
       models: {
         "qwen-plus": {
@@ -632,7 +680,7 @@ describe("auth login validation", () => {
         `
         const consolaModule = await import("consola");
         const consola = consolaModule.default ?? consolaModule;
-        const answers = ${JSON.stringify(item.answers)};
+        const answers = ["manual", ...${JSON.stringify(item.answers)}];
         consola.prompt = async () => answers.shift();
         consola.info = () => {};
         consola.success = () => {};

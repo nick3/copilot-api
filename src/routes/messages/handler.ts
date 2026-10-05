@@ -411,6 +411,7 @@ export interface CompletionPayloadOptions {
   skipClaudeAutoModel?: boolean
   skipModelMapping?: boolean
   skipWebSearch?: boolean
+  publicModel?: string
   usageEndpoint?: TokenUsageEndpoint
   subagentMarker?: SubagentMarker | null
   sessionId?: string
@@ -575,7 +576,7 @@ export async function handleCompletionPayload(
   )
   logger.debug("Generated request ID:", upstreamRequestId)
 
-  const clientModel = anthropicPayload.model
+  const clientModel = dispatchOptions.publicModel ?? anthropicPayload.model
   anthropicPayload.model = resolveModelAlias(anthropicPayload.model)
   if (webSearchRoute.kind === "responses") {
     anthropicPayload.model = webSearchRoute.model
@@ -667,7 +668,10 @@ export async function handleCompletionPayload(
     )
   }
 
-  const headerSessionId = c.req.header("x-session-id") ?? null
+  const headerSessionId =
+    c.req.header("x-root-session-id")?.trim()
+    || c.req.header("x-session-id")?.trim()
+    || null
   const affinityKey = resolveAffinityKey({
     metadataSessionId: promptCacheKey,
     headerSessionId,

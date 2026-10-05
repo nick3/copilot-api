@@ -168,7 +168,8 @@ describe("reasoning effort normalization", () => {
     ).toBeUndefined()
   })
 
-  test("uses configured model default when no default resolver is provided", () => {
+  test("uses configured model default when no default resolver is provided", async () => {
+    await writeConfig({ modelReasoningEfforts: { "gpt-5-mini": "low" } })
     const model = buildModel(["low", "medium", "high"])
 
     expect(
@@ -246,7 +247,7 @@ describe("reasoning effort normalization", () => {
           target: "gpt-5-mini",
         },
       },
-      modelReasoningEfforts: {},
+      modelReasoningEfforts: { "gpt-5-mini": "low" },
     })
 
     expect(getConfiguredReasoningEffortForModel("fast")).toBe("low")
@@ -259,7 +260,7 @@ describe("reasoning effort normalization", () => {
           target: "gpt-5-mini-2026-01-01",
         },
       },
-      modelReasoningEfforts: {},
+      modelReasoningEfforts: { "gpt-5-mini": "low" },
     })
 
     expect(getConfiguredReasoningEffortForModel("fast")).toBe("low")
@@ -272,7 +273,7 @@ describe("reasoning effort normalization", () => {
           target: "gpt-5.4",
         },
       },
-      modelReasoningEfforts: {},
+      modelReasoningEfforts: { "gpt-5-mini": "low" },
     })
 
     expect(getConfiguredReasoningEffortForModel("fast")).toBe("xhigh")
@@ -295,7 +296,7 @@ describe("reasoning effort normalization", () => {
 
   test("uses gpt-5-mini base default for dated gpt-5-mini variants", async () => {
     await writeConfig({
-      modelReasoningEfforts: {},
+      modelReasoningEfforts: { "gpt-5-mini": "low" },
     })
 
     expect(getConfiguredReasoningEffortForModel("gpt-5-mini-2026-01-01")).toBe(

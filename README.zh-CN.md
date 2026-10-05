@@ -2,6 +2,9 @@
 
 [English](./README.md) | 简体中文
 
+[客户端指南与运行时配置](docs/guides/zh-CN/README.md)
+
+
 > [!WARNING]
 > 这是一个通过逆向工程实现的 GitHub Copilot API 代理，不受 GitHub 官方支持，并且可能随时异常失效。请自行承担使用风险。当前版本中，如果不使用 opencode OAuth，设备 ID 和机器 ID 会被发送给 GitHub Copilot。
 

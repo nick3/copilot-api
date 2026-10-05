@@ -34,6 +34,7 @@ import {
   applyDashScopePreserveThinkingDefault,
   applyOpenAICompatibleContextCache,
   isDashScopeAliyunProvider,
+  normalizeDashScopeAssistantTextContent,
 } from "~/lib/dashscope"
 import { HTTPError } from "~/lib/error"
 import {
@@ -765,10 +766,15 @@ const createOpenAICompatiblePayload = (
     extraBody: modelConfig?.extraBody,
   })
 
+  applyMiMoThinking(openAIPayload, payload)
   applyDashScopePreserveThinkingDefault(openAIPayload, providerConfig)
 
   if (!Object.hasOwn(openAIPayload, "parallel_tool_calls")) {
     openAIPayload.parallel_tool_calls = true
+  }
+
+  if (isDashScopeProvider) {
+    normalizeDashScopeAssistantTextContent(openAIPayload.messages)
   }
 
   const contextCacheEnabled = modelConfig?.contextCache ?? isDashScopeProvider
@@ -777,6 +783,31 @@ const createOpenAICompatiblePayload = (
   }
 
   return openAIPayload
+}
+
+const applyMiMoThinking = (
+  payload: ChatCompletionsPayload,
+  source: AnthropicMessagesPayload,
+): void => {
+  if (!/(?:^|\/)mimo(?:[-_.]|$)/i.test(payload.model)) {
+    return
+  }
+
+  const sourceThinkingType = source.thinking?.type
+  const shouldEnableThinking = Boolean(
+    payload.reasoning_effort || sourceThinkingType,
+  )
+  delete payload.reasoning_effort
+
+  if (sourceThinkingType === "disabled") {
+    payload.thinking = { type: "disabled" }
+    delete payload.thinking_budget
+    return
+  }
+
+  if (shouldEnableThinking) {
+    payload.thinking = { type: "enabled" }
+  }
 }
 
 const normalizeOpenAICompatibleReasoningContent = (

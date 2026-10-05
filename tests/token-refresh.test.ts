@@ -25,7 +25,7 @@ const expiredCredentials: CodexCredentials = {
 
 const rotatedCredentials: CodexCredentials = {
   accessToken: "rotated-access-token",
-  accountId: "acct_new",
+  accountId: expiredCredentials.accountId,
   expiresAt: Date.now() + 60 * 60 * 1000,
   refreshToken: "rotated-refresh-token",
 }
@@ -121,6 +121,33 @@ test("reuses credentials rotated by another refresh instead of the stale token",
   expect(refreshCalls).toBe(0)
 })
 
+test("shares a rotated token refresh between callers with old and current snapshots", async () => {
+  const current = {
+    ...expiredCredentials,
+    accountId: "rotated-single-flight",
+    refreshToken: "current-refresh",
+  }
+  const old = { ...current, refreshToken: "old-refresh" }
+  const rotated = { ...rotatedCredentials, accountId: current.accountId }
+  const refreshing = Promise.withResolvers<CodexCredentials>()
+  let refreshCalls = 0
+  const dependencies: CodexRefreshDependencies = {
+    getCurrentCredentials: () => current,
+    persistCodexCredentials: () => Promise.resolve(),
+    refreshCodexCredentials: (base) => {
+      expect(base).toBe(current)
+      refreshCalls++
+      return refreshing.promise
+    },
+  }
+  const first = refreshCodexCredentialsOnce(old, dependencies)
+  const second = refreshCodexCredentialsOnce(current, dependencies)
+  expect(second).toBe(first)
+  refreshing.resolve(rotated)
+  expect(await first).toBe(rotated)
+  expect(refreshCalls).toBe(1)
+})
+
 test("refreshes when the caller's snapshot is still the current credentials", async () => {
   const snapshot: CodexCredentials = {
     ...expiredCredentials,
@@ -210,6 +237,46 @@ test("retries persistence without refreshing rotated credentials again", async (
   expect(retry).toBe(rotatedCredentials)
   expect(refreshCalls).toBe(1)
   expect(persistCalls).toBe(2)
+})
+
+test("keeps a failed persistence retry separate from a new same-account sign-in", async () => {
+  const old = { ...expiredCredentials, accountId: "reauth-persistence" }
+  const fresh = { ...old, refreshToken: "new-signin-refresh" }
+  const oldRotated = { ...rotatedCredentials, accountId: old.accountId }
+  const newRotated = { ...oldRotated, refreshToken: "new-rotated-refresh" }
+  let oldPersistCalls = 0
+  let oldRefreshCalls = 0
+  const dependencies: CodexRefreshDependencies = {
+    getCurrentCredentials: () => null,
+    persistCodexCredentials: () => {
+      if (++oldPersistCalls === 1)
+        return Promise.reject(new Error("disk unavailable"))
+      return Promise.resolve()
+    },
+    refreshCodexCredentials: () => {
+      oldRefreshCalls++
+      return Promise.resolve(oldRotated)
+    },
+  }
+  const failure = await refreshCodexCredentialsOnce(old, dependencies).catch(
+    (error: unknown) => error,
+  )
+  expect(failure).toHaveProperty("message", "disk unavailable")
+  let freshRefreshCalls = 0
+  const result = await refreshCodexCredentialsOnce(fresh, {
+    getCurrentCredentials: () => null,
+    persistCodexCredentials: () => Promise.resolve(),
+    refreshCodexCredentials: (base) => {
+      expect(base.refreshToken).toBe(fresh.refreshToken)
+      freshRefreshCalls++
+      return Promise.resolve(newRotated)
+    },
+  })
+  expect(result).toBe(newRotated)
+  expect(freshRefreshCalls).toBe(1)
+  expect(await refreshCodexCredentialsOnce(old, dependencies)).toBe(oldRotated)
+  expect(oldRefreshCalls).toBe(1)
+  expect(oldPersistCalls).toBe(2)
 })
 
 test("refreshes expired Codex credentials once for concurrent Codex requests", () => {

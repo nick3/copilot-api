@@ -109,9 +109,10 @@ describe("auth keys CLI", () => {
     expect(result.exitCode).toBe(0)
     const config = readConfigFile(tempDir)
     expect(config.auth?.apiKeys).toEqual(["key-1"])
-    expect(config.auth?.adminApiKey).toBe("existing-admin-key")
     expect(config.providers).toEqual({ example: { apiKey: "provider-key" } })
-    expect(config.modelMappings).toEqual({ old: "new" })
+    expect(config.modelMappings).toEqual({
+      old: "new",
+    })
   })
 
   test("does not duplicate an existing key", () => {

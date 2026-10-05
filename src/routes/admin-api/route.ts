@@ -5,6 +5,7 @@ import {
   DEFAULT_IDENTITY_ENTERPRISE_DOMAIN,
   getCurrentIdentityEnvironment,
 } from "~/lib/account-client-identity"
+import { reloadServerConfig } from "~/lib/config-reload"
 import { accountsManager } from "~/lib/accounts-manager"
 import {
   getAccountClientIdentityByLoginAndApp,
@@ -18,8 +19,6 @@ import {
   getConfig,
   getModelAliases,
   getModelAliasesInfo,
-  getModelRefreshIntervalMs,
-  isAccountAffinityEnabled,
   isSupportedProviderType,
   mergeConfigWithDefaults,
   SUPPORTED_PROVIDER_TYPES,
@@ -38,7 +37,6 @@ import {
 } from "~/lib/config"
 import { hasTokenPrices } from "~/lib/model-billing"
 import { PATHS } from "~/lib/paths"
-import { updateQuotaRefreshSchedulerFromConfig } from "~/lib/quota-refresh-scheduler-runtime"
 import {
   parseReasoningEffortSupport,
   REASONING_EFFORTS as REASONING_EFFORT_VALUES,
@@ -51,7 +49,6 @@ import {
   type AccountStatsRow,
 } from "~/lib/request-history"
 import { getRequestOutboundStore } from "~/lib/request-outbound"
-import { applySharedSessionAffinityRetention } from "~/lib/session-affinity-store"
 import { toLocalDateString } from "~/lib/stats-store"
 import {
   getTokenUsageDailySummary,
@@ -222,6 +219,7 @@ const CONFIG_KEYS = new Set<keyof AppConfig>([
   "auth",
   "extraPrompts",
   "smallModel",
+  "smallModels",
   "logLevel",
   "accountAffinity",
   "apiKey",
@@ -510,6 +508,8 @@ const PROVIDER_CONFIG_FIELDS = [
   "pricingCurrency",
   "models",
   "adjustInputTokens",
+  "modelsDevProviderId",
+  "codexModels",
 ] as const
 
 type ProviderConfigField = (typeof PROVIDER_CONFIG_FIELDS)[number]
@@ -1230,6 +1230,18 @@ function parseProviderConfig(
   )
   if (adjustInputTokensError) return { error: adjustInputTokensError }
 
+  const catalog = parseOptionalString(
+    value.modelsDevProviderId,
+    `${field}.modelsDevProviderId`,
+  )
+  if ("error" in catalog) return catalog
+  if ("value" in catalog) provider.modelsDevProviderId = catalog.value
+  const codexModels = parseOptionalStringArray(
+    value.codexModels,
+    `${field}.codexModels`,
+  )
+  if ("error" in codexModels) return codexModels
+  if ("value" in codexModels) provider.codexModels = codexModels.value
   return { value: provider }
 }
 
@@ -1270,6 +1282,19 @@ function parseProviders(
     }
     seenProviderNames.add(normalizedProviderName)
 
+    if (providerName.toLowerCase() === "copilot") {
+      return {
+        error: "Use github-copilot to configure the builtin Copilot provider",
+      }
+    }
+    if (providerName === "github-copilot" && isPlainObject(rawProviderConfig)) {
+      const keyError = validateAllowedObjectKeys(
+        rawProviderConfig,
+        "providers.github-copilot",
+        new Set(["enabled", "codexModels"]),
+      )
+      if (keyError) return { error: keyError }
+    }
     const parsed = parseProviderConfig(
       rawProviderConfig,
       `providers.${providerName}`,
@@ -1716,7 +1741,7 @@ function applyModelMappings(
   const parsed = parseModelMappings(value)
   if ("error" in parsed) return parsed.error
   if ("clear" in parsed) {
-    delete next.modelMappings
+    next.modelMappings = {}
     return undefined
   }
   next.modelMappings = parsed.value
@@ -1896,6 +1921,20 @@ const CONFIG_PATCH_HANDLERS: Partial<Record<string, ConfigPatchHandler>> = {
   auth: applyAuthConfig,
   extraPrompts: applyExtraPrompts,
   smallModel: (next, value) => applyOptionalString(next, "smallModel", value),
+  smallModels: (next, value) => {
+    const parsed = parseStringRecord(value, "smallModels")
+    if ("error" in parsed) return parsed.error
+    if ("clear" in parsed) delete next.smallModels
+    else {
+      if (
+        Object.keys(parsed.value).some(
+          (key) => !key.trim() || key !== key.trim(),
+        )
+      )
+        return "smallModels keys must be non-empty provider names without surrounding whitespace"
+      next.smallModels = parsed.value
+    }
+  },
   logLevel: applyLogLevel,
   accountAffinity: (next, value) =>
     applyOptionalBoolean(next, "accountAffinity", value),
@@ -2048,15 +2087,41 @@ adminApiRoutes.post("/config", async (c) => {
 
   try {
     await writeConfigFile(result.config)
-    const merged = applyAdminConfigResponseDefaults(mergeConfigWithDefaults())
-    accountsManager.setAccountAffinityEnabled(isAccountAffinityEnabled())
-    accountsManager.setModelsRefreshIntervalMs(getModelRefreshIntervalMs())
-    updateQuotaRefreshSchedulerFromConfig()
-    applySharedSessionAffinityRetention()
-    return c.json({ ...merged, _configPath: PATHS.CONFIG_PATH })
+    try {
+      await reloadServerConfig()
+      return c.json({
+        ...applyAdminConfigResponseDefaults(getConfig()),
+        _configPath: PATHS.CONFIG_PATH,
+        _runtimeApplied: true,
+      })
+    } catch {
+      return c.json({
+        ...applyAdminConfigResponseDefaults(getConfig()),
+        _configPath: PATHS.CONFIG_PATH,
+        _runtimeApplied: false,
+        _runtimeError:
+          "Configuration saved, but runtime activation failed. Retry reloading the configuration.",
+      })
+    }
   } catch {
     return jsonError(c, 500, {
       message: "Failed to write config.",
+      type: "internal_error",
+    })
+  }
+})
+
+adminApiRoutes.post("/config/reload", async (c) => {
+  try {
+    await reloadServerConfig()
+    return c.json({
+      ...applyAdminConfigResponseDefaults(getConfig()),
+      _configPath: PATHS.CONFIG_PATH,
+      _runtimeApplied: true,
+    })
+  } catch {
+    return jsonError(c, 500, {
+      message: "Failed to reload configuration.",
       type: "internal_error",
     })
   }

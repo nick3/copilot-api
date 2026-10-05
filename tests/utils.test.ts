@@ -188,3 +188,39 @@ describe("resolveAffinityKey", () => {
     expect(result.affinityKeySource).toBe("metadata_session_id")
   })
 })
+
+test.each([
+  [undefined, "root-session", "child-session", getUUID("root-session")],
+  [undefined, "", "child-session", getUUID("child-session")],
+  [undefined, undefined, "child-session", getUUID("child-session")],
+  [
+    jsonStyleUserId,
+    "root-session",
+    "child-session",
+    getUUID("2c4e1cf0-7a67-4d2e-9a4b-1d16d3f44752"),
+  ],
+  [
+    JSON.stringify({ device_id: "device" }),
+    "root-session",
+    "child-session",
+    getUUID("root-session"),
+  ],
+  [undefined, undefined, undefined, undefined],
+])(
+  "session identity prefers valid metadata, then root header, then legacy header (%#)",
+  (userId, root, legacy, expected) => {
+    const payload: AnthropicMessagesPayload = {
+      model: "test",
+      max_tokens: 0,
+      messages: [],
+      metadata: userId ? { user_id: userId } : undefined,
+    }
+    const headers = new Headers()
+    if (root !== undefined) headers.set("x-root-session-id", root)
+    if (legacy !== undefined) headers.set("x-session-id", legacy)
+    const context = {
+      req: { header: (name: string) => headers.get(name) ?? undefined },
+    } as unknown as Context
+    expect(getRootSessionId(payload, context)).toBe(expected)
+  },
+)

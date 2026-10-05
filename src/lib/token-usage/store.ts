@@ -845,15 +845,30 @@ function getModelSummaries(
 
 function getDailyModelSummaries(
   db: SqliteDatabase,
-  range: { endMs: number; startMs: number },
+  intervals: Array<{ date: string; endMs: number; startMs: number }>,
 ): Map<string, Array<TokenUsageModelSummary>> {
-  const usageDate =
-    "strftime('%Y-%m-%d', created_at_ms / 1000.0, 'unixepoch', 'localtime')"
+  if (intervals.length === 0) {
+    return new Map()
+  }
+
+  // Bucket events by the same local-day intervals the response reports.
+  // SQLite's 'localtime' follows the C library timezone, which can disagree
+  // with the JavaScript runtime (bun test forces UTC; images without tzdata
+  // ignore TZ), putting events in the wrong day.
+  const usageDays = `usage_days(usage_date, day_start_ms, day_end_ms) AS (VALUES ${intervals
+    .map(() => "(?, ?, ?)")
+    .join(", ")})`
+  const dayParams = intervals.flatMap((interval) => [
+    interval.date,
+    interval.startMs,
+    interval.endMs,
+  ])
   const rows = db
     .prepare(
       `
+    WITH ${usageDays}
     SELECT
-      ${usageDate} AS usage_date,
+      usage_days.usage_date AS usage_date,
       model,
       COUNT(*) AS request_count,
       COALESCE(SUM(input_tokens), 0) AS input_tokens,
@@ -862,31 +877,35 @@ function getDailyModelSummaries(
       COALESCE(SUM(cache_creation_input_tokens), 0) AS cache_creation_input_tokens,
       SUM(total_nano_aiu) AS total_nano_aiu,
       COALESCE(SUM(total_tokens), 0) AS total_tokens
-    FROM token_usage_events
-    WHERE created_at_ms >= ? AND created_at_ms < ?
-    GROUP BY usage_date, model
-    ORDER BY usage_date ASC, total_tokens DESC, model ASC
+    FROM usage_days
+    JOIN token_usage_events
+      ON created_at_ms >= usage_days.day_start_ms
+      AND created_at_ms < usage_days.day_end_ms
+    GROUP BY usage_days.usage_date, model
+    ORDER BY usage_days.usage_date ASC, total_tokens DESC, model ASC
   `,
     )
-    .all(range.startMs, range.endMs) as Array<Record<string, unknown>>
+    .all(...dayParams) as Array<Record<string, unknown>>
   const costRows = db
     .prepare(
       `
+    WITH ${usageDays}
     SELECT
-      ${usageDate} AS usage_date,
+      usage_days.usage_date AS usage_date,
       model,
       cost_currency,
       COALESCE(SUM(total_cost_nanos), 0) AS total_cost_nanos
-    FROM token_usage_events
-    WHERE created_at_ms >= ?
-      AND created_at_ms < ?
-      AND cost_currency IS NOT NULL
+    FROM usage_days
+    JOIN token_usage_events
+      ON created_at_ms >= usage_days.day_start_ms
+      AND created_at_ms < usage_days.day_end_ms
+    WHERE cost_currency IS NOT NULL
       AND total_cost_nanos IS NOT NULL
-    GROUP BY usage_date, model, cost_currency
-    ORDER BY usage_date ASC, model ASC, cost_currency ASC
+    GROUP BY usage_days.usage_date, model, cost_currency
+    ORDER BY usage_days.usage_date ASC, model ASC, cost_currency ASC
   `,
     )
-    .all(range.startMs, range.endMs) as Array<Record<string, unknown>>
+    .all(...dayParams) as Array<Record<string, unknown>>
   const costsByDateAndModel = new Map<string, Array<TokenUsageCost>>()
   for (const row of costRows) {
     const date = stringFromRow(row, "usage_date")
@@ -973,7 +992,7 @@ export async function getTokenUsageDailySummary(
   const db = await getDb()
   const range = getPeriodRangeFromDb(db, period)
   const intervals = createDailyIntervals(range)
-  const dailySummaries = getDailyModelSummaries(db, range)
+  const dailySummaries = getDailyModelSummaries(db, intervals)
 
   return {
     byModel: getModelSummaries(db, range),

@@ -27,6 +27,8 @@ export interface WriteCodexCredentialsOptions {
   alias?: string
   // Refresh paths pass false so that a removed account is never re-created.
   insertIfMissing?: boolean
+  // A refresh must not overwrite credentials from a newer sign-in.
+  expectedRefreshToken?: string
 }
 
 interface CodexCredentialLockMetadata {
@@ -476,6 +478,15 @@ export async function writeCodexCredentials(
       // the account was removed while this process still held its credentials
       // in memory (for example a server that was not restarted after switching
       // accounts), so inserting it again would silently undo the removal.
+      return
+    }
+
+    const existingRefreshToken = store.accounts[existingIndex]?.refreshToken
+    if (
+      options.expectedRefreshToken !== undefined
+      && existingRefreshToken !== options.expectedRefreshToken
+      && existingRefreshToken !== normalizedCredentials.refreshToken
+    ) {
       return
     }
 

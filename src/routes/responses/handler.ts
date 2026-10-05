@@ -1,3 +1,4 @@
+import { getCodexTaskTitleModel } from "./task-title"
 import {
   getCodexResponsesSubagentMarker,
   getIncomingResponsesSessionId,
@@ -125,12 +126,47 @@ export const handleResponsesPayload = async (
     })
   }
 
+  const originalCopilotModel = payload.model
+  const blockedTargets = getAliasTargetSet()
+  if (blockedTargets.has(originalCopilotModel.toLowerCase())) {
+    recordSelectionFailure(getRequestHistoryStore(), {
+      request: buildRequestContext(c),
+      stream: Boolean(payload.stream),
+      clientModel: originalCopilotModel,
+      reason: "MODEL_NOT_SUPPORTED",
+    })
+    return selectionFailureResponse(c, {
+      reason: "MODEL_NOT_SUPPORTED",
+      message:
+        "This model is only available via an alias. Please use the alias model name.",
+    })
+  }
+  const taskTitleModel = getCodexTaskTitleModel(
+    c.req.header("user-agent"),
+    payload.input,
+    "copilot",
+  )
+  if (taskTitleModel) {
+    const smallModel = findEndpointModel(taskTitleModel)
+    if (
+      smallModel?.supported_endpoints?.some(
+        (endpoint) => endpoint === "/responses" || endpoint === "/v1/messages",
+      )
+    ) {
+      payload.model = taskTitleModel
+    } else {
+      logger.warn(
+        "Task-title small model is unavailable; keeping the requested model",
+        { model: taskTitleModel },
+      )
+    }
+  }
   const endpointModel = findEndpointModel(payload.model)
   const responsesTransport = getResponsesTransportForModel(endpointModel)
   if (
     endpointModel
     && shouldUseMessagesAdapter({
-      model: payload.model,
+      model: endpointModel.id,
       codexClient: isCodexUserAgent(c.req.header("user-agent")),
       transport: responsesTransport,
       endpoints: endpointModel.supported_endpoints,
@@ -159,7 +195,7 @@ export const handleResponsesPayload = async (
   const store = getRequestHistoryStore()
   const request = buildRequestContext(c)
 
-  const clientModel = payload.model
+  const clientModel = originalCopilotModel
 
   if (!isResponsesApiWebSearchEnabled()) {
     removeWebSearchTool(payload)
@@ -185,27 +221,18 @@ export const handleResponsesPayload = async (
   request.promptCacheKey = normalizedPromptCacheKey
   request.initiator = initialInitiator
 
-  const blockedTargets = getAliasTargetSet()
-  if (blockedTargets.has(clientModel.toLowerCase())) {
-    recordSelectionFailure(store, {
-      request,
-      stream: streamRequested,
-      clientModel,
-      reason: "MODEL_NOT_SUPPORTED",
-    })
-
-    return selectionFailureResponse(c, {
-      reason: "MODEL_NOT_SUPPORTED",
-      message:
-        "This model is only available via an alias. Please use the alias model name.",
-    })
-  }
-
-  const headerSessionId = c.req.header("x-session-id") ?? null
-  const upstreamRequestId = generateRequestIdFromPayload(
-    { messages: payload.input },
-    incomingSessionId ?? normalizedPromptCacheKey,
-  )
+  const headerSessionId =
+    c.req.header("x-root-session-id")?.trim()
+    || c.req.header("x-session-id")?.trim()
+    || null
+  const threadId = c.req.header("thread-id")?.trim()
+  const upstreamRequestId =
+    threadId ?
+      getUUID(threadId + "_")
+    : generateRequestIdFromPayload(
+        { messages: payload.input },
+        incomingSessionId ?? normalizedPromptCacheKey,
+      )
 
   const affinityKey = resolveAffinityKey({
     promptCacheKey: requestBodyPromptCacheKey,
@@ -219,7 +246,7 @@ export const handleResponsesPayload = async (
   const selection = await accountsManager.selectAccountForRequest(
     [
       {
-        modelId: clientModel,
+        modelId: endpointModel?.id ?? payload.model,
         endpoint: RESPONSES_ENDPOINT,
       },
     ],

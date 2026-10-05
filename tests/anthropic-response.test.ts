@@ -447,6 +447,131 @@ describe("OpenAI to Anthropic Streaming Response Translation", () => {
 })
 
 describe("OpenAI stream interleaved tool/content translation", () => {
+  test("emits text before a tool call when both start in the same chunk", () => {
+    const streamState: AnthropicStreamState = {
+      messageStartSent: false,
+      messageCompleted: false,
+      contentBlockIndex: 0,
+      contentBlockOpen: false,
+      toolCalls: {},
+      thinkingBlockOpen: false,
+    }
+    const chunks: Array<ChatCompletionChunk> = [
+      {
+        id: "chatcmpl-be6d5639-41fd-44c4-9a16-d8c4ce48ded9",
+        object: "chat.completion.chunk",
+        created: 1790258959,
+        model: "deepseek-v4.1-flash",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              content: "）**",
+              tool_calls: [
+                {
+                  id: "call_1f4a0f06a6d4487da8350d28",
+                  type: "function",
+                  index: 0,
+                  function: { name: "read", arguments: "" },
+                },
+              ],
+              reasoning_content: "",
+            },
+            logprobs: null,
+            finish_reason: null,
+          },
+        ],
+        usage: null,
+      },
+      {
+        id: "chatcmpl-be6d5639-41fd-44c4-9a16-d8c4ce48ded9",
+        object: "chat.completion.chunk",
+        created: 1790258959,
+        model: "deepseek-v4.1-flash",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [{ index: 0, function: { arguments: "{}" } }],
+            },
+            logprobs: null,
+            finish_reason: null,
+          },
+        ],
+        usage: null,
+      },
+      {
+        id: "chatcmpl-be6d5639-41fd-44c4-9a16-d8c4ce48ded9",
+        object: "chat.completion.chunk",
+        created: 1790258959,
+        model: "deepseek-v4.1-flash",
+        choices: [
+          {
+            index: 0,
+            delta: {},
+            logprobs: null,
+            finish_reason: "tool_calls",
+          },
+        ],
+        usage: null,
+      },
+    ]
+
+    const translatedStream = chunks.flatMap((chunk) =>
+      translateChunkToAnthropicEvents(chunk, streamState),
+    )
+    translatedStream.push(...flushPendingAnthropicStreamEvents(streamState))
+
+    expect(translatedStream).toEqual([
+      {
+        type: "message_start",
+        message: {
+          id: "chatcmpl-be6d5639-41fd-44c4-9a16-d8c4ce48ded9",
+          type: "message",
+          role: "assistant",
+          content: [],
+          model: "deepseek-v4.1-flash",
+          stop_reason: null,
+          stop_sequence: null,
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+      },
+      {
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "text", text: "" },
+      },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "）**" },
+      },
+      { type: "content_block_stop", index: 0 },
+      {
+        type: "content_block_start",
+        index: 1,
+        content_block: {
+          type: "tool_use",
+          id: "call_1f4a0f06a6d4487da8350d28",
+          name: "read",
+          input: {},
+        },
+      },
+      {
+        type: "content_block_delta",
+        index: 1,
+        delta: { type: "input_json_delta", partial_json: "{}" },
+      },
+      { type: "content_block_stop", index: 1 },
+      {
+        type: "message_delta",
+        delta: { stop_reason: "tool_use", stop_sequence: null },
+        usage: { input_tokens: 0, output_tokens: 0 },
+      },
+      { type: "message_stop" },
+    ])
+  })
+
   test("should defer content while a tool call is still streaming", () => {
     const openAIStream: Array<ChatCompletionChunk> = [
       {

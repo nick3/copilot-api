@@ -1,3 +1,4 @@
+import { isGitHubCopilotEnabled } from "~/lib/github-copilot-provider"
 import { accountsManager } from "~/lib/accounts-manager"
 import { QuotaRefreshScheduler } from "~/lib/accounts-manager-quota-scheduler"
 import { getQuotaRefreshConfig } from "~/lib/config"
@@ -16,7 +17,10 @@ let isQuotaRefreshSchedulerStarted = false
 
 export function startQuotaRefreshSchedulerFromConfig(): void {
   isQuotaRefreshSchedulerStarted = true
-  quotaRefreshScheduler.start(getQuotaRefreshConfig())
+  quotaRefreshScheduler.start({
+    ...getQuotaRefreshConfig(),
+    enabled: isGitHubCopilotEnabled() && getQuotaRefreshConfig().enabled,
+  })
 }
 
 export function stopQuotaRefreshScheduler(): void {
@@ -40,5 +44,8 @@ export function updateQuotaRefreshSchedulerFromConfig(): void {
     return
   }
 
-  quotaRefreshScheduler.updateConfig(getQuotaRefreshConfig())
+  quotaRefreshScheduler.updateConfig({
+    ...getQuotaRefreshConfig(),
+    enabled: isGitHubCopilotEnabled() && getQuotaRefreshConfig().enabled,
+  })
 }

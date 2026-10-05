@@ -626,7 +626,7 @@ describe("responses handler reasoning effort normalization", () => {
 
   test("uses selected target model configured fallback when request model has none", async () => {
     await writeConfig({
-      modelReasoningEfforts: {},
+      modelReasoningEfforts: { "gpt-5-mini": "low" },
       modelMappings: {},
     })
 
@@ -1664,4 +1664,55 @@ describe("responses handler Codex internal chat metadata stripping", () => {
     expect(forwardedInput[0].role).toBe("user")
     expect(forwardedInput[1].name).toBe("shell")
   })
+})
+
+describe("Codex task titles use provider-specific small models", () => {
+  const prompt =
+    "Generate a concise, single-line task title of at most 36 characters and under five words where possible."
+  for (const [userAgent, smallModel, expected] of [
+    ["codex/0.160.0", "gpt-small", "gpt-small"],
+    ["codex/0.160.0", "", "gpt-test"],
+    ["other-client/1.0", "gpt-small", "gpt-test"],
+    ["codex/0.160.0", "missing-small", "gpt-test"],
+  ]) {
+    test(`${userAgent} with small model '${smallModel}' selects ${expected}`, async () => {
+      await writeConfig({
+        smallModels: { copilot: smallModel },
+        modelMappings: { "gpt-small": "do-not-remap" },
+        useResponsesApiWebSocket: false,
+      })
+      accountsManager.getFirstAccountModels = () => ({
+        object: "list",
+        data: [
+          buildModel("gpt-test"),
+          { ...buildModel("gpt-small"), supported_endpoints: ["/responses"] },
+        ],
+      })
+      const selected: Array<string> = []
+      accountsManager.selectAccountForRequest = (candidates) => {
+        selected.push(candidates[0].modelId)
+        return Promise.resolve(
+          buildSelection("/responses", candidates[0].modelId),
+        )
+      }
+      fetchHolder.fetch = mock(() =>
+        Promise.resolve(Response.json(buildResponsesResult(expected, "title"))),
+      ) as unknown as typeof fetch
+      const response = await responsesRoutes.request("http://localhost/", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "user-agent": userAgent,
+        },
+        body: JSON.stringify({
+          model: "gpt-test",
+          input: [
+            { role: "user", content: [{ type: "input_text", text: prompt }] },
+          ],
+        }),
+      })
+      expect(response.status).toBe(200)
+      expect(selected).toEqual([expected])
+    })
+  }
 })

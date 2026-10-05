@@ -211,12 +211,13 @@ export const getRootSessionId = (
   c: Context,
 ): string | undefined => {
   const userId = anthropicPayload.metadata?.user_id
-  const sessionId =
-    userId ?
-      parseUserIdMetadata(userId).sessionId || undefined
-    : c.req.header("x-session-id")
-
-  return normalizeStableSessionId(sessionId)
+  return (
+    normalizeStableSessionId(
+      userId ? parseUserIdMetadata(userId).sessionId : undefined,
+    )
+    ?? normalizeStableSessionId(c.req.header("x-root-session-id"))
+    ?? normalizeStableSessionId(c.req.header("x-session-id"))
+  )
 }
 
 export const getUUID = (content: string): string => {

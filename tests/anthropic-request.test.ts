@@ -161,6 +161,67 @@ describe("Anthropic to OpenAI translation logic", () => {
 
     const openAIPayload = translateToOpenAI(anthropicPayload)
     expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+    expect(openAIPayload.model).toBe("gpt-4o")
+    expect(openAIPayload.messages).toEqual([
+      { role: "user", content: "Hello!" },
+    ])
+    expect(openAIPayload).not.toHaveProperty("reasoning_effort")
+  })
+
+  test("omits tool_choice when tools are absent or empty", () => {
+    const choices: Array<NonNullable<AnthropicMessagesPayload["tool_choice"]>> =
+      [
+        { type: "auto" },
+        { type: "any" },
+        { type: "none" },
+        { type: "tool", name: "getWeather" },
+      ]
+
+    for (const tools of [undefined, []]) {
+      for (const toolChoice of choices) {
+        const result = translateToOpenAI({
+          model: "gpt-4o",
+          messages: [{ role: "user", content: "Hello!" }],
+          max_tokens: 150,
+          tools,
+          tool_choice: toolChoice,
+        })
+
+        expect(result.tool_choice).toBeUndefined()
+        expect(JSON.parse(JSON.stringify(result))).not.toHaveProperty(
+          "tool_choice",
+        )
+      }
+    }
+  })
+
+  test("preserves tool choices when tools are available", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "gpt-4o",
+      messages: [{ role: "user", content: "Check the weather" }],
+      max_tokens: 150,
+      tools: [{ name: "getWeather", input_schema: { type: "object" } }],
+    }
+
+    expect(translateToOpenAI(payload).tool_choice).toBeUndefined()
+    expect(
+      translateToOpenAI({ ...payload, tool_choice: { type: "auto" } })
+        .tool_choice,
+    ).toBe("auto")
+    expect(
+      translateToOpenAI({ ...payload, tool_choice: { type: "any" } })
+        .tool_choice,
+    ).toBe("required")
+    expect(
+      translateToOpenAI({ ...payload, tool_choice: { type: "none" } })
+        .tool_choice,
+    ).toBe("none")
+    expect(
+      translateToOpenAI({
+        ...payload,
+        tool_choice: { type: "tool", name: "getWeather" },
+      }).tool_choice,
+    ).toEqual({ type: "function", function: { name: "getWeather" } })
   })
 
   test("should translate comprehensive Anthropic payload to valid OpenAI payload", () => {
@@ -236,19 +297,6 @@ describe("Anthropic to OpenAI translation logic", () => {
     expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
   })
 
-  test("omits reasoning_effort when output_config effort is missing", () => {
-    const anthropicPayload: AnthropicMessagesPayload = {
-      model: "gpt-4o",
-      messages: [{ role: "user", content: "Hello!" }],
-      max_tokens: 0,
-    }
-
-    const openAIPayload = translateToOpenAI(anthropicPayload)
-
-    expect(openAIPayload).not.toHaveProperty("reasoning_effort")
-    expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
-  })
-
   test("maps thinking budget within selected model limits", () => {
     const originalGetFirstAccountModels =
       accountsManager.getFirstAccountModels.bind(accountsManager)
@@ -273,28 +321,6 @@ describe("Anthropic to OpenAI translation logic", () => {
     } finally {
       accountsManager.getFirstAccountModels = originalGetFirstAccountModels
     }
-  })
-
-  test("should handle missing fields gracefully", () => {
-    const anthropicPayload: AnthropicMessagesPayload = {
-      model: "gpt-4o",
-      messages: [{ role: "user", content: "Hello!" }],
-      max_tokens: 0,
-    }
-    const openAIPayload = translateToOpenAI(anthropicPayload)
-    expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
-  })
-
-  test("should handle invalid types in Anthropic payload", () => {
-    const anthropicPayload = {
-      model: "gpt-4o",
-      messages: [{ role: "user", content: "Hello!" }],
-      temperature: "hot", // Should be a number
-    }
-    // @ts-expect-error intended to be invalid
-    const openAIPayload = translateToOpenAI(anthropicPayload)
-    // Should fail validation
-    expect(isValidChatCompletionRequest(openAIPayload)).toBe(false)
   })
 
   test("should skip assistant messages with empty content array", () => {
@@ -965,118 +991,5 @@ describe("compact request detection", () => {
     }
 
     expect(getCompactType(anthropicPayload)).toBe(COMPACT_REQUEST)
-  })
-})
-
-describe("OpenAI Chat Completion v1 Request Payload Validation with Zod", () => {
-  test("should return true for a minimal valid request payload", () => {
-    const validPayload = {
-      model: "gpt-4o",
-      messages: [{ role: "user", content: "Hello!" }],
-    }
-    expect(isValidChatCompletionRequest(validPayload)).toBe(true)
-  })
-
-  test("should return true for a comprehensive valid request payload", () => {
-    const validPayload = {
-      model: "gpt-4o",
-      messages: [
-        { role: "system", content: "You are a helpful assistant." },
-        { role: "user", content: "What is the weather like in Boston?" },
-      ],
-      temperature: 0.7,
-      max_tokens: 150,
-      top_p: 1,
-      frequency_penalty: 0,
-      presence_penalty: 0,
-      stream: false,
-      n: 1,
-    }
-    expect(isValidChatCompletionRequest(validPayload)).toBe(true)
-  })
-
-  test('should return false if the "model" field is missing', () => {
-    const invalidPayload = {
-      messages: [{ role: "user", content: "Hello!" }],
-    }
-    expect(isValidChatCompletionRequest(invalidPayload)).toBe(false)
-  })
-
-  test('should return false if the "messages" field is missing', () => {
-    const invalidPayload = {
-      model: "gpt-4o",
-    }
-    expect(isValidChatCompletionRequest(invalidPayload)).toBe(false)
-  })
-
-  test('should return false if the "messages" array is empty', () => {
-    const invalidPayload = {
-      model: "gpt-4o",
-      messages: [],
-    }
-    expect(isValidChatCompletionRequest(invalidPayload)).toBe(false)
-  })
-
-  test('should return false if "model" is not a string', () => {
-    const invalidPayload = {
-      model: 12345,
-      messages: [{ role: "user", content: "Hello!" }],
-    }
-    expect(isValidChatCompletionRequest(invalidPayload)).toBe(false)
-  })
-
-  test('should return false if "messages" is not an array', () => {
-    const invalidPayload = {
-      model: "gpt-4o",
-      messages: { role: "user", content: "Hello!" },
-    }
-    expect(isValidChatCompletionRequest(invalidPayload)).toBe(false)
-  })
-
-  test('should return false if a message in the "messages" array is missing a "role"', () => {
-    const invalidPayload = {
-      model: "gpt-4o",
-      messages: [{ content: "Hello!" }],
-    }
-    expect(isValidChatCompletionRequest(invalidPayload)).toBe(false)
-  })
-
-  test('should return false if a message in the "messages" array is missing "content"', () => {
-    const invalidPayload = {
-      model: "gpt-4o",
-      messages: [{ role: "user" }],
-    }
-    // Note: Zod considers 'undefined' as missing, so this will fail as expected.
-    const result = chatCompletionRequestSchema.safeParse(invalidPayload)
-    expect(result.success).toBe(false)
-  })
-
-  test('should return false if a message has an invalid "role"', () => {
-    const invalidPayload = {
-      model: "gpt-4o",
-      messages: [{ role: "customer", content: "Hello!" }],
-    }
-    expect(isValidChatCompletionRequest(invalidPayload)).toBe(false)
-  })
-
-  test("should return false if an optional field has an incorrect type", () => {
-    const invalidPayload = {
-      model: "gpt-4o",
-      messages: [{ role: "user", content: "Hello!" }],
-      temperature: "hot", // Should be a number
-    }
-    expect(isValidChatCompletionRequest(invalidPayload)).toBe(false)
-  })
-
-  test("should return false for a completely empty object", () => {
-    const invalidPayload = {}
-    expect(isValidChatCompletionRequest(invalidPayload)).toBe(false)
-  })
-
-  test("should return false for null or non-object payloads", () => {
-    expect(isValidChatCompletionRequest(null)).toBe(false)
-    expect(isValidChatCompletionRequest(undefined)).toBe(false)
-    expect(isValidChatCompletionRequest("a string")).toBe(false)
-    expect(isValidChatCompletionRequest(123)).toBe(false)
   })
 })

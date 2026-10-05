@@ -9,7 +9,10 @@ import type { ResponsesPayload } from "~/services/copilot/create-responses"
 import { writeSSEIfConnected } from "~/lib/sse"
 import type { SubagentMarker } from "~/lib/subagent"
 import { handleCompletionPayload } from "~/routes/messages/handler"
-import { shouldInjectMessagesToolCallTips } from "~/routes/models/codex-models"
+import {
+  isCodexUserAgent,
+  shouldInjectMessagesToolCallTips,
+} from "~/routes/models/codex-models"
 
 import {
   responsesResultToStreamEvents,
@@ -40,6 +43,15 @@ export async function handleResponsesViaMessages(
   },
 ): Promise<Response> {
   try {
+    if (
+      isCodexUserAgent(c.req.header("user-agent"))
+      && options.targetModel.toLowerCase().includes("mimo-v2.6")
+    ) {
+      throw new ResponsesMessagesTranslationError(
+        "MiMo v2.6 cannot return valid Codex custom tool responses. Please switch models.",
+      )
+    }
+
     const translation = translateResponsesToMessages(
       { ...options.payload, model: options.publicModel },
       {
@@ -68,6 +80,7 @@ export async function handleResponsesViaMessages(
           compactType: translation.compaction ? COMPACT_REQUEST : undefined,
           skipClaudeAutoModel: true,
           skipModelMapping: true,
+          publicModel: options.publicModel,
           skipWebSearch: true,
           usageEndpoint: "responses",
           subagentMarker: options.subagentMarker,

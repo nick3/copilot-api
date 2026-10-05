@@ -98,6 +98,40 @@ afterEach(() => {
 })
 
 describe("provider resolver", () => {
+  test("provider enablement controls all routing independently of Codex catalog visibility", () => {
+    const tempDir = createTempDir()
+    writeConfigFile(tempDir, {
+      providers: {
+        dashscope: {
+          type: "openai-compatible",
+          baseUrl: "https://provider.example/v1",
+          apiKey: "provider-key",
+        },
+      },
+    })
+    const output = runScript(
+      tempDir,
+      `
+      const { getProviderConfig, listEnabledProviders } = await import("./src/lib/provider-config");
+      const { saveProviderManagementConfig, isProviderCodexModelVisible } = await import("./src/lib/provider-management");
+      const { getConfig } = await import("./src/lib/config-store");
+      const before = getProviderConfig("dashscope") !== null;
+      saveProviderManagementConfig({ providers: { dashscope: { enabled: false } } });
+      const disabled = getProviderConfig("dashscope") === null && !listEnabledProviders().includes("dashscope");
+      saveProviderManagementConfig({ providers: { dashscope: { enabled: true, codexModels: [] } } });
+      console.log(JSON.stringify({ before, disabled, reenabled: getProviderConfig("dashscope") !== null,
+        credentialsPreserved: getProviderConfig("dashscope")?.apiKey === "provider-key",
+        codexVisible: isProviderCodexModelVisible(getConfig().providers?.dashscope, "model") }));
+    `,
+    )
+    expect(JSON.parse(output)).toEqual({
+      before: true,
+      disabled: true,
+      reenabled: true,
+      credentialsPreserved: true,
+      codexVisible: false,
+    })
+  })
   test("resolves codex from config.providers to the ChatGPT Codex backend", () => {
     const tempDir = createTempDir()
     writeConfigFile(tempDir, {

@@ -79,6 +79,49 @@ afterEach(() => {
 })
 
 describe("credential store atomic writes", () => {
+  test("does not overwrite a newer sign-in with an old refresh result", async () => {
+    useTempCredentialPaths()
+    const fresh = {
+      accountId: "same-account",
+      accessToken: "new-signin-access",
+      refreshToken: "new-signin-refresh",
+      expiresAt: 123,
+    }
+    await writeCodexCredentials(fresh)
+    await writeCodexCredentials(
+      {
+        ...fresh,
+        accessToken: "old-rotated-access",
+        refreshToken: "old-rotated-refresh",
+      },
+      { insertIfMissing: false, expectedRefreshToken: "old-refresh" },
+    )
+    expect(await readCodexCredentials(fresh.accountId)).toEqual(fresh)
+  })
+
+  test("writes a matching refresh and allows retrying the same rotated result", async () => {
+    useTempCredentialPaths()
+    const old = {
+      accountId: "same-account",
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      expiresAt: 123,
+    }
+    const rotated = {
+      ...old,
+      accessToken: "rotated-access",
+      refreshToken: "rotated-refresh",
+    }
+    await writeCodexCredentials(old)
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await writeCodexCredentials(rotated, {
+        insertIfMissing: false,
+        expectedRefreshToken: old.refreshToken,
+      })
+      expect(await readCodexCredentials(old.accountId)).toEqual(rotated)
+    }
+  })
+
   test("writes GitHub and Codex credentials with protected permissions", async () => {
     const { githubTokenPath, codexCredentialPath } = useTempCredentialPaths()
     const credentials = {

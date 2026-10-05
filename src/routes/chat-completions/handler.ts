@@ -352,7 +352,10 @@ async function selectChatCompletionAccount(params: {
     payload,
     normalizedPromptCacheKey,
   )
-  const headerSessionId = c.req.header("x-session-id") ?? null
+  const headerSessionId =
+    c.req.header("x-root-session-id")?.trim()
+    || c.req.header("x-session-id")?.trim()
+    || null
   const affinityKey = resolveAffinityKey({
     metadataSessionId: normalizedPromptCacheKey,
     headerSessionId,

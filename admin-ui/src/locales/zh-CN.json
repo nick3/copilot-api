@@ -833,6 +833,18 @@
       "transportHint": "超时单位为毫秒；缓冲限制分别为字节和消息数。留空对象使用默认值。修改适用于后续请求。",
       "transportInvalidJson": "请输入有效的 JSON 对象。",
       "providersReasoningFieldLabel": "历史消息中的推理字段"
+    },
+    "catalog": {
+      "codexModels": "向 Codex 客户端显示的模型",
+      "restrict": "限制可见模型列表",
+      "codexModelsHint": "每行一个上游模型 ID。开启后留空会在 Codex 中隐藏此提供商的所有模型，API 调用权限不受影响。",
+      "copilotEnabled": "启用 GitHub Copilot",
+      "copilotHint": "控制所有已配置的 Copilot 账号。关闭后暂停上游刷新和请求路由，已保存的账号会保留。",
+      "catalogProvider": "models.dev 提供商 ID",
+      "catalogProviderHint": "可选，用于匹配模型能力和价格目录，例如 openai 或 anthropic。",
+      "smallModels": "按提供商设置小模型",
+      "smallModelsHint": "填写同一提供商的模型名。留空表示关闭可选的小模型覆盖。Copilot 使用上方的小模型设置。",
+      "activationFailed": "配置已保存，但运行时应用失败。请点击重新加载以重试。"
     }
   },
   "accountManagement": {

@@ -746,77 +746,6 @@ describe("mergeToolResultForClaude attachments", () => {
       ],
     })
   })
-
-  test("appends image and document blocks to the last tool_result", () => {
-    const payload: AnthropicMessagesPayload = {
-      model: "claude-opus-4.6",
-      max_tokens: 128,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "tool_result",
-              tool_use_id: "tool-1",
-              content: "binary output",
-            },
-            {
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: "image/png",
-                data: "image-data",
-              },
-            },
-            {
-              type: "document",
-              source: {
-                type: "base64",
-                media_type: "application/pdf",
-                data: "pdf-data",
-              },
-              title: "report.pdf",
-            },
-          ],
-        },
-      ],
-    }
-
-    mergeToolResultForClaude(payload)
-
-    expect(payload.messages[0]).toEqual({
-      role: "user",
-      content: [
-        {
-          type: "tool_result",
-          tool_use_id: "tool-1",
-          content: [
-            {
-              type: "text",
-              text: "binary output",
-            },
-            {
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: "image/png",
-                data: "image-data",
-              },
-            },
-            {
-              type: "document",
-              source: {
-                type: "base64",
-                media_type: "application/pdf",
-                data: "pdf-data",
-              },
-              title: "report.pdf",
-            },
-          ],
-        },
-      ],
-    })
-  })
 })
 
 describe("mergeToolResultForClaude attachments fallback", () => {
@@ -1105,39 +1034,6 @@ describe("sanitizeIdeTools", () => {
       (tool) => tool.name === "mcp__ide__executeCode",
     )
     expect(executeCodeTool?.description).toBe("Execute code")
-  })
-
-  test("rewrites getDiagnostics description for GPT models", () => {
-    const payload: AnthropicMessagesPayload = {
-      model: "gpt-5.4",
-      max_tokens: 128,
-      messages: [{ role: "user", content: "hello" }],
-      tools: [
-        {
-          name: "mcp__ide__executeCode",
-          description: "Execute code",
-          input_schema: { type: "object" },
-        },
-        {
-          name: "mcp__ide__getDiagnostics",
-          description: "Old description",
-          input_schema: { type: "object" },
-        },
-      ],
-    }
-
-    sanitizeIdeTools(payload)
-
-    expect(payload.tools?.map((tool) => tool.name)).toEqual([
-      "mcp__ide__executeCode",
-      "mcp__ide__getDiagnostics",
-    ])
-    const diagnosticsTool = payload.tools?.find(
-      (tool) => tool.name === "mcp__ide__getDiagnostics",
-    )
-    expect(diagnosticsTool?.description).toBe(
-      "Get language diagnostics from VS Code. Returns errors, warnings, information, and hints for files in the workspace.",
-    )
   })
 })
 

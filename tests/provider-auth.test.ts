@@ -10,7 +10,10 @@ import {
 } from "~/lib/config"
 import { PATHS } from "~/lib/paths"
 
-import { buildProviderUpstreamHeaders } from "../src/services/providers/provider-proxy"
+import {
+  buildProviderUpstreamHeaders,
+  resolveProviderEndpointUrl,
+} from "../src/services/providers/provider-proxy"
 
 function createProviderConfig(
   overrides: Partial<ResolvedProviderConfig> = {},
@@ -67,7 +70,7 @@ describe("getProviderConfig", () => {
         },
       },
       () => {
-        expect(getProviderConfig("custom")).toEqual({
+        expect(getProviderConfig("custom")).toMatchObject({
           name: "custom",
           type: "anthropic",
           baseUrl: "https://example.com",
@@ -94,7 +97,7 @@ describe("getProviderConfig", () => {
         },
       },
       () => {
-        expect(getProviderConfig("custom")).toEqual({
+        expect(getProviderConfig("custom")).toMatchObject({
           name: "custom",
           type: "anthropic",
           baseUrl: "https://example.com",
@@ -161,6 +164,15 @@ describe("buildProviderUpstreamHeaders", () => {
       authorization: "Bearer provider-key",
     })
   })
+
+  test("sets an Anthropic API version for a selected models.dev provider", () => {
+    const headers = buildProviderUpstreamHeaders(
+      createProviderConfig({ modelsDevProviderId: "anthropic-provider" }),
+      new Headers(),
+    )
+    expect(headers["anthropic-version"]).toBe("2023-06-01")
+    expect(headers["x-api-key"]).toBe("provider-key")
+  })
 })
 
 describe("resolveProviderAuthType", () => {
@@ -180,5 +192,44 @@ describe("resolveProviderAuthType", () => {
     expect(
       resolveProviderAuthType("custom", "oauth2", "openai-responses"),
     ).toBe("authorization")
+  })
+})
+
+describe("provider endpoint URL", () => {
+  test("uses models.dev API paths directly for all three supported protocols", () => {
+    const provider = createProviderConfig({
+      baseUrl: "https://api.example.com/anthropic/v1",
+      modelsDevProviderId: "example",
+    })
+    expect(resolveProviderEndpointUrl(provider, "messages")).toBe(
+      "https://api.example.com/anthropic/v1/messages",
+    )
+    expect(resolveProviderEndpointUrl(provider, "chat/completions")).toBe(
+      "https://api.example.com/anthropic/v1/chat/completions",
+    )
+    expect(resolveProviderEndpointUrl(provider, "responses")).toBe(
+      "https://api.example.com/anthropic/v1/responses",
+    )
+  })
+
+  test("does not duplicate a catalog URL's final chat endpoint", () => {
+    expect(
+      resolveProviderEndpointUrl(
+        createProviderConfig({
+          baseUrl: "https://api.example.com/v1/chat/completions",
+          modelsDevProviderId: "example",
+        }),
+        "chat/completions",
+      ),
+    ).toBe("https://api.example.com/v1/chat/completions")
+  })
+
+  test("preserves the existing manual-provider URL convention", () => {
+    expect(
+      resolveProviderEndpointUrl(
+        createProviderConfig({ baseUrl: "https://api.example.com/api" }),
+        "chat/completions",
+      ),
+    ).toBe("https://api.example.com/api/v1/chat/completions")
   })
 })

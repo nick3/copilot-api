@@ -85,52 +85,35 @@ describe("stageMultipartBodyToDisk", () => {
     expect(existsSync(staged.directory)).toBe(false)
   })
 
-  test("strips path separators from uploaded file names", async () => {
-    const formData = new FormData()
-    formData.append(
-      "image",
-      new Blob(["image-bytes"], { type: "image/png" }),
-      "../../evil.png",
-    )
+  test.each([
+    ["../../evil.png", "evil.png"],
+    ["capture?.png", "capture?.png"],
+  ])(
+    "stages %s safely and preserves the name %s",
+    async (name, expectedName) => {
+      const formData = new FormData()
+      formData.append(
+        "image",
+        new Blob(["image-bytes"], { type: "image/png" }),
+        name,
+      )
 
-    const staged = await stage(formData)
-    try {
-      expect(readdirSync(staged.directory)).toEqual(["0.upload"])
+      const staged = await stage(formData)
+      try {
+        expect(readdirSync(staged.directory)).toEqual(["0.upload"])
 
-      const roundTripped = await new Response(staged.formData).formData()
-      const image = roundTripped.get("image")
-      if (image === null || typeof image === "string") {
-        throw new Error("Expected the staged image to be a file")
+        const roundTripped = await new Response(staged.formData).formData()
+        const image = roundTripped.get("image")
+        if (image === null || typeof image === "string") {
+          throw new Error("Expected the staged image to be a file")
+        }
+        expect(image.name).toBe(expectedName)
+        expect(await image.text()).toBe("image-bytes")
+      } finally {
+        await staged.cleanup()
       }
-      expect(image.name).toBe("evil.png")
-      expect(await image.text()).toBe("image-bytes")
-    } finally {
-      await staged.cleanup()
-    }
-  })
-
-  test("keeps cross-platform file names out of temporary paths", async () => {
-    const formData = new FormData()
-    formData.append(
-      "image",
-      new Blob(["image-bytes"], { type: "image/png" }),
-      "capture?.png",
-    )
-
-    const staged = await stage(formData)
-    try {
-      expect(readdirSync(staged.directory)).toEqual(["0.upload"])
-      const roundTripped = await new Response(staged.formData).formData()
-      const image = roundTripped.get("image")
-      if (image === null || typeof image === "string") {
-        throw new Error("Expected the staged image to be a file")
-      }
-      expect(image.name).toBe("capture?.png")
-      expect(await image.text()).toBe("image-bytes")
-    } finally {
-      await staged.cleanup()
-    }
-  })
+    },
+  )
 
   test("rejects fields that exceed their byte limit instead of truncating", async () => {
     const formData = new FormData()

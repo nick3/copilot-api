@@ -1,3 +1,4 @@
+import { getResponsesStreamTerminalDisposition } from "~/services/responses-websocket-helpers"
 import consola from "consola"
 import type { events } from "fetch-event-stream"
 import { createHash } from "node:crypto"
@@ -34,6 +35,8 @@ export interface ResponsesPayload {
   model: string
   instructions?: string | null
   input?: string | Array<ResponseInputItem>
+  text?: ResponsesTextConfig | null
+  client_metadata?: Record<string, string> | null
   tools?: Array<Tool> | null
   tool_choice?: ToolChoiceOptions | ToolChoiceFunction | ToolChoiceCustom
   temperature?: number | null
@@ -50,6 +53,26 @@ export interface ResponsesPayload {
   context_management?: Array<ResponseContextManagementItem> | null
   include?: Array<ResponseIncludable>
   service_tier?: string | null // NOTE: Unsupported by GitHub Copilot
+  [key: string]: unknown
+}
+
+export interface ResponsesTextConfig {
+  format?: ResponsesTextFormat | null
+  verbosity?: "low" | "medium" | "high" | null
+  [key: string]: unknown
+}
+
+export type ResponsesTextFormat =
+  | { type: "text" }
+  | { type: "json_object" }
+  | ResponsesTextFormatJSONSchema
+
+export interface ResponsesTextFormatJSONSchema {
+  type: "json_schema"
+  name: string
+  description?: string | null
+  schema: { [key: string]: unknown }
+  strict?: boolean | null
   [key: string]: unknown
 }
 
@@ -418,6 +441,7 @@ export interface ResponseOutputRefusal {
 }
 
 export interface ResponseUsage {
+  cost?: number
   input_tokens: number
   output_tokens?: number
   total_tokens: number
@@ -954,24 +978,6 @@ const createResponsesWebSocketStreamChunk = (
   }
 }
 
-const isTerminalResponsesStreamChunk = (chunk: { data?: string }): boolean => {
-  if (!chunk.data || chunk.data === "[DONE]") {
-    return false
-  }
-
-  try {
-    const parsed = JSON.parse(chunk.data) as { type?: unknown }
-    return (
-      parsed.type === "response.completed"
-      || parsed.type === "response.failed"
-      || parsed.type === "response.incomplete"
-      || parsed.type === "error"
-    )
-  } catch {
-    return false
-  }
-}
-
 const consumeResponsesWebSocketStream = async (
   stream: ResponsesStream,
 ): Promise<ResponsesResult> => {
@@ -1045,7 +1051,7 @@ const runResponsesWebSocketRequest = async function* (
     },
     {
       createChunk: createResponsesWebSocketStreamChunk,
-      isTerminalChunk: isTerminalResponsesStreamChunk,
+      getTerminalDisposition: getResponsesStreamTerminalDisposition,
       maxBufferedBytes: config.websocketMaxBufferedBytes,
       maxBufferedMessages: config.websocketMaxBufferedMessages,
       openTimeoutMs: config.websocketOpenTimeoutMs,

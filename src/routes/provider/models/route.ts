@@ -1,3 +1,4 @@
+import { getOpencodeGoModelRecords } from "~/lib/models-dev-cache"
 import { type Context, Hono } from "hono"
 
 import { getProviderConfig, type ResolvedProviderConfig } from "~/lib/config"
@@ -62,6 +63,22 @@ providerModelRoutes.get("/", async (c) => {
         data: models.data,
         has_more: false,
       })
+    }
+
+    if (providerConfig.name === "opencode-go") {
+      const models = getOpencodeGoModelRecords()
+      if (models.length === 0) {
+        return c.json(
+          {
+            error: {
+              message: "OpenCode Go model catalog is unavailable",
+              type: "service_unavailable",
+            },
+          },
+          503,
+        )
+      }
+      return c.json({ object: "list", data: models, has_more: false })
     }
 
     const upstreamResponse = await forwardProviderModels(

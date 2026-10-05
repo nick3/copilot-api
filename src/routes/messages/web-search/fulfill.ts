@@ -1,3 +1,4 @@
+import { getMessageApiWebSearchModel } from "~/lib/config"
 import type { ConsolaInstance } from "consola"
 import type { Context } from "hono"
 
@@ -57,6 +58,7 @@ import { debugJson } from "~/lib/logger"
 
 export const webSearchFlowDependencies = {
   createResponses: createCopilotResponses,
+  getMessageApiWebSearchModel,
   resolveProviderConfig,
   createUsageRecorder: (
     payload: AnthropicMessagesPayload,

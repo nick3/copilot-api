@@ -7,7 +7,9 @@ const getTrimmedHeader = (c: Context, name: string): string | undefined => {
 }
 
 export const getIncomingResponsesSessionId = (c: Context): string | undefined =>
-  getTrimmedHeader(c, "session-id") ?? getTrimmedHeader(c, "x-session-id")
+  getTrimmedHeader(c, "session-id")
+  ?? getTrimmedHeader(c, "x-root-session-id")
+  ?? getTrimmedHeader(c, "x-session-id")
 
 const codexSubagentHeaderValues = new Set([
   "collab_spawn",

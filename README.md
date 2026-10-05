@@ -2,6 +2,9 @@
 
 English | [简体中文](./README.zh-CN.md)
 
+[Client guides and runtime configuration](docs/guides/en/README.md)
+
+
 > [!WARNING]
 > This is a reverse-engineered proxy of GitHub Copilot API. It is not supported by GitHub, and may break unexpectedly. Use at your own risk. In the current version, if not using opencode OAuth, the device ID and machine ID will be sent to GitHub Copilot.
 

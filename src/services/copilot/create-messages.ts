@@ -77,6 +77,7 @@ const allowedAnthropicBetas = new Set([
   INTERLEAVED_THINKING_BETA,
   "context-management-2025-06-27",
   ADVANCED_TOOL_USE_BETA,
+  "extended-cache-ttl-2025-04-11",
 ])
 
 const TOOL_SEARCH_SUPPORTED_MODELS = [
@@ -92,7 +93,7 @@ const modelSupportsToolSearch = (modelId: string): boolean => {
   )
 }
 
-const buildAnthropicBetaHeader = (
+export const buildAnthropicBetaHeader = (
   anthropicBetaHeader: string | undefined,
   thinking: AnthropicMessagesPayload["thinking"],
   model: string,

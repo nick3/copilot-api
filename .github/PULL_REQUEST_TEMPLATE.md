@@ -23,7 +23,7 @@
 
   ```text
   Review Decision: BLOCKING | NON_BLOCKING
-  Findings Total: <N> (CRITICAL=<n1>, HIGH_PRIORITY=<n2>, REFERENCE=<n3>)
+  Findings Total: <N> (CRITICAL=<n1>, HIGH_PRIORITY=<n2>, SUGGESTION=<n3>)
 
   [CRITICAL]
   None
@@ -31,7 +31,7 @@
   [HIGH_PRIORITY]
   None
 
-  [REFERENCE]
+  [SUGGESTION]
   None
   ```
 
@@ -43,13 +43,13 @@
 <!-- Check what you actually ran; CI enforces all of these. -->
 
 - [ ] `bun run lint:all` passes
-- [ ] `bun run typecheck` passes (root and `desktop/` when touched)
+- [ ] `bun run typecheck` passes (root and `admin-ui/` when touched)
 - [ ] `bun test` passes - targeted files run: <!-- e.g. bun test tests/provider-resolver.test.ts -->
-- [ ] `bun run build` succeeds (`bun run build:desktop` for desktop/shared changes)
+- [ ] `bun run build` succeeds (`bun run build:admin` for admin-ui/shared changes)
 
 ## Screenshots
 
-<!-- Required for desktop or pages/ UI changes; delete this section otherwise. -->
+<!-- Required for Admin UI changes; delete this section otherwise. -->
 
 ## Notes
 

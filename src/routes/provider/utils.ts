@@ -1,3 +1,5 @@
+import type { Context } from "hono"
+
 import { builtinProviderModelRegistry } from "~/lib/builtin-provider-models"
 import type { ModelConfig, ResolvedProviderConfig } from "~/lib/config"
 import {
@@ -5,6 +7,20 @@ import {
   type ResponsesReasoningEffort,
 } from "~/lib/reasoning-effort"
 import type { ResponsesPayload } from "~/lib/types/responses"
+import { createProviderProxyResponseHeaders } from "~/services/providers/provider-proxy"
+
+export const forwardProviderResponseHeaders = (
+  c: Context,
+  upstreamHeaders: Headers,
+): void => {
+  const headers = createProviderProxyResponseHeaders(upstreamHeaders)
+  headers.delete("set-cookie")
+  headers.delete("x-models-etag")
+
+  for (const [headerName, headerValue] of headers) {
+    c.header(headerName, headerValue)
+  }
+}
 
 interface SamplingPayload {
   temperature?: number | null

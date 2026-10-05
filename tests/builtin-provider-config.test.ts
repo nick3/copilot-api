@@ -406,9 +406,7 @@ describe("builtin provider config", () => {
 
     const writtenConfig = readConfigFile(configPath)
     expect(writtenConfig.extraPrompts).toBeDefined()
-    expect(Object.keys(writtenConfig.extraPrompts ?? {})).toEqual([
-      "gpt-5-mini",
-    ])
+    expect(writtenConfig.extraPrompts).toEqual({})
   })
 
   test("does not persist gpt-5.3+ modelReasoningEfforts in config file", () => {
@@ -420,8 +418,6 @@ describe("builtin provider config", () => {
       'const { mergeConfigWithDefaults } = await import("./src/lib/config"); mergeConfigWithDefaults();',
     )
 
-    expect(readConfigFile(configPath).modelReasoningEfforts).toEqual({
-      "gpt-5-mini": "low",
-    })
+    expect(readConfigFile(configPath).modelReasoningEfforts).toEqual({})
   })
 })

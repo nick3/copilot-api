@@ -769,46 +769,49 @@ describe("translateAnthropicMessagesToResponsesPayload", () => {
     ])
   })
 
-  it("maps bridge tool_use history into tool_search_call input items", () => {
-    const result = translateAnthropicMessagesToResponsesPayload({
-      model: "gpt-5.4",
-      max_tokens: 1024,
-      messages: [
-        {
-          role: "assistant",
-          content: [
-            {
-              type: "tool_use",
-              id: "call_search",
-              name: "mcp__tool_search__search",
-              input: { names: "mcp__fetch__fetch" },
-            },
-          ],
-        },
-      ],
-      tools: [
-        {
-          name: "mcp__tool_search__search",
-          input_schema: { type: "object" },
-        },
-        {
-          name: "mcp__fetch__fetch",
-          input_schema: { type: "object" },
-        },
-      ],
-    })
+  it.each(["mcp__tool_search__search", "tool_search_search"])(
+    "maps %s tool_use history into tool_search_call input items",
+    (bridgeName) => {
+      const result = translateAnthropicMessagesToResponsesPayload({
+        model: "gpt-5.4",
+        max_tokens: 1024,
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "call_search",
+                name: bridgeName,
+                input: { names: "mcp__fetch__fetch" },
+              },
+            ],
+          },
+        ],
+        tools: [
+          {
+            name: bridgeName,
+            input_schema: { type: "object" },
+          },
+          {
+            name: "mcp__fetch__fetch",
+            input_schema: { type: "object" },
+          },
+        ],
+      })
 
-    const input = result.input as Array<ResponseToolSearchCallItem>
-    expect(input).toEqual([
-      {
-        type: "tool_search_call",
-        call_id: "call_search",
-        arguments: { names: ["mcp__fetch__fetch"] },
-        execution: "client",
-        status: "completed",
-      },
-    ])
-  })
+      const input = result.input as Array<ResponseToolSearchCallItem>
+      expect(input).toEqual([
+        {
+          type: "tool_search_call",
+          call_id: "call_search",
+          arguments: { names: ["mcp__fetch__fetch"] },
+          execution: "client",
+          status: "completed",
+        },
+      ])
+    },
+  )
 
   it("preserves namespace on deferred tool_use history", () => {
     const result = translateAnthropicMessagesToResponsesPayload({
@@ -846,47 +849,6 @@ describe("translateAnthropicMessagesToResponsesPayload", () => {
         name: "get_shipping_eta",
         namespace: "get_shipping_eta",
         arguments: '{"order_id":"order_42"}',
-        status: "completed",
-      },
-    ])
-  })
-
-  it("accepts tool_search bridge aliases in tool_use history", () => {
-    const result = translateAnthropicMessagesToResponsesPayload({
-      model: "gpt-5.4",
-      max_tokens: 1024,
-      messages: [
-        {
-          role: "assistant",
-          content: [
-            {
-              type: "tool_use",
-              id: "call_search",
-              name: "tool_search_search",
-              input: { names: "mcp__fetch__fetch" },
-            },
-          ],
-        },
-      ],
-      tools: [
-        {
-          name: "tool_search_search",
-          input_schema: { type: "object" },
-        },
-        {
-          name: "mcp__fetch__fetch",
-          input_schema: { type: "object" },
-        },
-      ],
-    })
-
-    const input = result.input as Array<ResponseToolSearchCallItem>
-    expect(input).toEqual([
-      {
-        type: "tool_search_call",
-        call_id: "call_search",
-        arguments: { names: ["mcp__fetch__fetch"] },
-        execution: "client",
         status: "completed",
       },
     ])

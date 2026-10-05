@@ -35,6 +35,7 @@ import {
   getDevMode,
   setDevMode,
   updateAdminConfig,
+  reloadAdminConfig,
 } from "@/lib/admin-api"
 import { i18n } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
@@ -260,6 +261,10 @@ type ProviderModelItem = {
 }
 
 type ProviderItem = {
+  authTypeConfigured: boolean
+  modelsDevProviderId: string
+  codexModels: string
+  codexModelsConfigured: boolean
   accountId?: string
   id: string
   name: string
@@ -665,6 +670,10 @@ function stringifyOptionalJson(value: unknown): string {
 function createProviderItem(overrides: Partial<ProviderItem> = {}): ProviderItem {
   return {
     id: createItemId(),
+    authTypeConfigured: overrides.authType !== undefined,
+    modelsDevProviderId: "",
+    codexModels: "",
+    codexModelsConfigured: false,
     name: "",
     type: "anthropic",
     enabled: true,
@@ -753,11 +762,15 @@ export function providerItemsFromRecord(record: ProviderRecord | undefined): Arr
     id: createItemId(),
     name,
     accountId: provider.accountId,
+    modelsDevProviderId: provider.modelsDevProviderId ?? "",
+    codexModels: provider.codexModels?.join("\n") ?? "",
+    codexModelsConfigured: provider.codexModels !== undefined,
     type: normalizeProviderType(provider.type),
     enabled: provider.enabled ?? true,
     baseUrl: provider.baseUrl ?? "",
     apiKey: provider.apiKey ?? "",
     authType: normalizeProviderAuthType(provider.authType),
+    authTypeConfigured: provider.authType !== undefined,
     pricingCurrency: provider.pricingCurrency ?? "",
     adjustInputTokens: provider.adjustInputTokens ?? false,
     models: Object.entries(provider.models ?? {}).map(([model, config]) => ({
@@ -802,6 +815,7 @@ export function providerItemsFromRecord(record: ProviderRecord | undefined): Arr
 }
 
 function providerHasMeaningfulContent(item: ProviderItem): boolean {
+  if (item.codexModelsConfigured || item.modelsDevProviderId.trim()) return true
   if (item.enabled === false) return true
   if (item.type !== "anthropic") return true
   if (item.baseUrl.trim() || item.apiKey.trim() || item.pricingCurrency.trim()) {
@@ -1152,7 +1166,7 @@ export function parseProviderModelItems(
   return { record: modelsRecord }
 }
 
-function providerRecordFromItems(items: Array<ProviderItem>): ParseResult<ProviderRecord> {
+export function providerRecordFromItems(items: Array<ProviderItem>): ParseResult<ProviderRecord> {
   const record: ProviderRecord = Object.create(null) as ProviderRecord
   const seenProviders = new Set<string>()
 
@@ -1175,6 +1189,11 @@ function providerRecordFromItems(items: Array<ProviderItem>): ParseResult<Provid
 
     seenProviders.add(normalizedProviderName)
 
+    const codexModels = item.codexModelsConfigured ? [...new Set(item.codexModels.split(/[,\n]/u).map((value) => value.trim()).filter(Boolean))] : undefined
+    if (providerName === "github-copilot") {
+      record[providerName] = { enabled: item.enabled, ...(codexModels === undefined ? {} : { codexModels }) }
+      continue
+    }
     const providerType = item.type.trim() || "anthropic"
     if (!isProviderType(providerType)) {
       return {
@@ -1188,10 +1207,12 @@ function providerRecordFromItems(items: Array<ProviderItem>): ParseResult<Provid
 
     const provider: ProviderConfig = {
       type: providerType,
+      modelsDevProviderId: item.modelsDevProviderId.trim() || undefined,
+      codexModels,
       enabled: item.enabled,
       baseUrl: baseUrl || undefined,
       apiKey: apiKey || undefined,
-      authType: item.authType,
+      ...(item.authTypeConfigured ? { authType: item.authType } : {}),
       ...(item.accountId ? { accountId: item.accountId } : {}),
       pricingCurrency: pricingCurrency || undefined,
       adjustInputTokens: item.adjustInputTokens,
@@ -4339,6 +4360,17 @@ function ProviderItemCard({
   onUpdateModel,
 }: ProviderItemCardProps): React.JSX.Element {
   const { t } = useTranslation()
+  const catalogControls = <div className="space-y-2">
+    <Label htmlFor={`codex-models-${item.id}`}>{t("settingsPage.catalog.codexModels")}</Label>
+    <div className="flex items-center gap-2"><Switch aria-label={t("settingsPage.catalog.restrict")} checked={item.codexModelsConfigured} onCheckedChange={(value) => onUpdateProvider(item.id, { codexModelsConfigured: value })} /><span className="text-sm">{t("settingsPage.catalog.restrict")}</span></div>
+    {item.codexModelsConfigured ? <Textarea id={`codex-models-${item.id}`} value={item.codexModels} onChange={(event) => onUpdateProvider(item.id, { codexModels: event.target.value })} /> : null}
+    <p className="text-muted-foreground text-xs">{t("settingsPage.catalog.codexModelsHint")}</p>
+  </div>
+  if (item.name === "github-copilot") return <div className="grid gap-3 rounded-lg border p-3">
+    <div className="flex items-center justify-between gap-2"><Label>GitHub Copilot</Label><Switch aria-label={t("settingsPage.catalog.copilotEnabled")} checked={item.enabled} onCheckedChange={(value) => onUpdateProvider(item.id, { enabled: value })} /></div>
+    <p className="text-muted-foreground text-xs">{t("settingsPage.catalog.copilotHint")}</p>
+    {catalogControls}
+  </div>
 
   return (
     <div className="grid gap-3 rounded-lg border p-3">
@@ -4389,6 +4421,8 @@ function ProviderItemCard({
         </Button>
       </div>
 
+      {catalogControls}
+      <div className="grid gap-2"><Label htmlFor={`models-dev-${item.id}`}>{t("settingsPage.catalog.catalogProvider")}</Label><Input id={`models-dev-${item.id}`} value={item.modelsDevProviderId} onChange={(event) => onUpdateProvider(item.id, { modelsDevProviderId: event.target.value })} /><p className="text-muted-foreground text-xs">{t("settingsPage.catalog.catalogProviderHint")}</p></div>
       <div className="grid gap-3 md:grid-cols-4">
         <div className="grid gap-2 md:col-span-2">
           <Label className="text-muted-foreground text-xs">
@@ -4447,7 +4481,7 @@ function ProviderItemCard({
           <Select
             value={item.authType}
             onValueChange={(value) =>
-              onUpdateProvider(item.id, { authType: value as ProviderAuthType })
+              onUpdateProvider(item.id, { authType: value as ProviderAuthType, authTypeConfigured: true })
             }
           >
             <SelectTrigger>
@@ -4713,7 +4747,15 @@ function applyNonNegativeNumberInputChange(params: {
   setDraft((prev) => setDraftNonNegativeNumberValue(prev, key, parsed))
 }
 
+function ProviderSmallModelsCard({ values, names, onChange }: { values: Record<string, string>; names: Array<string>; onChange: (name: string, value: string) => void }): React.JSX.Element {
+  const { t } = useTranslation()
+  return <Card className="gap-4 py-4"><CardHeader className="px-4"><CardTitle>{t("settingsPage.catalog.smallModels")}</CardTitle><CardDescription>{t("settingsPage.catalog.smallModelsHint")}</CardDescription></CardHeader><CardContent className="grid gap-3 px-4 md:grid-cols-2">{names.map((name) => <div key={name} className="grid gap-2"><Label htmlFor={`small-model-${name}`}>{name}</Label><Input id={`small-model-${name}`} value={values[name] ?? ""} placeholder={name === "codex" ? "gpt-6-luna" : ""} onChange={(event) => onChange(name, event.target.value)} /></div>)}</CardContent></Card>
+}
+
 type SettingsPageViewProps = {
+  providerSmallModels: Record<string, string>
+  smallModelProviders: Array<string>
+  onProviderSmallModelChange: (name: string, value: string) => void
   transportJson: string
   transportIssue: string | null
   onTransportChange: (value: string) => void
@@ -4994,7 +5036,9 @@ function useSettingsPageState(): SettingsPageViewProps {
 
   const applyConfigResponse = useCallback(
     (config: AdminConfigResponse) => {
-      const { _configPath, ...configData } = config
+      const { _configPath, _runtimeApplied, _runtimeError, ...configData } = config
+      void _runtimeApplied
+      void _runtimeError
       const aliasItems = aliasItemsFromRecord(configData.modelAliases)
       const normalizedAliases = aliasRecordFromItems(aliasItems)
       const mappingItems = modelMappingItemsFromRecord(configData.modelMappings)
@@ -5023,7 +5067,7 @@ function useSettingsPageState(): SettingsPageViewProps {
       )
       setAliasFromRecord(normalizedAliases)
       setMappingFromRecord(normalizedMappings)
-      setProvidersFromRecord(configData.providers)
+      setProvidersFromRecord({ "github-copilot": { enabled: true }, ...configData.providers })
       setModelRefreshIntervalInput(
         toNumberInputValue(configData.modelRefreshIntervalHours),
       )
@@ -5131,7 +5175,11 @@ function useSettingsPageState(): SettingsPageViewProps {
     try {
       const updated = await updateAdminConfig(draft)
       applyConfigResponse(updated)
-      toast.success(i18n.t("settingsPage.toast.configSaved"))
+      if (updated._runtimeApplied === false) {
+        const message = i18n.t("settingsPage.catalog.activationFailed")
+        setError(message)
+        toast.warning(message)
+      } else toast.success(i18n.t("settingsPage.toast.configSaved"))
     } catch (err) {
       const msg = err instanceof AdminApiError ? err.message : String(err)
       setError(msg)
@@ -5142,8 +5190,10 @@ function useSettingsPageState(): SettingsPageViewProps {
   }, [applyConfigResponse, draft])
 
   const onReload = useCallback(() => {
-    void load()
-  }, [load])
+    void reloadAdminConfig().then(applyConfigResponse).catch((error: unknown) => {
+      setError(error instanceof Error ? error.message : String(error))
+    })
+  }, [applyConfigResponse])
 
   const onSave = useCallback(() => {
     void save()
@@ -5153,7 +5203,7 @@ function useSettingsPageState(): SettingsPageViewProps {
     (value: string) => {
       setDraft((prev) => ({
         ...prev,
-        smallModel: value === "__default__" ? "" : value,
+        smallModels: { ...prev.smallModels, copilot: value === "__default__" ? "" : value },
       }))
     },
     [setDraft],
@@ -5161,7 +5211,7 @@ function useSettingsPageState(): SettingsPageViewProps {
 
   const handleSmallModelInput = useCallback(
     (value: string) => {
-      setDraft((prev) => ({ ...prev, smallModel: value }))
+      setDraft((prev) => ({ ...prev, smallModels: { ...prev.smallModels, copilot: value } }))
     },
     [setDraft],
   )
@@ -5345,7 +5395,7 @@ function useSettingsPageState(): SettingsPageViewProps {
   )
 
   const hasModels = models.length > 0
-  const smallModelValue = draft.smallModel ? draft.smallModel : "__default__"
+  const smallModelValue = (draft.smallModels?.copilot ?? draft.smallModel) || "__default__"
   const canSave = !transportIssue &&
     !saving
     && !loading
@@ -5372,7 +5422,7 @@ function useSettingsPageState(): SettingsPageViewProps {
   const smallModelLabel = hasModels
     ? t("settingsPage.general.smallModel")
     : t("settingsPage.general.smallModelManual")
-  const smallModelInputValue = draft.smallModel ?? ""
+  const smallModelInputValue = draft.smallModels?.copilot ?? draft.smallModel ?? ""
   const authApiKeysValue = getAuthApiKeysFromConfig(draft).join("\n")
   const anthropicApiKeyValue = draft.anthropicApiKey ?? ""
   const anthropicApiKeyEnvNote = t(
@@ -5447,6 +5497,9 @@ function useSettingsPageState(): SettingsPageViewProps {
   const providerModelSuggestions = deriveProviderModelSuggestions(providersItems)
 
   return {
+    providerSmallModels: draft.smallModels ?? {},
+    smallModelProviders: [...new Set(["codex", ...Object.keys(draft.providers ?? {}), ...Object.keys(draft.smallModels ?? {})])].filter((name) => name !== "copilot" && name !== "github-copilot"),
+    onProviderSmallModelChange: (name, value) => setDraft((prev) => ({ ...prev, smallModels: { ...prev.smallModels, [name]: value } })),
     transportJson, transportIssue, onTransportChange,
     loading,
     saving,
@@ -5573,6 +5626,7 @@ function useSettingsPageState(): SettingsPageViewProps {
 }
 
 function SettingsPageView({
+  providerSmallModels, smallModelProviders, onProviderSmallModelChange,
   transportJson, transportIssue, onTransportChange,
   loading,
   saving,
@@ -5831,6 +5885,8 @@ function SettingsPageView({
               onAnthropicApiKeyChange={onAnthropicApiKeyChange}
             />
           </SettingsSectionCard>
+
+          <ProviderSmallModelsCard values={providerSmallModels} names={smallModelProviders} onChange={onProviderSmallModelChange} />
 
           {/* Reasoning Efforts */}
           <SettingsSectionCard

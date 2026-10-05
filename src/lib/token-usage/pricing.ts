@@ -33,6 +33,7 @@ export interface CalculatedTokenUsageCost {
 }
 
 export interface TokenUsageCostInput extends UsageTokens {
+  serviceTier?: string | null
   // Timestamp used to pick peak or off-peak prices; defaults to the current
   // time when omitted.
   at?: Date | null
@@ -107,11 +108,14 @@ export function resolveTokenUsageCost(
   const cacheReadPrice = resolveCacheReadPrice(pricing, input)
   const cacheCreationPrice = resolveCacheCreationPrice(pricing)
 
-  const totalCostNanos =
+  const baseCostNanos =
     costNanosForTokens(input.input_tokens, inputPrice)
     + costNanosForTokens(input.output_tokens, outputPrice)
     + costNanosForTokens(input.cache_read_input_tokens, cacheReadPrice)
     + costNanosForTokens(input.cache_creation_input_tokens, cacheCreationPrice)
+  const totalCostNanos = Math.round(
+    baseCostNanos * resolveCodexServiceTierMultiplier(input, providerName),
+  )
 
   if (totalCostNanos <= 0) {
     return null
@@ -121,6 +125,27 @@ export function resolveTokenUsageCost(
     currency,
     source: resolvedPricing.source,
     total_cost_nanos: totalCostNanos,
+  }
+}
+
+function resolveCodexServiceTierMultiplier(
+  input: TokenUsageCostInput,
+  providerName: string,
+): number {
+  if (providerName.toLowerCase() !== "codex") {
+    return 1
+  }
+
+  // Price-estimate multipliers, applied after selecting the context rates.
+  // https://developers.openai.com/api/docs/pricing
+  switch (input.serviceTier?.trim().toLowerCase()) {
+    case "priority":
+    case "fast":
+      return 2
+    case "ultrafast":
+      return 6
+    default:
+      return 1
   }
 }
 
@@ -182,9 +207,16 @@ function resolveProviderPricing(
     }
   }
 
+  const pricingModel =
+    (
+      providerName.toLowerCase() === "codex"
+      && model.trim().toLowerCase() === "gpt-5.6"
+    ) ?
+      "gpt-5.6-sol"
+    : model
   const builtinPricing = builtinProviderModelRegistry.getModelConfig(
     providerName,
-    model,
+    pricingModel,
   )?.pricing
   if (!builtinPricing) {
     return null

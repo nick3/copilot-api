@@ -25,6 +25,10 @@ import {
   type ProviderType,
 } from "./lib/config"
 import { loginCodex } from "./lib/oauth/codex"
+import {
+  loadModelsDevProviderOptions,
+  type ModelsDevProviderOption,
+} from "./lib/models-dev-cache"
 import { PATHS, ensurePaths } from "./lib/paths"
 import { getConfiguredApiKeys } from "./lib/request-auth"
 import {
@@ -424,7 +428,11 @@ function assertCustomProviderName(providerName: string): void {
     )
   }
 
-  if (providerName === "copilot" || providerName === "codex") {
+  if (
+    providerName === "copilot"
+    || providerName === "github-copilot"
+    || providerName === "codex"
+  ) {
     throw new Error(
       `Provider name '${providerName}' is reserved for a builtin provider`,
     )
@@ -531,18 +539,22 @@ async function promptRequiredSecret(
   return normalizedValue
 }
 
-async function promptCustomProviderName(): Promise<string> {
-  const providerName = await promptRequiredText(
-    "Enter provider name",
-    "Provider name",
-  )
+async function promptCustomProviderName(defaultName?: string): Promise<string> {
+  const value = await prompt("Enter provider name", {
+    type: "text",
+    ...(defaultName ? { default: defaultName, initial: defaultName } : {}),
+  })
+  const providerName = (value || defaultName || "").trim()
   assertCustomProviderName(providerName)
   return providerName
 }
 
-async function promptCustomProviderType(): Promise<ProviderType> {
+async function promptCustomProviderType(
+  defaultType?: ProviderType,
+): Promise<ProviderType> {
   const providerType = await prompt("Select provider type", {
     type: "select",
+    initial: defaultType,
     options: SUPPORTED_PROVIDER_TYPES.map((type) => ({
       label: type,
       value: type,
@@ -557,6 +569,49 @@ async function promptCustomProviderType(): Promise<ProviderType> {
   }
 
   return providerType
+}
+
+async function promptModelsDevProvider(): Promise<
+  ModelsDevProviderOption | undefined
+> {
+  const source = await prompt("Choose custom provider source", {
+    type: "select",
+    options: [
+      { label: "Enter manually", value: "manual" },
+      { label: "Choose from models.dev", value: "models-dev" },
+    ],
+  })
+  if (source === "manual") return undefined
+  if (source !== "models-dev") throw new Error("No provider source selected")
+
+  const providers = await loadModelsDevProviderOptions()
+  const query = (
+    (await prompt("Search models.dev providers (blank to list all)", {
+      type: "text",
+    })) ?? ""
+  )
+    .trim()
+    .toLowerCase()
+  const matches = providers.filter(
+    (provider) =>
+      provider.id.toLowerCase().includes(query)
+      || provider.name.toLowerCase().includes(query),
+  )
+  if (matches.length === 0) {
+    throw new Error("No matching models.dev providers with a supported API URL")
+  }
+  const selectedId = await prompt("Select a models.dev provider", {
+    type: "select",
+    options: matches.map((provider) => ({
+      label: `${provider.name} (${provider.id}) — ${provider.type}`,
+      value: provider.id,
+    })),
+  })
+  const selectedProvider = matches.find(
+    (provider) => provider.id === selectedId,
+  )
+  if (!selectedProvider) throw new Error("No models.dev provider selected")
+  return selectedProvider
 }
 
 async function promptQuickProviderType(
@@ -657,16 +712,23 @@ function buildCustomProviderConfig(
     baseUrl: string
     pricingCurrency?: string
     type: ProviderType
+    modelsDevProviderId?: string
   },
 ): ProviderConfig {
   return {
     type: options.type,
     enabled: true,
     baseUrl: options.baseUrl,
+    ...(options.modelsDevProviderId && {
+      modelsDevProviderId: options.modelsDevProviderId,
+    }),
     apiKey: options.apiKey,
     ...(options.authType ? { authType: options.authType } : {}),
     pricingCurrency:
       options.pricingCurrency ?? existingProviderConfig.pricingCurrency,
+    ...(existingProviderConfig.codexModels !== undefined ?
+      { codexModels: existingProviderConfig.codexModels }
+    : {}),
     ...(existingProviderConfig.models ?
       { models: existingProviderConfig.models }
     : {}),
@@ -674,11 +736,15 @@ function buildCustomProviderConfig(
 }
 
 async function configureCustomProvider(): Promise<void> {
-  const providerName = await promptCustomProviderName()
-  const type = await promptCustomProviderType()
-  const baseUrl = normalizeProviderBaseUrl(
-    await promptRequiredText("Enter provider baseUrl", "baseUrl"),
-  )
+  const catalogProvider = await promptModelsDevProvider()
+  const providerName = await promptCustomProviderName(catalogProvider?.id)
+  const type = await promptCustomProviderType(catalogProvider?.type)
+  const baseUrl =
+    catalogProvider ?
+      await promptQuickProviderBaseUrl(catalogProvider.api)
+    : normalizeProviderBaseUrl(
+        await promptRequiredText("Enter provider baseUrl", "baseUrl"),
+      )
   if (!baseUrl) {
     throw new Error("baseUrl must be a non-empty string")
   }
@@ -693,6 +759,7 @@ async function configureCustomProvider(): Promise<void> {
       apiKey,
       authType,
       baseUrl,
+      modelsDevProviderId: catalogProvider?.id,
       type,
     }),
   )

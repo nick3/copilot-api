@@ -49,6 +49,7 @@ if (isMcpFastPath(process.argv)) {
         import("./check-usage").then((mod) => mod.checkUsage),
       debug: () => import("./debug").then((mod) => mod.debug),
       mcp: () => import("./mcp").then((mod) => mod.mcp),
+      provider: () => import("./provider").then((mod) => mod.provider),
     },
     args: cliArgs,
   })

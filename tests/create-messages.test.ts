@@ -228,7 +228,7 @@ test("captures final outbound headers after messages-proxy overrides", async () 
       expect(outboundHeaders?.xInteractionType).toBe("messages-proxy")
       expect(outboundHeaders?.openaiIntent).toBe("messages-proxy")
       expect(outboundHeaders?.userAgent).toBe(
-        "vscode_claude_code/2.1.112 (external, sdk-ts, agent-sdk/0.2.112)",
+        "vscode_claude_code/2.1.258 (external, sdk-ts, agent-sdk/0.3.258)",
       )
     },
   )

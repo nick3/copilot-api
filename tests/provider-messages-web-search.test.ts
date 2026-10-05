@@ -922,7 +922,7 @@ describe("provider messages web_search", () => {
       stream?: boolean
     }
     expect(upstreamBody.stream).toBe(true)
-    expect(upstreamBody.reasoning?.effort).toBe("xhigh")
+    expect(upstreamBody.reasoning?.effort).toBe("max")
 
     const upstreamHeaders = new Headers((init as RequestInit).headers)
     expect(upstreamHeaders.get("accept")).toBe("text/event-stream")
@@ -977,7 +977,7 @@ describe("provider messages web_search", () => {
     const upstreamBody = JSON.parse((init as RequestInit).body as string) as {
       reasoning?: { effort?: string }
     }
-    expect(upstreamBody.reasoning?.effort).toBe("xhigh")
+    expect(upstreamBody.reasoning?.effort).toBe("max")
   })
 
   test("passes explicit reasoning for openai-responses provider messages without Copilot metadata", async () => {

@@ -833,6 +833,18 @@
       "transportHint": "Timeouts are in milliseconds; buffer limits use bytes and message counts. An empty object uses defaults. Changes apply to subsequent requests.",
       "transportInvalidJson": "Enter a valid JSON object.",
       "providersReasoningFieldLabel": "Reasoning field in message history"
+    },
+    "catalog": {
+      "codexModels": "Models visible to Codex clients",
+      "restrict": "Limit the visible model list",
+      "codexModelsHint": "One upstream model ID per line. Turning this on with an empty list hides all models from this provider in Codex; API access remains available.",
+      "copilotEnabled": "Enable GitHub Copilot",
+      "copilotHint": "Controls all configured Copilot accounts. Disabling pauses upstream refresh and request routing; saved accounts remain available.",
+      "catalogProvider": "models.dev provider ID",
+      "catalogProviderHint": "Optional catalog identifier for model capabilities and prices, for example openai or anthropic.",
+      "smallModels": "Small models by provider",
+      "smallModelsHint": "Use a model from the same provider. A blank value disables the optional override. Copilot uses the small-model setting above.",
+      "activationFailed": "Configuration saved, but runtime activation failed. Use Reload to retry."
     }
   },
   "accountManagement": {

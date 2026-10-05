@@ -4,10 +4,13 @@ import os from "node:os"
 import path from "node:path"
 
 import {
+  getAlphaSearchModel,
+  getMessageApiWebSearchModel,
   reloadConfig,
   setConfiguredApiKeys,
   writeConfigToDisk,
 } from "~/lib/config-store"
+import { getSmallModel, getSmallModelForProvider } from "~/lib/config"
 import { PATHS } from "~/lib/paths"
 
 interface StoredConfig {
@@ -77,9 +80,59 @@ test("reloadConfig creates a default config when it is missing", () => {
   const config = reloadConfig()
 
   expect(config.auth?.apiKeys).toEqual([])
+  expect(config.smallModels).toEqual({
+    codex: "gpt-6-luna",
+    copilot: "gpt-6-luna",
+  })
+  expect(config.alphaSearchModel).toBe("gpt-6-luna")
+  expect(config.messageApiWebSearchModel).toBe("gpt-6-luna")
+  expect(config.extraPrompts).toBeUndefined()
+  expect(config.modelReasoningEfforts).toEqual({})
   if (process.platform !== "win32") {
     expect(fs.statSync(configPath).mode & 0o777).toBe(0o600)
   }
+})
+
+test("model getters use gpt-6-luna when config fields are absent", () => {
+  const configPath = useTempConfigPath()
+  fs.writeFileSync(
+    configPath,
+    '{"auth":{"adminApiKey":"existing-admin-key"}}\n',
+    "utf8",
+  )
+
+  reloadConfig()
+
+  expect(getSmallModel()).toBe("gpt-6-luna")
+  expect(getSmallModelForProvider("codex")).toBe("gpt-6-luna")
+  expect(getSmallModelForProvider("copilot")).toBe("gpt-6-luna")
+  expect(getSmallModelForProvider("other-provider")).toBeUndefined()
+  expect(getAlphaSearchModel()).toBe("gpt-6-luna")
+  expect(getMessageApiWebSearchModel()).toBeUndefined()
+})
+
+test("smallModels selects provider models and allows an empty value to disable switching", () => {
+  const configPath = useTempConfigPath()
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify({
+      auth: { adminApiKey: "existing-admin-key" },
+      smallModels: {
+        codex: "",
+        copilot: "gpt-copilot-small",
+        openai: "gpt-openai-small",
+      },
+    }),
+    "utf8",
+  )
+
+  reloadConfig()
+
+  expect(getSmallModelForProvider("codex")).toBeUndefined()
+  expect(getSmallModelForProvider("copilot")).toBe("gpt-copilot-small")
+  expect(getSmallModelForProvider("openai")).toBe("gpt-openai-small")
+  expect(getSmallModelForProvider("dashscope")).toBeUndefined()
+  expect(getSmallModel()).toBe("gpt-copilot-small")
 })
 
 test("reloadConfig preserves an unreadable config file", () => {
@@ -128,14 +181,15 @@ test("setConfiguredApiKeys normalizes keys and preserves other config fields", (
   expect(storedKeys).toEqual(["key-1", "key-2"])
   const config = JSON.parse(fs.readFileSync(configPath, "utf8")) as StoredConfig
   expect(config.auth.apiKeys).toEqual(["key-1", "key-2"])
-  expect(config.auth.adminApiKey).toBe("existing-admin-key")
   expect(config.providers).toEqual({
     example: {
       apiKey: "provider-key",
       baseUrl: "https://provider.example",
     },
   })
-  expect(config.modelMappings).toEqual({ "claude-opus-4-7": "gpt-5-mini" })
+  expect(config.modelMappings).toEqual({
+    "claude-opus-4-7": "gpt-5-mini",
+  })
 })
 
 test("setConfiguredApiKeys can clear all keys", () => {
@@ -150,5 +204,4 @@ test("setConfiguredApiKeys can clear all keys", () => {
   expect(storedKeys).toEqual([])
   const config = JSON.parse(fs.readFileSync(configPath, "utf8")) as StoredConfig
   expect(config.auth.apiKeys).toEqual([])
-  expect(config.auth.adminApiKey).toBe("admin-key")
 })

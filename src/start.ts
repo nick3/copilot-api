@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+import { isGitHubCopilotEnabled } from "./lib/github-copilot-provider"
+import {
+  startModelsDevCache,
+  stopModelsDevRefreshLoop,
+} from "./lib/models-dev-cache"
 
 import { defineCommand } from "citty"
 import clipboard from "clipboardy"
@@ -227,6 +232,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   await cacheVsCodeDeviceId()
 
   // Initialize accounts manager with VS Code version
+  await accountsManager.setCopilotEnabled(isGitHubCopilotEnabled())
   await accountsManager.initialize(state.vsCodeVersion)
 
   // If --github-token is provided, set it as a temporary (high priority) account
@@ -243,6 +249,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   const hasAccounts = accountsManager.hasAccounts()
   const startInteractiveAuth =
     !hasAccounts
+    && isGitHubCopilotEnabled()
     && !options.skipAuth
     && Boolean(process.stdin.isTTY && process.stdout.isTTY)
   if (!hasAccounts) {
@@ -302,6 +309,16 @@ export async function runServer(options: RunServerOptions): Promise<void> {
       return server.fetch(request)
     },
     websocket: responsesWebSocketHandler,
+  })
+
+  void startModelsDevCache().catch((error: unknown) =>
+    consola.warn(
+      "Model catalog unavailable; existing providers remain available",
+      error,
+    ),
+  )
+  process.once("exit", () => {
+    void stopModelsDevRefreshLoop()
   })
 
   // Login may wait indefinitely for a user or fail offline. It must not gate

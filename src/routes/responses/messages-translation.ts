@@ -30,6 +30,7 @@ import type {
   Reasoning,
   ResponsesPayload,
   ResponsesResult,
+  ResponsesTextFormat,
   ResponseUsage,
 } from "~/services/copilot/create-responses"
 
@@ -68,6 +69,33 @@ export const MESSAGES_TOOL_CALL_TIPS = [
   "- For long-running commands, keep the returned `session_id` and poll it with `tools.write_stdin` until the command finishes; do not redirect output to a temp file and read it back in a second call.",
   "- If `functions__exec` returns `aborted`, retry at most 3 times. After 3 failures, terminate immediately and inform the user that `functions__exec` is unavailable.",
 ].join("\n")
+
+const JSON_OUTPUT_CONSTRAINT =
+  "Do not wrap the JSON in markdown code fences and do not add any text outside the JSON object."
+
+export const buildOutputFormatInstruction = (
+  format: ResponsesTextFormat | null | undefined,
+): string | null => {
+  if (!format) return null
+
+  if (format.type === "json_schema") {
+    return [
+      `Respond with a single JSON object that strictly matches the "${format.name}" JSON schema below.`,
+      JSON_OUTPUT_CONSTRAINT,
+      "",
+      "JSON schema:",
+      JSON.stringify(format.schema, null, 2),
+    ].join("\n")
+  }
+
+  if (format.type === "json_object") {
+    return ["Respond with a single JSON object.", JSON_OUTPUT_CONSTRAINT].join(
+      "\n",
+    )
+  }
+
+  return null
+}
 
 const COMPACTION_REPLAY_PROMPT =
   "The previous conversation was compacted. Continue from this handoff summary:\n\n"
@@ -135,6 +163,9 @@ export function translateResponsesToMessages(
 ): ResponsesToMessagesTranslation {
   const registry = createToolRegistry(payload)
   const normalized = normalizeResponsesInput(payload.input)
+  const outputFormatInstruction = buildOutputFormatInstruction(
+    payload.text?.format,
+  )
   const { messages, system } = translateInputToAnthropic(
     normalized.input,
     registry,
@@ -151,6 +182,10 @@ export function translateResponsesToMessages(
     throw new ResponsesMessagesTranslationError(
       "Responses input must contain at least one translatable message",
     )
+  }
+
+  if (outputFormatInstruction) {
+    messages.push({ role: "user", content: outputFormatInstruction })
   }
 
   applyEphemeralCacheControl(messages, system)
@@ -919,7 +954,7 @@ function translateToolChoice(
   toolChoice: ResponsesPayload["tool_choice"],
   registry: MessagesToolRegistry,
 ): AnthropicMessagesPayload["tool_choice"] {
-  if (!toolChoice) return undefined
+  if (!toolChoice || registry.tools.length === 0) return undefined
   if (typeof toolChoice === "string") {
     if (toolChoice === "required") return { type: "any" }
     return { type: toolChoice }

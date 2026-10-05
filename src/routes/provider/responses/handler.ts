@@ -1,3 +1,5 @@
+import { getCodexTaskTitleModel } from "~/routes/responses/task-title"
+import { forwardProviderResponseHeaders } from "~/routes/provider/utils"
 import {
   getCodexResponsesSubagentMarker,
   getIncomingResponsesSessionId,
@@ -61,6 +63,12 @@ export async function handleProviderResponsesForProvider(
   },
 ): Promise<Response> {
   const { payload, provider } = options
+  const taskTitleModel = getCodexTaskTitleModel(
+    c.req.header("user-agent"),
+    payload.input,
+    provider,
+  )
+  if (taskTitleModel) payload.model = taskTitleModel
   normalizeInputImageDetails(payload)
   fillEmptyNamespaceToolDescriptions(payload)
   debugJson(logger, "Responses request payload:", {
@@ -151,13 +159,17 @@ export async function handleProviderResponsesForProvider(
       payload,
       c.req.raw.headers,
       effectiveProviderConfig.baseUrl,
-      { clientSignal: c.req.raw.signal },
+      {
+        clientSignal: c.req.raw.signal,
+        onResponseHeaders: (headers) =>
+          forwardProviderResponseHeaders(c, headers),
+      },
     )
     const recordUsage = createProviderResponsesUsageRecorder(
       payload,
       provider,
-      providerConfig.models?.[payload.model],
-      providerConfig.pricingCurrency,
+      effectiveProviderConfig.models?.[payload.model],
+      effectiveProviderConfig.pricingCurrency,
     )
 
     if (payload.stream && isAsyncIterable(upstreamResponse)) {
@@ -190,8 +202,8 @@ export async function handleProviderResponsesForProvider(
   const recordUsage = createProviderResponsesUsageRecorder(
     payload,
     provider,
-    providerConfig.models?.[payload.model],
-    providerConfig.pricingCurrency,
+    effectiveProviderConfig.models?.[payload.model],
+    effectiveProviderConfig.pricingCurrency,
   )
 
   if (payload.stream) {
@@ -238,6 +250,7 @@ const createProviderResponsesUsageRecorder = (
     pricing: modelConfig?.pricing,
     pricingCurrency,
     providerName: provider,
+    serviceTier: payload.service_tier,
   })
 
 const streamProviderResponses = async (
