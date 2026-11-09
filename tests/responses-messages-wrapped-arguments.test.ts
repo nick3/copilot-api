@@ -597,4 +597,103 @@ describe("Messages wrapped argument streams", () => {
       ),
     ).toBe(false)
   })
+  describe("token limit", () => {
+    const maxTokens: AnthropicStreamEventData = {
+      type: "message_delta",
+      delta: { stop_reason: "max_tokens" },
+      usage: { output_tokens: 4 },
+    }
+    const stop: AnthropicStreamEventData = {
+      type: "content_block_stop",
+      index: 0,
+    }
+
+    test.each([
+      {
+        name: "after content_block_stop",
+        json: '{"arguments":{"code":"par',
+        closed: true,
+      },
+      {
+        name: "without content_block_stop",
+        json: '{"arguments":{"code":"par',
+        closed: false,
+      },
+      { name: "before any arguments", json: "", closed: false },
+    ])(
+      "keeps a wrapped call cut off by the token limit incomplete ($name)",
+      async ({ json, closed }) => {
+        const source: Array<AnthropicStreamEventData> = [toolStart()]
+        if (json) source.push(toolDelta(json))
+        if (closed) source.push(stop)
+        source.push(maxTokens, { type: "message_stop" })
+        const events = await collect(source)
+        expect(events.at(-1)?.type).toBe("response.incomplete")
+        const done = events.filter(
+          (event) => event.type === "response.output_item.done",
+        )
+        expect(done).toHaveLength(1)
+        expect(done[0]).toMatchObject({
+          item: {
+            type: "function_call",
+            name: browserTool.name,
+            arguments: "{}",
+            status: "incomplete",
+          },
+        })
+        expect(
+          events.filter(
+            (event) => event.type === "response.function_call_arguments.done",
+          ),
+        ).toMatchObject([{ arguments: "{}" }])
+      },
+    )
+
+    test("unwraps a complete call when the limit is reached after it", async () => {
+      const events = await collect([
+        toolStart(),
+        toolDelta('{"arguments":{"completion_summary":"Done"}}'),
+        stop,
+        maxTokens,
+        { type: "message_stop" },
+      ])
+      expect(events.at(-1)?.type).toBe("response.incomplete")
+      expect(
+        events.find((event) => event.type === "response.output_item.done"),
+      ).toMatchObject({
+        item: {
+          arguments: '{"completion_summary":"Done"}',
+          status: "completed",
+        },
+      })
+    })
+
+    test("still fails a malformed wrapper when the stop reason is not a token limit", async () => {
+      const events = await collect([
+        toolStart(),
+        toolDelta('{"arguments":'),
+        stop,
+        {
+          type: "message_delta",
+          delta: { stop_reason: "end_turn" },
+          usage: { output_tokens: 4 },
+        },
+        { type: "message_stop" },
+      ])
+      expect(events.at(-1)?.type).toBe("response.failed")
+    })
+
+    test("keeps an empty incomplete call in a non-streaming response", () => {
+      const result = translateAnthropicToResponses(
+        { ...responseWithInput({}), stop_reason: "max_tokens" },
+        translate(),
+      )
+      expect(result.status).toBe("incomplete")
+      expect(result.output[0]).toMatchObject({
+        type: "function_call",
+        arguments: "{}",
+        status: "incomplete",
+      })
+    })
+  })
 })

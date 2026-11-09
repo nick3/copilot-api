@@ -1040,7 +1040,12 @@ function translateAssistantOutput(
     }
     if (block.type === "tool_use") {
       output.push(
-        translateToolUseOutput(block, registry, `${response.id}:${index}:tool`),
+        translateToolUseOutput(
+          block,
+          registry,
+          `${response.id}:${index}:tool`,
+          response.stop_reason === "max_tokens",
+        ),
       )
     }
   }
@@ -1051,6 +1056,7 @@ function translateToolUseOutput(
   block: AnthropicToolUseBlock,
   registry: MessagesToolRegistry,
   idSeed: string,
+  truncated: boolean,
 ): ResponseOutputFunctionCall | ResponseOutputCustomToolCall {
   const descriptor = resolveToolDescriptor(registry, block.name)
   const common = {
@@ -1071,7 +1077,25 @@ function translateToolUseOutput(
     ...common,
     id: `fc_${createStableHash(idSeed)}`,
     type: "function_call",
-    arguments: decodeFunctionToolArguments(block.input, descriptor),
+    ...decodeFunctionToolOutput(block.input, descriptor, truncated),
+  }
+}
+
+// A token limit can cut a wrapped call short. The response already reports
+// max_output_tokens, so keep an empty incomplete call instead of failing.
+function decodeFunctionToolOutput(
+  input: unknown,
+  descriptor: MessagesToolDescriptor,
+  truncated: boolean,
+): Pick<ResponseOutputFunctionCall, "arguments" | "status"> {
+  try {
+    return {
+      arguments: decodeFunctionToolArguments(input, descriptor),
+      status: "completed",
+    }
+  } catch (error) {
+    if (!truncated) throw error
+    return { arguments: "{}", status: "incomplete" }
   }
 }
 

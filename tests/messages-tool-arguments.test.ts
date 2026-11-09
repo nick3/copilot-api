@@ -295,6 +295,100 @@ describe("native Messages tool arguments", () => {
     expect(events.at(-1)).toEqual(error)
   })
 
+  describe("token limit", () => {
+    const stop: AnthropicStreamEventData = {
+      type: "content_block_stop",
+      index: 0,
+    }
+    const messageDelta = (
+      stopReason?: "max_tokens" | "end_turn" | "tool_use",
+    ): AnthropicStreamEventData => ({
+      type: "message_delta",
+      delta: stopReason ? { stop_reason: stopReason } : {},
+      usage: { output_tokens: 4 },
+    })
+    const stopped: AnthropicStreamEventData = { type: "message_stop" }
+
+    test("closes a call whose arguments were cut off after content_block_stop", async () => {
+      const events = await collect([
+        start(),
+        delta('{"arguments":{"code":"par'),
+        stop,
+        messageDelta("max_tokens"),
+        stopped,
+      ])
+      expect(events).toEqual([
+        start(),
+        stop,
+        messageDelta("max_tokens"),
+        stopped,
+      ])
+    })
+
+    test("closes calls that never stopped before the stop reason arrives", async () => {
+      const events = await collect([
+        start(1),
+        delta('{"arguments":{', 1),
+        start(2),
+        messageDelta("max_tokens"),
+        stopped,
+      ])
+      expect(events).toEqual([
+        start(1),
+        start(2),
+        { type: "content_block_stop", index: 1 },
+        { type: "content_block_stop", index: 2 },
+        messageDelta("max_tokens"),
+        stopped,
+      ])
+    })
+
+    test.each(["end_turn", "tool_use"] as const)(
+      "still rejects an undecodable call when the stop reason is %s",
+      async (stopReason) => {
+        const error = await collect([
+          start(),
+          delta('{"arguments":'),
+          stop,
+          messageDelta(stopReason),
+          stopped,
+        ]).catch((error: unknown) => error)
+        expect(error).toBeInstanceOf(MessagesToolArgumentsError)
+        expect((error as Error).message).toContain(
+          "Invalid wrapped arguments JSON",
+        )
+      },
+    )
+
+    test("waits for a stop reason before judging an open call", async () => {
+      const events = await collect([
+        start(),
+        delta('{"arguments":{"code":"x"}}'),
+        messageDelta(),
+        stop,
+      ])
+      expect(events).toEqual([
+        start(),
+        messageDelta(),
+        delta('{"code":"x"}'),
+        stop,
+      ])
+    })
+
+    test("keeps an empty call when the limit cut a non-streaming call short", () => {
+      const adapter = new MessagesToolArgumentsAdapter(payload())
+      const cut = { ...response({}), stop_reason: "max_tokens" as const }
+      expect(adapter.decodeResponse(cut).content[1]).toMatchObject({
+        type: "tool_use",
+        input: {},
+      })
+      const complete = { ...response(), stop_reason: "max_tokens" as const }
+      expect(adapter.decodeResponse(complete).content[1]).toMatchObject({
+        input: { completion_summary: "Done" },
+      })
+    })
+  })
+
   test("returns a 502 for malformed non-streaming input", () => {
     const adapter = new MessagesToolArgumentsAdapter(payload())
     try {

@@ -57,6 +57,11 @@ export function unwrapToolArguments(
 interface ToolInputBuffer {
   name: string
   json: string
+  // The stop reason arrives after content_block_stop, so a stop whose input
+  // cannot be decoded waits here until message_delta shows whether a token
+  // limit cut the call short.
+  stop?: ServerSentEventMessage
+  error?: MessagesToolArgumentsError
 }
 
 export class MessagesToolArgumentsAdapter {
@@ -95,9 +100,12 @@ export class MessagesToolArgumentsAdapter {
 
   decodeResponse(response: AnthropicResponse): AnthropicResponse {
     if (this.wrappedTools.size === 0) return response
+    const truncated = response.stop_reason === "max_tokens"
     return {
       ...response,
-      content: response.content.map((block) => this.decodeBlock(block)),
+      content: response.content.map((block) =>
+        this.decodeBlock(block, truncated),
+      ),
     }
   }
 
@@ -164,49 +172,94 @@ export class MessagesToolArgumentsAdapter {
       if (event.type === "content_block_stop") {
         const buffer = buffers.get(event.index)
         if (buffer) {
-          let input: unknown
+          let partialJson: string
           try {
-            input = JSON.parse(buffer.json) as unknown
-          } catch {
-            throw new MessagesToolArgumentsError(
-              `Invalid wrapped arguments JSON for tool '${buffer.name}'`,
-            )
+            partialJson = decodeBufferedInput(buffer)
+          } catch (error) {
+            if (!(error instanceof MessagesToolArgumentsError)) throw error
+            buffer.stop = chunk
+            buffer.error = error
+            continue
           }
           const delta: AnthropicStreamEventData = {
             type: "content_block_delta",
             index: event.index,
-            delta: {
-              type: "input_json_delta",
-              partial_json: JSON.stringify(
-                unwrapToolArguments(input, buffer.name),
-              ),
-            },
+            delta: { type: "input_json_delta", partial_json: partialJson },
           }
           yield { ...chunk, event: delta.type, data: JSON.stringify(delta) }
           buffers.delete(event.index)
         }
       }
+      if (
+        event.type === "message_delta"
+        && event.delta.stop_reason
+        && buffers.size > 0
+      ) {
+        if (event.delta.stop_reason !== "max_tokens") {
+          throwBufferedFailure(buffers, "Messages stream stopped")
+        }
+        // A token limit cut these calls short. The stop reason already
+        // reports it, so close the calls without arguments instead of failing.
+        for (const [index, buffer] of [...buffers].sort(
+          (left, right) => left[0] - right[0],
+        )) {
+          yield buffer.stop ?? createBlockStop(index)
+          buffers.delete(index)
+        }
+      }
       if (event.type === "message_stop" && buffers.size > 0) {
-        throw new MessagesToolArgumentsError(
-          "Messages stream stopped before the wrapped tool input completed",
-        )
+        throwBufferedFailure(buffers, "Messages stream stopped")
       }
       yield chunk
     }
     if (buffers.size > 0) {
-      throw new MessagesToolArgumentsError(
-        "Messages stream ended before the wrapped tool input completed",
-      )
+      throwBufferedFailure(buffers, "Messages stream ended")
     }
   }
 
   private decodeBlock(
     block: AnthropicResponse["content"][number],
+    truncated: boolean,
   ): AnthropicResponse["content"][number] {
     if (block.type !== "tool_use" || !this.wrappedTools.has(block.name))
       return block
-    return { ...block, input: unwrapToolArguments(block.input, block.name) }
+    try {
+      return { ...block, input: unwrapToolArguments(block.input, block.name) }
+    } catch (error) {
+      // A token limit cut the call short; the stop reason already reports it.
+      if (truncated) return { ...block, input: {} }
+      throw error
+    }
   }
+}
+
+function decodeBufferedInput(buffer: ToolInputBuffer): string {
+  let input: unknown
+  try {
+    input = JSON.parse(buffer.json) as unknown
+  } catch {
+    throw new MessagesToolArgumentsError(
+      `Invalid wrapped arguments JSON for tool '${buffer.name}'`,
+    )
+  }
+  return JSON.stringify(unwrapToolArguments(input, buffer.name))
+}
+
+function throwBufferedFailure(
+  buffers: Map<number, ToolInputBuffer>,
+  reason: string,
+): never {
+  for (const buffer of buffers.values()) {
+    if (buffer.error) throw buffer.error
+  }
+  throw new MessagesToolArgumentsError(
+    `${reason} before the wrapped tool input completed`,
+  )
+}
+
+function createBlockStop(index: number): ServerSentEventMessage {
+  const stop: AnthropicStreamEventData = { type: "content_block_stop", index }
+  return { event: stop.type, data: JSON.stringify(stop) }
 }
 
 // Local JSON Pointers must still resolve to the original schema after nesting.
