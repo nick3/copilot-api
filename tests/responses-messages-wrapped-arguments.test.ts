@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv-provider.js"
+import cuaReplSchema from "./fixtures/cua-repl-js-schema.json"
 
 import type {
   AnthropicResponse,
@@ -16,69 +17,8 @@ import {
 } from "~/routes/responses/messages-translation"
 import { translateMessagesStream } from "~/routes/responses/messages-stream-translation"
 
-// Original input_schema from request_log 852 / request_outbound (HTTP 400).
-const browserSchema = {
-  type: "object",
-  properties: {
-    code: {
-      type: "string",
-      description:
-        "JavaScript to execute using the initialized cua_repl runtime.",
-    },
-    completion_summary: {
-      type: "string",
-      description:
-        "Write a headline for the observed outcome in three to six words total. Start with a past-tense verb and name the result in plain language, as in 'Booked a plumber for Thursday' or 'Renewed vehicle registration'. Leave identifiers, values, and explanations for the reply.",
-    },
-    timeout_ms: {
-      type: "integer",
-      description:
-        "Optional execution timeout in milliseconds. Defaults to 30000 (30 seconds) when omitted.",
-    },
-    title: {
-      type: "string",
-      description:
-        "Short user-facing description of what this code block is doing. Prefer a few words in present-progressive form, such as 'Checking the mobile layout' or 'Comparing prices', over imperative or past-tense titles.",
-    },
-  },
-  additionalProperties: false,
-  oneOf: [
-    {
-      type: "object",
-      properties: {
-        code: {
-          type: "string",
-          description:
-            "JavaScript to execute using the initialized cua_repl runtime.",
-        },
-        timeout_ms: {
-          type: "integer",
-          description:
-            "Optional execution timeout in milliseconds. Defaults to 30000 (30 seconds) when omitted.",
-        },
-        title: {
-          type: "string",
-          description:
-            "Short user-facing description of what this code block is doing. Prefer a few words in present-progressive form, such as 'Checking the mobile layout' or 'Comparing prices', over imperative or past-tense titles.",
-        },
-      },
-      required: ["code"],
-      additionalProperties: false,
-    },
-    {
-      type: "object",
-      properties: {
-        completion_summary: {
-          type: "string",
-          description:
-            "Write a headline for the observed outcome in three to six words total. Start with a past-tense verb and name the result in plain language, as in 'Booked a plumber for Thursday' or 'Renewed vehicle registration'. Leave identifiers, values, and explanations for the reply.",
-        },
-      },
-      required: ["completion_summary"],
-      additionalProperties: false,
-    },
-  ],
-}
+// Original schema captured from request_log 852, also present in request 1122.
+const browserSchema = cuaReplSchema
 
 const browserTool = {
   type: "function" as const,

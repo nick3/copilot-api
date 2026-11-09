@@ -2,6 +2,10 @@ import { createHash } from "node:crypto"
 
 import { compactTextOnlyGuard } from "~/lib/compact"
 import { requestContext } from "~/lib/request-context"
+import {
+  unwrapToolArguments,
+  wrapToolInputSchema,
+} from "~/routes/messages/tool-arguments"
 import type {
   AnthropicAssistantContentBlock,
   AnthropicAssistantMessage,
@@ -354,17 +358,14 @@ export function decodeFunctionToolArguments(
   descriptor: MessagesToolDescriptor,
 ): string {
   if (!descriptor.wrappedArguments) return JSON.stringify(input)
-  if (
-    !isRecord(input)
-    || Object.keys(input).length !== 1
-    || !isRecord(input.arguments)
-  ) {
+  try {
+    return JSON.stringify(unwrapToolArguments(input, descriptor.name))
+  } catch {
     throw new ResponsesMessagesTranslationError(
       `Invalid wrapped arguments for tool '${descriptor.name}'`,
       502,
     )
   }
-  return JSON.stringify(input.arguments)
 }
 
 export function toResponseId(messageId: string): string {
@@ -514,23 +515,13 @@ function registerMessagesTool(
   if (existing) return existing
 
   const descriptor = createMessagesToolDescriptor(registration, registry)
-  let inputSchema =
+  const inputSchema =
     registration.kind === "custom" ?
       CUSTOM_TOOL_INPUT_SCHEMA
     : (registration.parameters ?? { type: "object", properties: {} })
-  if (
-    registration.kind === "function"
-    && ["oneOf", "allOf", "anyOf"].some((keyword) => keyword in inputSchema)
-  ) {
+  const wrappedSchema = wrapToolInputSchema(inputSchema)
+  if (wrappedSchema !== inputSchema) {
     descriptor.wrappedArguments = true
-    const { $schema, ...parameters } = inputSchema
-    inputSchema = {
-      ...($schema ? { $schema } : {}),
-      type: "object",
-      properties: { arguments: relocateToolSchemaReferences(parameters) },
-      required: ["arguments"],
-      additionalProperties: false,
-    }
   }
   registry.byAlias.set(descriptor.alias, descriptor)
   registry.byOriginal.set(originalKey, descriptor)
@@ -539,69 +530,10 @@ function registerMessagesTool(
     ...(registration.description ?
       { description: registration.description }
     : {}),
-    input_schema: inputSchema,
+    input_schema: wrappedSchema,
     ...(registration.kind === "custom" ? { strict: true } : {}),
   })
   return descriptor
-}
-
-// Local JSON Pointers must still resolve to the original schema after nesting.
-// A subschema with its own $id starts a separate reference scope.
-function relocateToolSchemaReferences(schema: unknown): unknown {
-  if (!isRecord(schema) || schema.$id) return schema
-  const relocated = { ...schema }
-  for (const keyword of ["$ref", "$dynamicRef"]) {
-    const reference = schema[keyword]
-    if (
-      typeof reference === "string"
-      && (reference === "#" || /^#(?:\/|%2f)/iu.test(reference))
-    ) {
-      relocated[keyword] = `#/properties/arguments${reference.slice(1)}`
-    }
-  }
-  for (const keyword of [
-    "allOf",
-    "anyOf",
-    "oneOf",
-    "prefixItems",
-    "items",
-    "contains",
-    "not",
-    "if",
-    "then",
-    "else",
-    "additionalProperties",
-    "additionalItems",
-    "unevaluatedProperties",
-    "unevaluatedItems",
-    "propertyNames",
-    "contentSchema",
-  ]) {
-    if (!(keyword in schema)) continue
-    const value = schema[keyword]
-    relocated[keyword] =
-      Array.isArray(value) ?
-        value.map(relocateToolSchemaReferences)
-      : relocateToolSchemaReferences(value)
-  }
-  for (const keyword of [
-    "$defs",
-    "definitions",
-    "properties",
-    "patternProperties",
-    "dependentSchemas",
-    "dependencies",
-  ]) {
-    const value = schema[keyword]
-    if (!isRecord(value)) continue
-    relocated[keyword] = Object.fromEntries(
-      Object.entries(value).map(([name, child]) => [
-        name,
-        relocateToolSchemaReferences(child),
-      ]),
-    )
-  }
-  return relocated
 }
 
 function createMessagesToolDescriptor(

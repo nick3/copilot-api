@@ -20,6 +20,7 @@ import {
 import { isForceAgentEnabled } from "~/lib/config"
 import { logCopilotRateLimits } from "~/lib/copilot-rate-limit"
 import { HTTPError } from "~/lib/error"
+import { MessagesToolArgumentsAdapter } from "~/routes/messages/tool-arguments"
 import { captureOutboundHeadersSnapshot } from "~/lib/request-context"
 import { resolveEffectiveInitiator } from "~/lib/request-initiator"
 import { accountFromState } from "~/lib/state"
@@ -257,12 +258,13 @@ export const createMessages = async (
 
   captureOutboundHeadersSnapshot(headers)
 
+  const toolArguments = new MessagesToolArgumentsAdapter(payload)
   const response = await copilotFetch(
     `${copilotBaseUrl(ctx)}/v1/messages`,
     {
       method: "POST",
       headers,
-      body: JSON.stringify(payload),
+      body: JSON.stringify(toolArguments.payload),
     },
     {
       requestId: options?.requestId,
@@ -280,8 +282,10 @@ export const createMessages = async (
   }
 
   if (payload.stream) {
-    return createResponsesHttpEventStream(response)
+    return toolArguments.decodeStream(createResponsesHttpEventStream(response))
   }
 
-  return (await response.json()) as AnthropicResponse
+  return toolArguments.decodeResponse(
+    (await response.json()) as AnthropicResponse,
+  )
 }
