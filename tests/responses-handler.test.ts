@@ -257,6 +257,208 @@ afterEach(async () => {
 })
 
 describe("responses handler model mapping", () => {
+  test.each([
+    { stream: false, argumentsValue: { code: "await tab.getState()" } },
+    {
+      stream: false,
+      argumentsValue: { completion_summary: "Checked the page" },
+    },
+    { stream: true, argumentsValue: { code: "await tab.getState()" } },
+    {
+      stream: true,
+      argumentsValue: { completion_summary: "Checked the page" },
+    },
+  ])(
+    "round-trips wrapped browser arguments through the Responses route %j",
+    async ({ stream, argumentsValue }) => {
+      const model = "claude-sonnet-5.5"
+      const name = "mcp__cua_repl__js"
+      const parameters = {
+        type: "object",
+        properties: {
+          code: { type: "string" },
+          completion_summary: { type: "string" },
+        },
+        oneOf: [{ required: ["code"] }, { required: ["completion_summary"] }],
+        additionalProperties: false,
+      }
+      accountsManager.getFirstAccountModels = () => ({
+        object: "list",
+        data: [{ ...buildModel(model), supported_endpoints: ["/v1/messages"] }],
+      })
+      const upstreamMessage = {
+        id: "msg-browser",
+        type: "message",
+        role: "assistant",
+        model,
+        content: [
+          {
+            type: "tool_use",
+            id: "call-browser",
+            name,
+            input: { arguments: argumentsValue },
+          },
+        ],
+        stop_reason: "tool_use",
+        stop_sequence: null,
+        usage: { input_tokens: 8, output_tokens: 4 },
+      }
+      const handleMessages = mock(
+        (_context: unknown, payload: AnthropicMessagesPayload) => {
+          if (
+            payload.messages.some((message) => message.role === "assistant")
+          ) {
+            return Promise.resolve(
+              Response.json({
+                ...upstreamMessage,
+                content: [{ type: "text", text: "Done" }],
+                stop_reason: "end_turn",
+              }),
+            )
+          }
+          if (!payload.stream)
+            return Promise.resolve(Response.json(upstreamMessage))
+          const input = JSON.stringify({ arguments: argumentsValue })
+          const source = [
+            {
+              type: "message_start",
+              message: { ...upstreamMessage, content: [], stop_reason: null },
+            },
+            {
+              type: "content_block_start",
+              index: 0,
+              content_block: {
+                type: "tool_use",
+                id: "call-browser",
+                name,
+                input: {},
+              },
+            },
+            {
+              type: "content_block_delta",
+              index: 0,
+              delta: {
+                type: "input_json_delta",
+                partial_json: input.slice(0, 12),
+              },
+            },
+            {
+              type: "content_block_delta",
+              index: 0,
+              delta: {
+                type: "input_json_delta",
+                partial_json: input.slice(12),
+              },
+            },
+            { type: "content_block_stop", index: 0 },
+            {
+              type: "message_delta",
+              delta: { stop_reason: "tool_use", stop_sequence: null },
+              usage: { output_tokens: 4 },
+            },
+            { type: "message_stop" },
+          ]
+          return Promise.resolve(
+            new Response(
+              source
+                .map(
+                  (event) =>
+                    `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+                )
+                .join(""),
+              {
+                headers: { "content-type": "text/event-stream" },
+              },
+            ),
+          )
+        },
+      )
+      responsesMessagesDependencies.handleCompletionPayload = handleMessages
+      const requestPayload = {
+        model,
+        stream,
+        input: [{ type: "message", role: "user", content: "Use the browser" }],
+        tools: [{ type: "function", name, parameters }],
+      }
+      const response = await responsesRoutes.fetch(
+        new Request("http://local/", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(requestPayload),
+        }),
+      )
+      expect(response.status).toBe(200)
+      expect(
+        handleMessages.mock.calls[0]?.[1].tools?.[0]?.input_schema,
+      ).toEqual({
+        type: "object",
+        properties: { arguments: parameters },
+        required: ["arguments"],
+        additionalProperties: false,
+      })
+      let call: Record<string, unknown> | undefined
+      if (stream) {
+        const eventData = (await response.text())
+          .split("\n")
+          .filter((line) => line.startsWith("data: "))
+          .map(
+            (line) =>
+              JSON.parse(line.slice(6)) as {
+                type: string
+                item?: Record<string, unknown>
+              },
+          )
+        expect(eventData.at(-1)?.type).toBe("response.completed")
+        call = eventData.find(
+          (event) => event.type === "response.output_item.done",
+        )?.item
+      } else {
+        const body = (await response.json()) as {
+          output: Array<Record<string, unknown>>
+        }
+        call = body.output[0]
+      }
+      expect(call).toMatchObject({
+        type: "function_call",
+        call_id: "call-browser",
+        name,
+        arguments: JSON.stringify(argumentsValue),
+      })
+      const replay = await responsesRoutes.fetch(
+        new Request("http://local/", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            ...requestPayload,
+            stream: false,
+            input: [
+              ...requestPayload.input,
+              call,
+              {
+                type: "function_call_output",
+                call_id: "call-browser",
+                output: "Success",
+              },
+            ],
+          }),
+        }),
+      )
+      expect(replay.status).toBe(200)
+      expect(handleMessages.mock.calls[1]?.[1].messages[1]).toMatchObject({
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "call-browser",
+            name,
+            input: { arguments: argumentsValue },
+          },
+        ],
+      })
+      expect(await replay.json()).toMatchObject({ output_text: "Done" })
+    },
+  )
+
   test("routes a Messages-only Copilot model through Responses Lite", async () => {
     accountsManager.getFirstAccountModels = () => ({
       object: "list",
