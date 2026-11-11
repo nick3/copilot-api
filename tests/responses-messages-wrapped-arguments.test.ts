@@ -330,6 +330,26 @@ describe("Messages function argument wrappers", () => {
     expect(validate({ arguments: { value: 1 } }).valid).toBe(false)
   })
 
+  test("preserves references within a nested Draft-04 resource identified by id", () => {
+    const child = {
+      id: "https://example.test/child",
+      definitions: { value: { type: "string" } },
+      type: "object",
+      properties: { value: { $ref: "#/definitions/value" } },
+      required: ["value"],
+    }
+    const parameters = {
+      type: "object",
+      oneOf: [{ properties: { child } }],
+    }
+    const translation = translate({ tools: [{ ...browserTool, parameters }] })
+    const schema = translation.messagesPayload.tools?.[0]?.input_schema
+    expect(schema).toHaveProperty(
+      "properties.arguments.oneOf.0.properties.child",
+      child,
+    )
+  })
+
   test.each([
     { code: "await tab.getState()", title: "Checking the page" },
     { completion_summary: "Checked the page" },

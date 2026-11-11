@@ -203,6 +203,20 @@ export class MessagesToolArgumentsAdapter {
         for (const [index, buffer] of [...buffers].sort(
           (left, right) => left[0] - right[0],
         )) {
+          let partialJson: string | undefined
+          try {
+            partialJson = decodeBufferedInput(buffer)
+          } catch (error) {
+            if (!(error instanceof MessagesToolArgumentsError)) throw error
+          }
+          if (partialJson !== undefined) {
+            const delta: AnthropicStreamEventData = {
+              type: "content_block_delta",
+              index,
+              delta: { type: "input_json_delta", partial_json: partialJson },
+            }
+            yield { ...chunk, event: delta.type, data: JSON.stringify(delta) }
+          }
           yield buffer.stop ?? createBlockStop(index)
           buffers.delete(index)
         }
@@ -263,9 +277,9 @@ function createBlockStop(index: number): ServerSentEventMessage {
 }
 
 // Local JSON Pointers must still resolve to the original schema after nesting.
-// A subschema with its own $id starts a separate reference scope.
+// A subschema with its own id or $id starts a separate reference scope.
 function relocateToolSchemaReferences(schema: unknown): unknown {
-  if (!isRecord(schema) || schema.$id) return schema
+  if (!isRecord(schema) || schema.$id || schema.id) return schema
   const relocated = { ...schema }
   for (const keyword of ["$ref", "$dynamicRef"]) {
     const reference = schema[keyword]

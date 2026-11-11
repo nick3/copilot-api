@@ -343,6 +343,22 @@ describe("native Messages tool arguments", () => {
       ])
     })
 
+    test("decodes complete arguments before closing a call at the token limit", async () => {
+      const events = await collect([
+        start(),
+        delta('{"arguments":{"code":"complete"}}'),
+        messageDelta("max_tokens"),
+        stopped,
+      ])
+      expect(events).toEqual([
+        start(),
+        delta('{"code":"complete"}'),
+        stop,
+        messageDelta("max_tokens"),
+        stopped,
+      ])
+    })
+
     test.each(["end_turn", "tool_use"] as const)(
       "still rejects an undecodable call when the stop reason is %s",
       async (stopReason) => {
