@@ -4,6 +4,7 @@ import { Hono } from "hono"
 import path from "node:path"
 
 import "./shared-admin-db-test-home"
+import cuaReplSchema from "./fixtures/cua-repl-js-schema.json"
 
 import type { AccountRuntime } from "~/lib/types/account"
 import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
@@ -279,6 +280,206 @@ afterEach(async () => {
 })
 
 describe("messages handler sanitization", () => {
+  test.each([false, true])(
+    "wraps the captured browser schema on the native Messages route (stream=%s)",
+    async (stream) => {
+      let upstreamBody: Record<string, unknown> | undefined
+      const name = "mcp__cua_repl__js"
+      const fetchMock = mock((_url: string, opts?: FetchOptions) => {
+        upstreamBody = parseFetchBody(opts?.body)
+        const tools = upstreamBody.tools as Array<{
+          input_schema: Record<string, unknown>
+        }>
+        if ("oneOf" in tools[0].input_schema) {
+          return Promise.resolve(
+            Response.json(
+              {
+                type: "error",
+                error: {
+                  type: "invalid_request_error",
+                  message:
+                    "tools.10.custom.input_schema: input_schema does not support oneOf, allOf, or anyOf at the top level",
+                },
+              },
+              { status: 400 },
+            ),
+          )
+        }
+        const message = {
+          ...buildAnthropicResponse("messages-model", ""),
+          content: [
+            {
+              type: "tool_use",
+              id: "call-browser",
+              name,
+              input: { arguments: { completion_summary: "Checked the page" } },
+            },
+          ],
+          stop_reason: "tool_use",
+        }
+        if (upstreamBody.stream) {
+          const events = [
+            {
+              type: "message_start",
+              message: { ...message, content: [], stop_reason: null },
+            },
+            {
+              type: "content_block_start",
+              index: 0,
+              content_block: {
+                type: "tool_use",
+                id: "call-browser",
+                name,
+                input: {},
+              },
+            },
+            {
+              type: "content_block_delta",
+              index: 0,
+              delta: {
+                type: "input_json_delta",
+                partial_json: '{"arguments":{"completion_summary":',
+              },
+            },
+            {
+              type: "content_block_delta",
+              index: 0,
+              delta: {
+                type: "input_json_delta",
+                partial_json: '"Checked the page"}}',
+              },
+            },
+            { type: "content_block_stop", index: 0 },
+            {
+              type: "message_delta",
+              delta: { stop_reason: "tool_use", stop_sequence: null },
+              usage: { output_tokens: 4 },
+            },
+            { type: "message_stop" },
+          ]
+          return Promise.resolve(
+            new Response(
+              events
+                .map(
+                  (event) =>
+                    `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+                )
+                .join(""),
+              { headers: { "content-type": "text/event-stream" } },
+            ),
+          )
+        }
+        return Promise.resolve(Response.json(message))
+      })
+      // @ts-expect-error test mock implements the used fetch subset
+      fetchHolder.fetch = fetchMock
+      const response = await messageRoutes.fetch(
+        new Request("http://local/", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(
+            createPayload({
+              stream,
+              tools: [{ name, strict: true, input_schema: cuaReplSchema }],
+            }),
+          ),
+        }),
+      )
+      expect(response.status).toBe(200)
+      expect(upstreamBody?.tools).toMatchObject([
+        {
+          strict: true,
+          input_schema: {
+            type: "object",
+            properties: { arguments: cuaReplSchema },
+            required: ["arguments"],
+            additionalProperties: false,
+          },
+        },
+      ])
+      if (stream) {
+        const events = (await response.text())
+          .split("\n")
+          .filter((line) => line.startsWith("data: "))
+          .map(
+            (line) =>
+              JSON.parse(line.slice(6)) as {
+                type: string
+                delta?: { partial_json?: string }
+              },
+          )
+        expect(
+          events.filter((event) => event.delta?.partial_json),
+        ).toMatchObject([
+          {
+            delta: {
+              partial_json: '{"completion_summary":"Checked the page"}',
+            },
+          },
+        ])
+        expect(events.at(-1)?.type).toBe("message_stop")
+      } else {
+        expect(await response.json()).toMatchObject({
+          content: [
+            {
+              type: "tool_use",
+              name,
+              input: { completion_summary: "Checked the page" },
+            },
+          ],
+        })
+      }
+      const replay = await messageRoutes.fetch(
+        new Request("http://local/", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(
+            createPayload({
+              tools: [{ name, strict: true, input_schema: cuaReplSchema }],
+              messages: [
+                { role: "user", content: "Use the browser" },
+                {
+                  role: "assistant",
+                  content: [
+                    {
+                      type: "tool_use",
+                      name,
+                      id: "call-browser",
+                      input: { completion_summary: "Checked the page" },
+                    },
+                  ],
+                },
+                {
+                  role: "user",
+                  content: [
+                    {
+                      type: "tool_result",
+                      tool_use_id: "call-browser",
+                      content: "Success",
+                    },
+                  ],
+                },
+              ],
+            }),
+          ),
+        }),
+      )
+      expect(replay.status).toBe(200)
+      expect(upstreamBody?.messages).toMatchObject([
+        { role: "user" },
+        {
+          role: "assistant",
+          content: [
+            {
+              input: { arguments: { completion_summary: "Checked the page" } },
+            },
+          ],
+        },
+        { role: "user" },
+      ])
+    },
+  )
+
   test("preserves executeCode and rewrites getDiagnostics before forwarding tools", async () => {
     let upstreamBody: Record<string, unknown> | undefined
 

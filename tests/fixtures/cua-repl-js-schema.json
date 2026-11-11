@@ -1,0 +1,58 @@
+{
+  "type": "object",
+  "properties": {
+    "code": {
+      "type": "string",
+      "description": "JavaScript to execute using the initialized cua_repl runtime."
+    },
+    "completion_summary": {
+      "type": "string",
+      "description": "Write a headline for the observed outcome in three to six words total. Start with a past-tense verb and name the result in plain language, as in 'Booked a plumber for Thursday' or 'Renewed vehicle registration'. Leave identifiers, values, and explanations for the reply."
+    },
+    "timeout_ms": {
+      "type": "integer",
+      "description": "Optional execution timeout in milliseconds. Defaults to 30000 (30 seconds) when omitted."
+    },
+    "title": {
+      "type": "string",
+      "description": "Short user-facing description of what this code block is doing. Prefer a few words in present-progressive form, such as 'Checking the mobile layout' or 'Comparing prices', over imperative or past-tense titles."
+    }
+  },
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "JavaScript to execute using the initialized cua_repl runtime."
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "description": "Optional execution timeout in milliseconds. Defaults to 30000 (30 seconds) when omitted."
+        },
+        "title": {
+          "type": "string",
+          "description": "Short user-facing description of what this code block is doing. Prefer a few words in present-progressive form, such as 'Checking the mobile layout' or 'Comparing prices', over imperative or past-tense titles."
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "completion_summary": {
+          "type": "string",
+          "description": "Write a headline for the observed outcome in three to six words total. Start with a past-tense verb and name the result in plain language, as in 'Booked a plumber for Thursday' or 'Renewed vehicle registration'. Leave identifiers, values, and explanations for the reply."
+        }
+      },
+      "required": [
+        "completion_summary"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

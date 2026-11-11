@@ -16,12 +16,14 @@ import type {
 import { CustomToolInputStreamDecoder } from "./custom-tool-input-stream-decoder"
 import {
   createMessagesBackedResponsesResult,
+  decodeFunctionToolArguments,
   encodeMessagesCompaction,
   markMessagesReasoningId,
   resolveToolDescriptor,
   ResponsesMessagesTranslationError,
   toResponseId,
   translateAnthropicUsage,
+  type MessagesToolDescriptor,
   type MessagesResponseTranslationContext,
 } from "./messages-translation"
 
@@ -51,7 +53,9 @@ interface StreamMessageState extends StreamOutputState<ResponseOutputMessage> {
 }
 
 interface StreamFunctionToolState extends StreamOutputState<ResponseOutputFunctionCall> {
+  descriptor: MessagesToolDescriptor
   type: "function_tool"
+  wrappedInput?: string
 }
 
 interface StreamCustomToolState extends StreamOutputState<ResponseOutputCustomToolCall> {
@@ -358,7 +362,7 @@ function* translateEvent(
       break
     }
     case "content_block_stop": {
-      for (const translated of closeContentBlock(state, event.index)) {
+      for (const translated of closeContentBlock(state, event.index, false)) {
         yield translated
       }
       break
@@ -526,7 +530,9 @@ function* startContentBlock(
       Object.keys(block.input).length > 0 ? JSON.stringify(block.input) : ""
     state.blocks.set(event.index, {
       ...output,
+      descriptor,
       type: "function_tool",
+      ...(descriptor.wrappedArguments ? { wrappedInput: initialInput } : {}),
       done: false,
     })
     yield createEvent(state, {
@@ -534,7 +540,7 @@ function* startContentBlock(
       output_index: output.outputIndex,
       item: structuredClone(item),
     })
-    if (initialInput) {
+    if (initialInput && !descriptor.wrappedArguments) {
       item.arguments = initialInput
       yield createEvent(state, {
         type: "response.function_call_arguments.delta",
@@ -597,6 +603,10 @@ function* translateContentDelta(
     event.delta.type === "input_json_delta"
     && block.type === "function_tool"
   ) {
+    if (block.wrappedInput !== undefined) {
+      block.wrappedInput += event.delta.partial_json
+      return
+    }
     block.item.arguments += event.delta.partial_json
     yield createEvent(state, {
       type: "response.function_call_arguments.delta",
@@ -650,10 +660,12 @@ function* appendReasoningText(
 function* closeContentBlock(
   state: TranslationState,
   index: number,
+  final = true,
 ): Generator<ResponseStreamEvent> {
   const block = state.blocks.get(index)
   if (!block || block.done) return
 
+  let status: "completed" | "incomplete" = "completed"
   if (block.type === "message") {
     yield createEvent(state, {
       type: "response.output_text.done",
@@ -703,6 +715,25 @@ function* closeContentBlock(
       input,
     })
   } else {
+    if (block.wrappedInput !== undefined) {
+      try {
+        block.item.arguments = decodeWrappedStreamInput(block)
+      } catch (error) {
+        // message_delta carries the stop reason and follows content_block_stop,
+        // so an undecodable call stays open until message_stop.
+        if (!final) return
+        // A token limit cut the call short; the response is already incomplete.
+        if (state.stopReason !== "max_tokens") throw error
+        block.item.arguments = "{}"
+        status = "incomplete"
+      }
+      yield createEvent(state, {
+        type: "response.function_call_arguments.delta",
+        item_id: block.item.id,
+        output_index: block.outputIndex,
+        delta: block.item.arguments,
+      })
+    }
     yield createEvent(state, {
       type: "response.function_call_arguments.done",
       item_id: block.item.id,
@@ -712,7 +743,7 @@ function* closeContentBlock(
     })
   }
 
-  block.item.status = "completed"
+  block.item.status = status
   block.done = true
   yield createEvent(state, {
     type: "response.output_item.done",
@@ -720,6 +751,19 @@ function* closeContentBlock(
     item: structuredClone(block.item),
   })
   state.blocks.delete(index)
+}
+
+function decodeWrappedStreamInput(block: StreamFunctionToolState): string {
+  let input: unknown
+  try {
+    input = JSON.parse(block.wrappedInput ?? "") as unknown
+  } catch {
+    throw new ResponsesMessagesTranslationError(
+      `Invalid wrapped arguments JSON for tool '${block.item.name}'`,
+      502,
+    )
+  }
+  return decodeFunctionToolArguments(input, block.descriptor)
 }
 
 function* closeAllBlocks(

@@ -2,6 +2,10 @@ import { createHash } from "node:crypto"
 
 import { compactTextOnlyGuard } from "~/lib/compact"
 import { requestContext } from "~/lib/request-context"
+import {
+  unwrapToolArguments,
+  wrapToolInputSchema,
+} from "~/routes/messages/tool-arguments"
 import type {
   AnthropicAssistantContentBlock,
   AnthropicAssistantMessage,
@@ -123,6 +127,7 @@ export interface MessagesToolDescriptor {
   kind: "custom" | "function"
   name: string
   namespace?: string
+  wrappedArguments?: boolean
 }
 
 export interface MessagesToolRegistry {
@@ -348,6 +353,21 @@ export function decodeCustomToolInput(input: unknown): string {
   return typeof input === "string" ? input : JSON.stringify(input ?? {})
 }
 
+export function decodeFunctionToolArguments(
+  input: unknown,
+  descriptor: MessagesToolDescriptor,
+): string {
+  if (!descriptor.wrappedArguments) return JSON.stringify(input)
+  try {
+    return JSON.stringify(unwrapToolArguments(input, descriptor.name))
+  } catch {
+    throw new ResponsesMessagesTranslationError(
+      `Invalid wrapped arguments for tool '${descriptor.name}'`,
+      502,
+    )
+  }
+}
+
 export function toResponseId(messageId: string): string {
   const normalized = messageId.replace(/^msg[-_]?/u, "")
   return `resp_${normalized || createStableHash(messageId)}`
@@ -495,6 +515,14 @@ function registerMessagesTool(
   if (existing) return existing
 
   const descriptor = createMessagesToolDescriptor(registration, registry)
+  const inputSchema =
+    registration.kind === "custom" ?
+      CUSTOM_TOOL_INPUT_SCHEMA
+    : (registration.parameters ?? { type: "object", properties: {} })
+  const wrappedSchema = wrapToolInputSchema(inputSchema)
+  if (wrappedSchema !== inputSchema) {
+    descriptor.wrappedArguments = true
+  }
   registry.byAlias.set(descriptor.alias, descriptor)
   registry.byOriginal.set(originalKey, descriptor)
   registry.tools.push({
@@ -502,10 +530,7 @@ function registerMessagesTool(
     ...(registration.description ?
       { description: registration.description }
     : {}),
-    input_schema:
-      registration.kind === "custom" ?
-        CUSTOM_TOOL_INPUT_SCHEMA
-      : (registration.parameters ?? { type: "object", properties: {} }),
+    input_schema: wrappedSchema,
     ...(registration.kind === "custom" ? { strict: true } : {}),
   })
   return descriptor
@@ -755,7 +780,7 @@ function translateInputToolCall(
     type: "tool_use",
     id: requireStringField(item, "call_id", `${kind}_tool_call`),
     name: descriptor.alias,
-    input,
+    input: descriptor.wrappedArguments ? { arguments: input } : input,
   })
 }
 
@@ -1015,7 +1040,12 @@ function translateAssistantOutput(
     }
     if (block.type === "tool_use") {
       output.push(
-        translateToolUseOutput(block, registry, `${response.id}:${index}:tool`),
+        translateToolUseOutput(
+          block,
+          registry,
+          `${response.id}:${index}:tool`,
+          response.stop_reason === "max_tokens",
+        ),
       )
     }
   }
@@ -1026,6 +1056,7 @@ function translateToolUseOutput(
   block: AnthropicToolUseBlock,
   registry: MessagesToolRegistry,
   idSeed: string,
+  truncated: boolean,
 ): ResponseOutputFunctionCall | ResponseOutputCustomToolCall {
   const descriptor = resolveToolDescriptor(registry, block.name)
   const common = {
@@ -1046,7 +1077,25 @@ function translateToolUseOutput(
     ...common,
     id: `fc_${createStableHash(idSeed)}`,
     type: "function_call",
-    arguments: JSON.stringify(block.input),
+    ...decodeFunctionToolOutput(block.input, descriptor, truncated),
+  }
+}
+
+// A token limit can cut a wrapped call short. The response already reports
+// max_output_tokens, so keep an empty incomplete call instead of failing.
+function decodeFunctionToolOutput(
+  input: unknown,
+  descriptor: MessagesToolDescriptor,
+  truncated: boolean,
+): Pick<ResponseOutputFunctionCall, "arguments" | "status"> {
+  try {
+    return {
+      arguments: decodeFunctionToolArguments(input, descriptor),
+      status: "completed",
+    }
+  } catch (error) {
+    if (!truncated) throw error
+    return { arguments: "{}", status: "incomplete" }
   }
 }
 
